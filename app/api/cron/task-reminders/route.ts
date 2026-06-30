@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { sendTaskReminderNotification } from "@/lib/notifications"
+import { sendTaskAssignmentNotifications } from "@/lib/notifications"
 
 // GET /api/cron/task-reminders
 // Cron job to send 24h and 1h reminders before tasks
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
           // sendTaskReminderNotification handles both push (if active tokens exist) and email via createNotification
           // It will only send push if user has active device tokens (handled by sendExpoPushNotification)
           // Email will be sent regardless (handled by createNotification based on user preferences)
-          await sendTaskReminderNotification(task.id, 1)
+          await sendTaskAssignmentNotifications(task.id, [task.assignedUser.id])
           results.oneHourReminders.push({ 
             taskId: task.id, 
             userId: task.assignedUser.id,
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
           // sendTaskReminderNotification handles both push (if active tokens exist) and email via createNotification
           // It will only send push if user has active device tokens (handled by sendExpoPushNotification)
           // Email will be sent regardless (handled by createNotification based on user preferences)
-          await sendTaskReminderNotification(task.id, 24)
+          await sendTaskAssignmentNotifications(task.id, [task.assignedUser.id])
           results.twentyFourHourReminders.push({ 
             taskId: task.id, 
             userId: task.assignedUser.id,

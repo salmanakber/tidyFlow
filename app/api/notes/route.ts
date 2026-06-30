@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import type { JWTPayload } from '@/lib/auth';
 import { NoteSeverity, NoteStatus, UserRole } from '@prisma/client';
 import { emitTaskEvent } from '@/lib/realtime';
 import { notifyTaskActivity } from '@/lib/notifications';
 
-async function assertTaskAccess(taskId: number, tokenUser: { userId: number; role: UserRole; companyId?: number | null }) {
+async function assertTaskAccess(taskId: number, tokenUser: JWTPayload) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {

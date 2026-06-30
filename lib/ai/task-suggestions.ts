@@ -73,7 +73,7 @@ function buildRuleBasedChecklist(
 ): string[] {
   const base = DEFAULT_CHECKLIST_BY_TYPE[propertyTypeKey(propertyType)] || DEFAULT_CHECKLIST_BY_TYPE.residential;
   const fromHistory = pastTitles.slice(0, 8);
-  const merged = [...new Set([...fromHistory, ...base])];
+  const merged = Array.from(new Set([...fromHistory, ...base]));
   return merged.slice(0, 12);
 }
 
@@ -326,7 +326,7 @@ Checklist 6–10 items. Supplies: pick 3–6 items from inventory only. Quantity
 
   if (task?.checklists.length && !aiGenerated) {
     const existing = task.checklists.map((c) => c.title);
-    checklist = [...new Set([...existing, ...checklist])].slice(0, 12);
+    checklist = Array.from(new Set([...existing, ...checklist])).slice(0, 12);
   }
 
   return {

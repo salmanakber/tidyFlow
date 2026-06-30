@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireAuth, requireCompanyScope, isManagerPlusRole } from '@/lib/rbac';
 import { requireActiveSubscription } from '@/lib/subscription';
 import { UserRole } from '@prisma/client';
 
@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const role = auth.tokenUser.role as UserRole;
-  if (![UserRole.OWNER, UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.DEVELOPER, UserRole.SUPER_ADMIN].includes(role)) {
+  if (!isManagerPlusRole(role)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 
@@ -116,7 +116,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const role = auth.tokenUser.role as UserRole;
-  if (![UserRole.OWNER, UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.DEVELOPER, UserRole.SUPER_ADMIN].includes(role)) {
+  if (!isManagerPlusRole(role)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 

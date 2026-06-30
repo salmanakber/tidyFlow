@@ -19,6 +19,23 @@ const GLOBAL_ROLES: UserRole[] = [
   UserRole.DEVELOPER,
 ];
 
+/** Roles that can manage company resources (properties, payroll, safety logs, etc.). */
+export const MANAGER_PLUS_ROLES: UserRole[] = [
+  UserRole.SUPER_ADMIN,
+  UserRole.OWNER,
+  UserRole.DEVELOPER,
+  UserRole.COMPANY_ADMIN,
+  UserRole.MANAGER,
+];
+
+export function isManagerPlusRole(role: UserRole | string): boolean {
+  return MANAGER_PLUS_ROLES.includes(role as UserRole);
+}
+
+export function hasOneOfRoles(role: UserRole | string, allowed: readonly UserRole[]): boolean {
+  return allowed.includes(role as UserRole);
+}
+
 export function hasAtLeastRole(userRole: UserRole, minRole: UserRole): boolean {
   return ROLE_ORDER.indexOf(userRole) >= ROLE_ORDER.indexOf(minRole);
 }

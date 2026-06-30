@@ -426,7 +426,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     // Notify only newly assigned cleaners (not everyone on every save)
     if (assignedUserId !== undefined || assignedUserIds !== undefined) {
-      const newAssigneeIds = [...new Set(cleanerIdsToNotify.map((uid) => Number(uid)))].filter(
+      const newAssigneeIds = Array.from(new Set(cleanerIdsToNotify.map((uid) => Number(uid)))).filter(
         (uid) => uid > 0 && !previousAssigneeIds.has(uid)
       );
       if (newAssigneeIds.length > 0) {

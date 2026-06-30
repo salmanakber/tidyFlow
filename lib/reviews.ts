@@ -21,7 +21,7 @@ export async function getTaskCleanerIds(taskId: number): Promise<number[]> {
   const ids = new Set<number>();
   if (task.assignedUserId) ids.add(task.assignedUserId);
   for (const a of task.taskAssignments) ids.add(a.userId);
-  return [...ids];
+  return Array.from(ids);
 }
 
 export async function assignClientReviewToCleaners(input: {

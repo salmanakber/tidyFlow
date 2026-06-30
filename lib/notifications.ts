@@ -91,7 +91,7 @@ async function sendExpoPush(
 }
 
 export async function sendTaskAssignmentNotifications(taskId: number, cleanerIds: number[]) {
-  const uniqueIds = [...new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0))];
+  const uniqueIds = Array.from(new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0)));
   if (uniqueIds.length === 0) return;
 
   const task = await prisma.task.findUnique({
@@ -126,7 +126,7 @@ export async function sendTaskUpdatedNotification(
   cleanerIds: number[],
   reason: 'assignment' | 'status' | 'update'
 ) {
-  const uniqueIds = [...new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0))];
+  const uniqueIds = Array.from(new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0)));
   if (uniqueIds.length === 0) return;
 
   const task = await prisma.task.findUnique({
@@ -152,6 +152,35 @@ export async function sendTaskUpdatedNotification(
       screenParams: { taskId },
     });
   }
+}
+
+/** Notify a cleaner when a manager submits a QA score for their task. */
+export async function sendQAResultNotification(
+  taskId: number,
+  userId: number,
+  passed: boolean,
+  comments?: string | null
+) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { title: true, property: { select: { address: true } } },
+  });
+  if (!task) return;
+
+  const location = task.property?.address ? ` at ${task.property.address}` : '';
+  const commentSuffix = comments?.trim() ? ` Comment: ${comments.trim().slice(0, 200)}` : '';
+
+  await createNotification({
+    userId,
+    title: passed ? 'QA Passed' : 'QA Review Complete',
+    message: passed
+      ? `Your work on "${task.title}"${location} passed QA review.${commentSuffix}`
+      : `Your work on "${task.title}"${location} was reviewed. Please check feedback.${commentSuffix}`,
+    type: 'qa_result',
+    metadata: { taskId, passed, hasComments: !!comments?.trim() },
+    screenRoute: 'TaskDetail',
+    screenParams: { taskId },
+  });
 }
 
 export async function notifyManagersClientReview(input: {
@@ -237,7 +266,7 @@ export async function notifyTaskApproved(input: {
   if (task.assignedUserId) cleanerIds.add(task.assignedUserId);
   task.taskAssignments.forEach((a) => cleanerIds.add(a.userId));
 
-  for (const userId of cleanerIds) {
+  for (const userId of Array.from(cleanerIds)) {
     await createNotification({
       userId,
       title: 'Task Approved',
@@ -281,7 +310,7 @@ export async function notifyTaskActivity(input: {
     }
   }
 
-  for (const userId of userIds) {
+  for (const userId of Array.from(userIds)) {
     await createNotification({
       userId,
       title: input.title,

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import type { JWTPayload } from '@/lib/auth';
 import { NoteStatus, UserRole } from '@prisma/client';
 import { emitTaskEvent } from '@/lib/realtime';
 import { notifyTaskActivity } from '@/lib/notifications';
 
-async function getNoteWithAccess(noteId: number, tokenUser: { userId: number; role: UserRole; companyId?: number | null }) {
+async function getNoteWithAccess(noteId: number, tokenUser: JWTPayload) {
   const note = await prisma.note.findUnique({
     where: { id: noteId },
     include: {

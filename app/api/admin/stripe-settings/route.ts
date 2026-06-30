@@ -8,8 +8,12 @@ import {
 } from '@/lib/stripe-settings';
 import { encryptSecret } from '@/lib/encrypt';
 
-function isPlatformAdmin(role: string) {
-  return [UserRole.SUPER_ADMIN, UserRole.DEVELOPER, UserRole.ADMIN_UNIQUE].includes(role as UserRole);
+function isPlatformAdmin(role: any) {
+  return (
+    role === UserRole.SUPER_ADMIN ||
+    role === UserRole.DEVELOPER ||
+    role === UserRole.ADMIN_UNIQUE
+  );
 }
 
 export async function GET(request: NextRequest) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
-import { UserRole } from '@prisma/client';
+import { TaskStatus, UserRole } from '@prisma/client';
 
 const INVOICE_ELIGIBLE_STATUSES = [
   'ASSIGNED',
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
   const tasks = await prisma.task.findMany({
     where: {
       companyId,
-      status: { in: INVOICE_ELIGIBLE_STATUSES },
+      status: { in: INVOICE_ELIGIBLE_STATUSES as TaskStatus[] }, 
       clientInvoices: { none: { status: { not: 'void' } } },
       ...(taskIdParam ? { id: Number(taskIdParam) } : {}),
       ...(orFilters.length ? { OR: orFilters } : {}),

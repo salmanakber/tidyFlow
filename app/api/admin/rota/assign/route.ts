@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/rbac"
 import { UserRole } from "@prisma/client"
 import { validateAssignment } from "@/lib/rota-conflicts"
 import { logAudit } from "@/lib/audit"
-import { sendTaskAssignmentNotification, scheduleTaskReminders } from "@/lib/notifications"
+import { sendTaskAssignmentNotifications } from "@/lib/notifications"
 
 // POST /api/admin/rota/assign - Assign task to cleaner (admin-only)
 export async function POST(request: NextRequest) {
@@ -121,8 +121,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Send notifications
-    await sendTaskAssignmentNotification(task.id, cleaner.id)
-    await scheduleTaskReminders(task.id)
+    await sendTaskAssignmentNotifications(task.id, [cleaner.id])
 
     return NextResponse.json({ 
       success: true, 

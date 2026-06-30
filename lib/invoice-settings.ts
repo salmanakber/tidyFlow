@@ -56,6 +56,30 @@ const DEFAULT_SETTINGS: CompanyInvoiceSettingsDTO = {
   invoiceLanguage: 'en',
 };
 
+function prismaCreateDefaults(companyId: number) {
+  return {
+    companyId,
+    companyDisplayName: DEFAULT_SETTINGS.companyDisplayName,
+    logoUrl: DEFAULT_SETTINGS.logoUrl,
+    address: DEFAULT_SETTINGS.address,
+    phone: DEFAULT_SETTINGS.phone,
+    email: DEFAULT_SETTINGS.email,
+    website: DEFAULT_SETTINGS.website,
+    taxRegistrationNumber: DEFAULT_SETTINGS.taxRegistrationNumber,
+    invoicePrefix: DEFAULT_SETTINGS.invoicePrefix,
+    nextInvoiceNumber: DEFAULT_SETTINGS.nextInvoiceNumber,
+    taxEnabled: DEFAULT_SETTINGS.taxEnabled,
+    taxRules: serializeTaxRules(DEFAULT_SETTINGS.taxRules),
+    defaultTaxRuleId: DEFAULT_SETTINGS.defaultTaxRuleId,
+    payrollPrefix: DEFAULT_SETTINGS.payrollPrefix,
+    nextPayrollNumber: DEFAULT_SETTINGS.nextPayrollNumber,
+    payrollTaxEnabled: DEFAULT_SETTINGS.payrollTaxEnabled,
+    payrollTaxRules: serializeTaxRules(DEFAULT_SETTINGS.payrollTaxRules),
+    payrollDefaultTaxRuleId: DEFAULT_SETTINGS.payrollDefaultTaxRuleId,
+    invoiceLanguage: DEFAULT_SETTINGS.invoiceLanguage,
+  };
+}
+
 export function parseTaxRules(raw: string | null | undefined): TaxRule[] {
   if (!raw) return [];
   try {
@@ -191,7 +215,7 @@ export async function upsertCompanyInvoiceSettings(
 
   const saved = await prisma.companyInvoiceSettings.upsert({
     where: { companyId },
-    create: { companyId, ...DEFAULT_SETTINGS, taxRules: '[]', ...data },
+    create: { ...prismaCreateDefaults(companyId), ...data },
     update: data,
   });
 

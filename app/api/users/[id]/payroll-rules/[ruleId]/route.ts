@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireAuth, requireCompanyScope, isManagerPlusRole } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { serializeRule, validateRuleInput } from '@/lib/payroll-rules';
-
-function canManagePayrollRules(role: UserRole) {
-  return [UserRole.OWNER, UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.DEVELOPER, UserRole.SUPER_ADMIN].includes(role);
-}
 
 /** PATCH/DELETE /api/users/[id]/payroll-rules/[ruleId] */
 export async function PATCH(
@@ -17,7 +13,7 @@ export async function PATCH(
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const role = auth.tokenUser.role as UserRole;
-  if (!canManagePayrollRules(role)) {
+  if (!isManagerPlusRole(role)) {
     return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
   }
 
@@ -80,7 +76,7 @@ export async function DELETE(
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const role = auth.tokenUser.role as UserRole;
-  if (!canManagePayrollRules(role)) {
+  if (!isManagerPlusRole(role)) {
     return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
   }
 

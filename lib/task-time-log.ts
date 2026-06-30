@@ -460,6 +460,12 @@ export async function sumTaskHoursForPeriod(
     select: {
       durationMinutes: true,
       editedDurationMinutes: true,
+      startedAt: true,
+      endedAt: true,
+      workSessions: true,
+      totalBreakMinutes: true,
+      onBreak: true,
+      breakStartedAt: true,
     },
   });
 

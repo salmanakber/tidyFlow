@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
                   taskAssignments: {
                     select: {
                       userId: true,
+                      workSessions: true,
                       user: { select: { id: true, firstName: true, lastName: true, email: true } },
                     },
                   },

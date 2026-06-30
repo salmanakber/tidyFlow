@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
-import { sendTaskAssignmentNotification, scheduleTaskReminders } from '@/lib/notifications';
+import { sendTaskAssignmentNotifications } from '@/lib/notifications';
 import { logAudit } from '@/lib/audit';
 import { validateAssignment } from '@/lib/rota-conflicts';
 
@@ -114,8 +114,7 @@ export async function POST(request: NextRequest) {
       newValues: { assignedUserId: cleaner.id },
     });
 
-    await sendTaskAssignmentNotification(task.id, cleaner.id);
-    await scheduleTaskReminders(task.id);
+    await sendTaskAssignmentNotifications(task.id, [cleaner.id]);
 
     return NextResponse.json({ 
       success: true, 

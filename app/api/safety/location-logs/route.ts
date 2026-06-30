@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
+import { requireAuth, resolveCompanyIdAsync, isManagerPlusRole } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 
 /** Company GPS check-in logs — managers see geofence flags */
@@ -9,11 +9,7 @@ export async function GET(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const role = auth.tokenUser.role as UserRole;
-  if (
-    ![UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.DEVELOPER].includes(
-      role
-    )
-  ) {
+  if (!isManagerPlusRole(role)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 

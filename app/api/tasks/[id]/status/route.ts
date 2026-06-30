@@ -6,6 +6,13 @@ import { finalizePhotoReviewsOnTaskApproval } from '@/lib/ai/photo-review';
 import { notifyTaskApproved } from '@/lib/notifications';
 import { invalidateAIActivityCache } from '@/lib/ai/activity-queue';
 
+const REOPEN_FROM_STATUSES: TaskStatus[] = [
+  TaskStatus.SUBMITTED,
+  TaskStatus.APPROVED,
+  TaskStatus.REJECTED,
+  TaskStatus.COMPLETED,
+];
+
 // PATCH /api/tasks/[id]/status
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireAuth(request);
@@ -78,9 +85,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const data: any = { status };
     const reopening =
       status === TaskStatus.IN_PROGRESS &&
-      [TaskStatus.SUBMITTED, TaskStatus.APPROVED, TaskStatus.REJECTED, TaskStatus.COMPLETED].includes(
-        task.status
-      );
+      REOPEN_FROM_STATUSES.includes(task.status);
 
     if (status === TaskStatus.IN_PROGRESS && !task.startedAt) data.startedAt = new Date();
     if (reopening) {
@@ -232,9 +237,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         where: { taskId: id },
         select: { userId: true },
       });
-      const cleanerIds = [...new Set(assignments.map((a) => a.userId))];
+      const cleanerIds = Array.from(new Set(assignments.map((a) => a.userId)));
       if (task.assignedUserId) cleanerIds.push(task.assignedUserId);
-      const uniqueCleanerIds = [...new Set(cleanerIds)];
+      const uniqueCleanerIds = Array.from(new Set(cleanerIds));
       if (uniqueCleanerIds.length > 0) {
         const { sendTaskUpdatedNotification } = await import('@/lib/notifications');
         await sendTaskUpdatedNotification(id, uniqueCleanerIds, 'status');

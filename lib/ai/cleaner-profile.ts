@@ -110,7 +110,7 @@ export async function recalculateCleanerProfile(userId: number, companyId: numbe
   if (isAIEnabled(config)) {
     try {
       const skills = user.cleanerSkills.map((cs) => cs.skill.name).join(', ') || 'general cleaning';
-      const propertyTypes = [...new Set(tasks.map((t) => t.property.propertyType))].join(', ');
+      const propertyTypes = Array.from(new Set(tasks.map((t) => t.property.propertyType))).join(', ');
 
       const prompt = `Analyze this cleaner performance data and respond with JSON only:
 {

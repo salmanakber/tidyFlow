@@ -40,7 +40,7 @@ export function getCleanerLocation(userId: number): CleanerLocationRecord | null
 export function getCompanyCleanerLocations(companyId: number): CleanerLocationRecord[] {
   const now = Date.now();
   const results: CleanerLocationRecord[] = [];
-  for (const [userId, record] of store.entries()) {
+  for (const [userId, record] of Array.from(store.entries())) {
     if (record.companyId !== companyId) continue;
     if (now - new Date(record.updatedAt).getTime() > TTL_MS) {
       store.delete(userId);
