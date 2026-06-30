@@ -68,6 +68,9 @@ export interface PlanUsageSnapshot {
     addManager: boolean;
   };
   upgradeMessage?: string;
+  pendingPlanTier?: string | null;
+  pendingPlanLabel?: string | null;
+  pendingPlanEffectiveAt?: string | null;
 }
 
 const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
@@ -203,12 +206,16 @@ export async function getPlanLimits(tier?: string | null): Promise<PlanLimits> {
 }
 
 export async function getCompanyPlan(companyId: number) {
+  await import('@/lib/plan-change').then((m) => m.applyPendingPlanChanges(companyId));
+
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: {
       id: true,
       name: true,
       planTier: true,
+      pendingPlanTier: true,
+      pendingPlanEffectiveAt: true,
       subscriptionStatus: true,
       isTrialActive: true,
       trialEndsAt: true,
@@ -217,7 +224,11 @@ export async function getCompanyPlan(companyId: number) {
   if (!company) return null;
 
   const limits = await getPlanLimits(company.planTier);
-  return { company, limits };
+  const pendingLimits = company.pendingPlanTier
+    ? await getPlanLimits(company.pendingPlanTier)
+    : null;
+
+  return { company, limits, pendingLimits };
 }
 
 export async function requireActiveSubscription(tokenUser: {
@@ -479,10 +490,15 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
     }),
   ]);
 
-  const { limits, company } = plan;
+  const { limits, company, pendingLimits } = plan;
   const subscriptionActive =
     company.subscriptionStatus === 'active' ||
     !!(company.isTrialActive && company.trialEndsAt && company.trialEndsAt > new Date());
+
+  const pendingActive =
+    !!company.pendingPlanTier &&
+    !!company.pendingPlanEffectiveAt &&
+    company.pendingPlanEffectiveAt > new Date();
 
   const aiAtLimit = aiUsed >= limits.aiRequestsPerMonth;
   const invoicesAtLimit = !limits.invoicesEnabled || invoicesUsed >= limits.maxInvoicesPerMonth;
@@ -558,10 +574,21 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
       addProperty: properties >= limits.maxProperties || !subscriptionActive,
       addManager: managers >= limits.maxManagers || !subscriptionActive,
     },
-    upgradeMessage: !subscriptionActive
+    upgradeMessage: pendingActive && pendingLimits
+      ? `Downgrade to ${pendingLimits.label} scheduled for ${company.pendingPlanEffectiveAt!.toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })}. You keep ${limits.label} features until then.`
+      : !subscriptionActive
       ? 'Your subscription is inactive. Renew in Billing to restore features.'
       : aiAtLimit
         ? `AI limit reached (${aiUsed}/${limits.aiRequestsPerMonth} this month). Upgrade your plan.`
         : undefined,
+    pendingPlanTier: pendingActive ? company.pendingPlanTier : null,
+    pendingPlanLabel: pendingActive ? pendingLimits?.label ?? null : null,
+    pendingPlanEffectiveAt: pendingActive
+      ? company.pendingPlanEffectiveAt!.toISOString()
+      : null,
   };
 }

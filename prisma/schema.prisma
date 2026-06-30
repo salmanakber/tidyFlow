@@ -89,6 +89,8 @@ model Company {
   name               String
   subscriptionStatus String    @default("active") @map("subscription_status")
   planTier           String    @default("STANDARD") @map("plan_tier") // STARTUP, STANDARD, PREMIUM
+  pendingPlanTier    String?   @map("pending_plan_tier")
+  pendingPlanEffectiveAt DateTime? @map("pending_plan_effective_at")
   basePrice          Decimal   @default(55.00) @map("base_price") @db.Decimal(10, 2)
   propertyCount      Int       @default(0) @map("property_count")
   trialEndsAt        DateTime? @map("trial_ends_at")

@@ -3,11 +3,9 @@ import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { getPlanLimits } from '@/lib/subscription';
-import { createStripeInstance } from '@/lib/stripe';
-import { getStripeSecretKey, getStripePriceIdForTier } from '@/lib/stripe-settings';
-import { getCompanyCurrency } from '@/lib/company-config';
+import { changeCompanyPlanTier } from '@/lib/plan-change';
 
-/** Owner changes subscription tier — updates DB + Stripe subscription price. */
+/** Owner changes subscription tier — upgrades immediately; downgrades at period end. */
 export async function POST(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
@@ -30,7 +28,6 @@ export async function POST(request: NextRequest) {
     }
 
     const limits = await getPlanLimits(tier);
-    const billingCurrency = await getCompanyCurrency(companyId);
     const propertyCount = await prisma.property.count({ where: { companyId, isActive: true } });
 
     if (propertyCount > limits.maxProperties) {
@@ -56,76 +53,53 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const billing = await prisma.billingRecord.findFirst({
-      where: {
-        companyId,
-        status: { in: ['active', 'trialing'] },
-        subscriptionId: { not: null },
-      },
-      orderBy: { createdAt: 'desc' },
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { planTier: true, isTrialActive: true },
     });
-
-    let stripeUpdated = false;
-    if (billing?.subscriptionId) {
-      const secretKey = await getStripeSecretKey();
-      const newPriceId = await getStripePriceIdForTier(tier, billingCurrency);
-
-      if (!secretKey) {
-        return NextResponse.json(
-          { success: false, message: 'Stripe is not configured. Contact support.' },
-          { status: 500 }
-        );
-      }
-      if (!newPriceId) {
-        return NextResponse.json(
-          {
-            success: false,
-            message: `Stripe price ID not configured for ${limits.label} (${billingCurrency}). Add it in Admin → Stripe Billing.`,
-          },
-          { status: 500 }
-        );
-      }
-
-      const stripe = createStripeInstance(secretKey);
-      const subscription = await stripe.subscriptions.retrieve(billing.subscriptionId);
-      const primaryItem = subscription.items.data[0];
-
-      if (primaryItem?.id) {
-        await stripe.subscriptions.update(billing.subscriptionId, {
-          items: [{ id: primaryItem.id, price: newPriceId }],
-          proration_behavior: 'create_prorations',
-          metadata: { planTier: tier, companyId: String(companyId) },
-        });
-        stripeUpdated = true;
-
-        await prisma.billingRecord.update({
-          where: { id: billing.id },
-          data: {
-            amountDue: limits.monthlyPrice,
-          },
-        });
-      }
+    if (!company) {
+      return NextResponse.json({ success: false, message: 'Company not found' }, { status: 404 });
     }
 
-    await prisma.company.update({
-      where: { id: companyId },
-      data: {
-        planTier: tier,
-        basePrice: limits.monthlyPrice,
-      },
+    const currentTier = (company.planTier || 'STANDARD').toUpperCase();
+    const [currentLimits, newLimits] = await Promise.all([
+      getPlanLimits(currentTier),
+      getPlanLimits(tier),
+    ]);
+    const isUpgrade = newLimits.monthlyPrice > currentLimits.monthlyPrice;
+
+    const result = await changeCompanyPlanTier(companyId, tier as 'STARTUP' | 'STANDARD' | 'PREMIUM', {
+      isTrialActive: company.isTrialActive,
     });
+
+    const formatDate = (d: Date) =>
+      d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    let message: string;
+    if (result.trialEnded) {
+      message = `You're now on ${limits.label}. Your free trial has ended and billing has started for your new plan.`;
+    } else if (result.timing === 'period_end' && result.effectiveAt) {
+      message = `Switch to ${limits.label} scheduled for ${formatDate(result.effectiveAt)}. You keep ${currentLimits.label} until then. The new price applies on your next renewal.`;
+    } else if (isUpgrade) {
+      message = `Upgraded to ${limits.label}. Your new features are active and any price difference has been added to your account.`;
+    } else {
+      message = `Plan changed to ${limits.label}.`;
+    }
 
     return NextResponse.json({
       success: true,
-      message: stripeUpdated
-        ? `Plan changed to ${limits.label}. Stripe billing updated.`
-        : `Plan changed to ${limits.label}.${billing?.subscriptionId ? '' : ' No active Stripe subscription found — DB only.'}`,
+      message,
       data: {
-        planTier: tier,
+        planTier: result.timing === 'period_end' ? currentTier : tier,
+        pendingPlanTier: result.timing === 'period_end' ? tier : null,
+        pendingPlanEffectiveAt: result.effectiveAt?.toISOString() ?? null,
         label: limits.label,
         monthlyPrice: limits.monthlyPrice,
         limits,
-        stripeUpdated,
+        stripeUpdated: result.stripeUpdated,
+        timing: result.timing,
+        isUpgrade,
+        trialEnded: result.trialEnded,
       },
     });
   } catch (error: any) {
