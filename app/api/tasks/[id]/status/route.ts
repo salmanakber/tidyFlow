@@ -206,6 +206,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       userId: tokenUser.userId,
     });
 
+    const { schedulePushTaskToCompanySheet } = await import('@/lib/google-sheets');
+    schedulePushTaskToCompanySheet(task.companyId, id);
+
     if (reopening) {
       await emitTaskEvent('task:tracker', task.companyId, id, {
         action: 'reset',

@@ -453,6 +453,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       title: updated.title,
     });
 
+    const { schedulePushTaskToCompanySheet } = await import('@/lib/google-sheets');
+    schedulePushTaskToCompanySheet(task.companyId, id);
+
     return NextResponse.json({ success: true, data: { task: updated } });
   } catch (error) {
     console.error('Task PATCH error:', error);

@@ -80,7 +80,7 @@ export function isGoogleSheetsConfigured(): boolean {
   return !!getServiceAccountCredentials();
 }
 
-async function getSheetsClient(): Promise<sheets_v4.Sheets> {
+async function getSheetsClient(writeAccess = false): Promise<sheets_v4.Sheets> {
   const credentials = getServiceAccountCredentials();
   if (!credentials) {
     throw new Error(
@@ -89,12 +89,46 @@ async function getSheetsClient(): Promise<sheets_v4.Sheets> {
   }
   const auth = new google.auth.GoogleAuth({
     credentials,
-    scopes: [
-      'https://www.googleapis.com/auth/spreadsheets.readonly',
-      'https://www.googleapis.com/auth/drive.readonly',
-    ],
+    scopes: writeAccess
+      ? ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly']
+      : [
+          'https://www.googleapis.com/auth/spreadsheets.readonly',
+          'https://www.googleapis.com/auth/drive.readonly',
+        ],
   });
   return google.sheets({ version: 'v4', auth });
+}
+
+const VALID_TASK_STATUSES = new Set([
+  'DRAFT',
+  'PLANNED',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'SUBMITTED',
+  'QA_REVIEW',
+  'APPROVED',
+  'REJECTED',
+  'ARCHIVED',
+  'COMPLETED',
+  'RESERVED',
+  'AWAITING',
+]);
+
+/** Skip inbound webhook sync briefly after we write outbound updates (avoids sync loops). */
+const outboundSheetWriteGuard = new Map<number, number>();
+
+export function markOutboundSheetWrite(companyId: number, durationMs = 8000) {
+  outboundSheetWriteGuard.set(companyId, Date.now() + durationMs);
+}
+
+export function shouldSkipInboundSheetSync(companyId: number): boolean {
+  const until = outboundSheetWriteGuard.get(companyId);
+  if (!until) return false;
+  if (Date.now() > until) {
+    outboundSheetWriteGuard.delete(companyId);
+    return false;
+  }
+  return true;
 }
 
 const ARCHIVE_TASK_STATUSES = new Set([
@@ -108,14 +142,15 @@ const ARCHIVE_TASK_STATUSES = new Set([
 ]);
 
 /** Statuses from sheet that require an assigned cleaner before applying. */
-const SHEET_STATUSES_REQUIRING_CLEANER = new Set(['COMPLETED', 'APPROVED']);
+const SHEET_STATUSES_REQUIRING_CLEANER = new Set(['ASSIGNED', 'APPROVED', 'COMPLETED']);
 
 async function taskHasAssignedCleaner(
   companyId: number,
   assignedUserId: number | undefined,
-  existingTaskId?: number
+  existingTaskId?: number,
+  resolvedCleanerIds?: number[]
 ): Promise<boolean> {
-  if (assignedUserId) return true;
+  if (assignedUserId || (resolvedCleanerIds && resolvedCleanerIds.length > 0)) return true;
   if (!existingTaskId) return false;
   const task = await prisma.task.findFirst({
     where: { id: existingTaskId, companyId },
@@ -125,6 +160,72 @@ async function taskHasAssignedCleaner(
     },
   });
   return !!(task?.assignedUserId || task?.taskAssignments?.length);
+}
+
+function parseAssigneeEmails(raw?: string | null): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(/[,;]/)
+    .map((e) => e.trim())
+    .filter((e) => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+}
+
+async function resolveCleanerIdsFromEmails(
+  companyId: number,
+  raw?: string | null
+): Promise<number[]> {
+  const emails = parseAssigneeEmails(raw);
+  if (!emails.length) return [];
+
+  const users = await prisma.user.findMany({
+    where: {
+      companyId,
+      isActive: true,
+      OR: emails.map((email) => ({ email: { equals: email, mode: 'insensitive' as const } })),
+    },
+    select: { id: true, email: true },
+  });
+
+  const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
+  const ids: number[] = [];
+  for (const email of emails) {
+    const id = byEmail.get(email.toLowerCase());
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+async function applyTaskAssigneesFromSheet(taskId: number, cleanerIds: number[]): Promise<void> {
+  if (!cleanerIds.length) return;
+  await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      assignedUserId: cleanerIds[0],
+      taskAssignments: {
+        deleteMany: {},
+        create: cleanerIds.map((userId) => ({ userId })),
+      },
+    },
+  });
+}
+
+function formatAssigneeEmailsForSheet(task: {
+  assignedUser?: { email: string } | null;
+  taskAssignments?: Array<{ user: { email: string } }>;
+}): string {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const add = (email?: string | null) => {
+    const e = email?.trim();
+    if (!e) return;
+    const key = e.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    ordered.push(e);
+  };
+  add(task.assignedUser?.email);
+  for (const a of task.taskAssignments || []) add(a.user.email);
+  return ordered.join(', ');
 }
 
 export function detectMasterSheetTabs(tabNames: string[]) {
@@ -470,8 +571,71 @@ function buildPropertySyncPayload(
 
 function parseSheetDate(raw?: string | null): Date | null {
   if (!raw?.trim()) return null;
-  const d = new Date(raw);
-  return !isNaN(d.getTime()) ? d : null;
+  const trimmed = raw.trim();
+
+  // Google Sheets serial date (days since 1899-12-30)
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const serial = parseFloat(trimmed);
+    if (serial > 0 && serial < 1000000) {
+      const epoch = new Date(1899, 11, 30);
+      const date = new Date(epoch.getTime() + serial * 24 * 60 * 60 * 1000);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+
+  // DD/MM/YYYY
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('/').map(Number);
+    const date = new Date(y, m - 1, d);
+    if (!isNaN(date.getTime()) && date.getDate() === d && date.getMonth() === m - 1) {
+      return date;
+    }
+  }
+
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime()) && d.getFullYear() >= 1900 && d.getFullYear() <= 2100) {
+    return d;
+  }
+  return null;
+}
+
+function dateToSheetSerial(date: Date): number {
+  const epoch = new Date(1899, 11, 30);
+  const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return (midnight.getTime() - epoch.getTime()) / (24 * 60 * 60 * 1000);
+}
+
+function normalizeSheetStatus(raw?: string | null): string | null {
+  if (!raw?.trim()) return 'PLANNED';
+  const normalized = raw.trim().toUpperCase().replace(/\s+/g, '_');
+  return VALID_TASK_STATUSES.has(normalized) ? normalized : null;
+}
+
+function findHeaderIndex(headers: string[], ...candidates: string[]): number {
+  const normalized = headers.map((h) => normalizeHeaderKey(h));
+  for (const candidate of candidates) {
+    const key = normalizeHeaderKey(candidate);
+    const idx = normalized.indexOf(key);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function columnLetter(index: number): string {
+  let n = index + 1;
+  let label = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    label = String.fromCharCode(65 + rem) + label;
+    n = Math.floor((n - 1) / 26);
+  }
+  return label;
+}
+
+function extractPropertySheetRef(notes?: string | null): string | null {
+  if (!notes) return null;
+  const match = notes.match(/sheet:([^\s\n]+)/);
+  return match?.[1] || null;
 }
 
 function findPropertyBySheetRef(companyId: number, propertyRef: string) {
@@ -555,121 +719,135 @@ export async function syncCompanySheet(companyId: number) {
   let tasksSynced = 0;
   let tasksArchived = 0;
   let statusBlocked = 0;
+  let rowErrors = 0;
   const tasksCreated: number[] = [];
   const tasksUpdated: number[] = [];
 
   for (const row of taskRows) {
-    const data = rowToObject(tasksHeaders, row.map(String));
-    const title = data['Title'] || data['title'];
-    const propertyRef = data['Property ID'] || data['property_id'];
-    if (!propertyRef?.trim()) continue;
+    try {
+      const data = rowToObject(tasksHeaders, row.map(String));
+      const title = data['Title'] || data['title'];
+      const propertyRef = data['Property ID'] || data['property_id'];
+      if (!propertyRef?.trim()) continue;
 
-    const property = await findPropertyBySheetRef(companyId, propertyRef.trim());
-    if (!property) continue;
+      const property = await findPropertyBySheetRef(companyId, propertyRef.trim());
+      if (!property) continue;
 
-    const uniqueId =
-      data['Unique ID'] ||
-      data['unique_id'] ||
-      data['Task ID'] ||
-      data['task_id'] ||
-      `${propertyRef}-${title || 'task'}`;
+      const uniqueId =
+        data['Unique ID'] ||
+        data['unique_id'] ||
+        data['Task ID'] ||
+        data['task_id'] ||
+        `${propertyRef}-${title || 'task'}`;
 
-    const existingTask = await prisma.task.findFirst({
-      where: { companyId, uniqueIdentifier: uniqueId },
-    });
-
-    const statusRaw = (data['Status'] || data['status'] || 'PLANNED')
-      .toUpperCase()
-      .replace(/\s+/g, '_');
-
-    if (ARCHIVE_TASK_STATUSES.has(statusRaw)) {
-      if (existingTask) {
-        await prisma.task.update({
-          where: { id: existingTask.id },
-          data: { status: 'ARCHIVED' },
-        });
-        tasksArchived++;
-        tasksUpdated.push(existingTask.id);
-      }
-      continue;
-    }
-
-    if (!title?.trim()) continue;
-
-    const scheduledDate = parseSheetDate(data['Scheduled Date'] || data['scheduled_date']);
-    const moveInDate = parseSheetDate(data['Move In Date'] || data['move_in_date']);
-
-    let assignedUserId: number | undefined;
-    const assigneeEmail = data['Assigned User Email'] || data['assigned_user_email'];
-    if (assigneeEmail?.trim()) {
-      const user = await prisma.user.findFirst({
-        where: { companyId, email: { equals: assigneeEmail.trim(), mode: 'insensitive' } },
+      const existingTask = await prisma.task.findFirst({
+        where: { companyId, uniqueIdentifier: uniqueId },
       });
-      assignedUserId = user?.id;
-    }
 
-    const resolvedCleanerId =
-      assignedUserId ?? existingTask?.assignedUserId ?? undefined;
-    const hasCleaner = await taskHasAssignedCleaner(
-      companyId,
-      resolvedCleanerId,
-      existingTask?.id
-    );
+      const statusRaw = normalizeSheetStatus(data['Status'] || data['status'] || 'PLANNED');
+      if (!statusRaw) {
+        console.warn(
+          `[sheet-sync] Skipping row — invalid status "${data['Status'] || data['status']}" for task "${title || uniqueId}"`
+        );
+        rowErrors++;
+        continue;
+      }
 
-    if (SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) && !hasCleaner) {
-      await notifyManagersSheetStatusBlocked({
+      if (ARCHIVE_TASK_STATUSES.has(statusRaw)) {
+        if (existingTask) {
+          await prisma.task.update({
+            where: { id: existingTask.id },
+            data: { status: 'ARCHIVED' },
+          });
+          tasksArchived++;
+          tasksUpdated.push(existingTask.id);
+        }
+        continue;
+      }
+
+      if (!title?.trim()) continue;
+
+      const scheduledDate = parseSheetDate(data['Scheduled Date'] || data['scheduled_date']);
+      const moveInDate = parseSheetDate(data['Move In Date'] || data['move_in_date']);
+
+      const assigneeRaw = data['Assigned User Email'] || data['assigned_user_email'];
+      const cleanerIds = await resolveCleanerIdsFromEmails(companyId, assigneeRaw);
+      const assignedUserId = cleanerIds[0];
+
+      const hasCleaner = await taskHasAssignedCleaner(
         companyId,
-        taskTitle: title!.trim(),
-        requestedStatus: statusRaw,
-        propertyRef: propertyRef.trim(),
-        spreadsheetTitle: conn.spreadsheetTitle || undefined,
-      });
-      statusBlocked++;
-      if (existingTask) {
-        await prisma.task.update({
-          where: { id: existingTask.id },
-          data: {
-            title: title.trim(),
-            description: data['Description'] || data['description'] || null,
-            scheduledDate,
-            moveInDate,
-            budget: (() => {
-              const n = parseSheetNumber(pickField(data, 'Budget', 'budget'));
-              return n != null && n > 0 ? n : null;
-            })(),
-            uniqueIdentifier: uniqueId,
-            propertyId: property.id,
-            ...(assignedUserId ? { assignedUserId } : {}),
-          },
+        assignedUserId,
+        existingTask?.id,
+        cleanerIds
+      );
+
+      if (SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) && !hasCleaner) {
+        await notifyManagersSheetStatusBlocked({
+          companyId,
+          taskTitle: title!.trim(),
+          requestedStatus: statusRaw,
+          propertyRef: propertyRef.trim(),
+          spreadsheetTitle: conn.spreadsheetTitle || undefined,
         });
-        tasksUpdated.push(existingTask.id);
+        statusBlocked++;
+        if (existingTask) {
+          await prisma.task.update({
+            where: { id: existingTask.id },
+            data: {
+              title: title.trim(),
+              description: data['Description'] || data['description'] || null,
+              scheduledDate,
+              moveInDate,
+              budget: (() => {
+                const n = parseSheetNumber(pickField(data, 'Budget', 'budget'));
+                return n != null && n > 0 ? n : null;
+              })(),
+              uniqueIdentifier: uniqueId,
+              propertyId: property.id,
+              ...(assignedUserId ? { assignedUserId } : {}),
+            },
+          });
+          if (cleanerIds.length) {
+            await applyTaskAssigneesFromSheet(existingTask.id, cleanerIds);
+          }
+          tasksUpdated.push(existingTask.id);
+        }
+        continue;
       }
-      continue;
-    }
 
-    const taskPayload = {
-      title: title.trim(),
-      description: data['Description'] || data['description'] || null,
-      scheduledDate,
-      moveInDate,
-      status: statusRaw as any,
-      budget: (() => {
-        const n = parseSheetNumber(pickField(data, 'Budget', 'budget'));
-        return n != null && n > 0 ? n : null;
-      })(),
-      uniqueIdentifier: uniqueId,
-      propertyId: property.id,
-      ...(assignedUserId ? { assignedUserId } : {}),
-    };
+      const taskPayload = {
+        title: title.trim(),
+        description: data['Description'] || data['description'] || null,
+        scheduledDate,
+        moveInDate,
+        status: statusRaw as any,
+        budget: (() => {
+          const n = parseSheetNumber(pickField(data, 'Budget', 'budget'));
+          return n != null && n > 0 ? n : null;
+        })(),
+        uniqueIdentifier: uniqueId,
+        propertyId: property.id,
+        ...(assignedUserId ? { assignedUserId } : {}),
+      };
 
-    if (existingTask) {
-      await prisma.task.update({ where: { id: existingTask.id }, data: taskPayload });
-      tasksUpdated.push(existingTask.id);
-    } else {
-      const created = await prisma.task.create({ data: { companyId, ...taskPayload } });
-      tasksCreated.push(created.id);
+      let syncedTaskId: number;
+      if (existingTask) {
+        const updated = await prisma.task.update({ where: { id: existingTask.id }, data: taskPayload });
+        syncedTaskId = updated.id;
+        tasksUpdated.push(existingTask.id);
+      } else {
+        const created = await prisma.task.create({ data: { companyId, ...taskPayload } });
+        syncedTaskId = created.id;
+        tasksCreated.push(created.id);
+      }
+      if (cleanerIds.length) {
+        await applyTaskAssigneesFromSheet(syncedTaskId, cleanerIds);
+      }
+      tasksSynced++;
+    } catch (rowError) {
+      rowErrors++;
+      console.error('[sheet-sync] Task row failed — continuing with remaining rows:', rowError);
     }
-    tasksSynced++;
   }
 
   await prisma.companyGoogleSheet.update({
@@ -683,6 +861,7 @@ export async function syncCompanySheet(companyId: number) {
     tasksArchived,
     propertiesDeactivated,
     statusBlocked,
+    rowErrors,
     companyId,
     tasksCreated,
     tasksUpdated,
@@ -838,23 +1017,64 @@ export async function syncTaskSheetFromMapping(companyId: number): Promise<TaskS
         continue;
       }
 
-      let assignedUserId: number | undefined;
-      if (mapped.assignedUserEmail) {
-        const user = await prisma.user.findFirst({
-          where: { companyId, email: { equals: mapped.assignedUserEmail, mode: 'insensitive' } },
-        });
-        assignedUserId = user?.id;
-      }
+      const cleanerIds = await resolveCleanerIdsFromEmails(companyId, mapped.assignedUserEmail);
+      const assignedUserId = cleanerIds[0];
 
       const scheduledRaw = mapped.scheduledDate;
-      const scheduledDate = scheduledRaw ? new Date(scheduledRaw) : null;
-      const statusRaw = (mapped.status || 'PLANNED').toUpperCase().replace(/\s+/g, '_');
+      const scheduledDate = scheduledRaw ? parseSheetDate(scheduledRaw) : null;
+      const moveInDate = mapped.moveInDate ? parseSheetDate(mapped.moveInDate) : null;
+      const statusRaw = normalizeSheetStatus(mapped.status || 'PLANNED');
+      if (!statusRaw) {
+        result.errors++;
+        continue;
+      }
+
+      const hasCleaner = await taskHasAssignedCleaner(
+        companyId,
+        assignedUserId,
+        existingTask?.id,
+        cleanerIds
+      );
+
+      if (SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) && !hasCleaner) {
+        await notifyManagersSheetStatusBlocked({
+          companyId,
+          taskTitle: title!,
+          requestedStatus: statusRaw,
+          propertyRef,
+          spreadsheetTitle: conn.spreadsheetTitle || undefined,
+        });
+        if (existingTask) {
+          await prisma.task.update({
+            where: { id: existingTask.id },
+            data: {
+              title: title!,
+              description: mapped.description || null,
+              scheduledDate,
+              moveInDate,
+              budget: (() => {
+                const n = parseSheetNumber(mapped.budget);
+                return n != null && n > 0 ? n : null;
+              })(),
+              uniqueIdentifier: uniqueId,
+              propertyId: property.id,
+              ...(assignedUserId ? { assignedUserId } : {}),
+            },
+          });
+          if (cleanerIds.length) {
+            await applyTaskAssigneesFromSheet(existingTask.id, cleanerIds);
+          }
+          result.updated++;
+          result.tasksUpdated.push(existingTask.id);
+        }
+        continue;
+      }
 
       const taskPayload = {
         title: title!,
         description: mapped.description || null,
-        scheduledDate: scheduledDate && !isNaN(scheduledDate.getTime()) ? scheduledDate : null,
-        moveInDate: mapped.moveInDate ? new Date(mapped.moveInDate) : null,
+        scheduledDate,
+        moveInDate,
         status: statusRaw as any,
         budget: (() => {
           const n = parseSheetNumber(mapped.budget);
@@ -865,14 +1085,20 @@ export async function syncTaskSheetFromMapping(companyId: number): Promise<TaskS
         ...(assignedUserId ? { assignedUserId } : {}),
       };
 
+      let syncedTaskId: number;
       if (existingTask) {
-        await prisma.task.update({ where: { id: existingTask.id }, data: taskPayload });
+        const updated = await prisma.task.update({ where: { id: existingTask.id }, data: taskPayload });
+        syncedTaskId = updated.id;
         result.updated++;
         result.tasksUpdated.push(existingTask.id);
       } else {
         const created = await prisma.task.create({ data: { companyId, ...taskPayload } });
+        syncedTaskId = created.id;
         result.created++;
         result.tasksCreated.push(created.id);
+      }
+      if (cleanerIds.length) {
+        await applyTaskAssigneesFromSheet(syncedTaskId, cleanerIds);
       }
     } catch {
       result.errors++;
@@ -1000,6 +1226,10 @@ const pendingSheetSyncResolvers = new Map<
  * Coalesces bursts into one sync and emits socket events once.
  */
 export function scheduleCompanySheetSync(companyId: number): Promise<Record<string, unknown>> {
+  if (shouldSkipInboundSheetSync(companyId)) {
+    return Promise.resolve({ skipped: true, reason: 'outbound_write_guard' });
+  }
+
   return new Promise((resolve, reject) => {
     const waiters = pendingSheetSyncResolvers.get(companyId) || [];
     waiters.push({ resolve, reject });
@@ -1012,6 +1242,11 @@ export function scheduleCompanySheetSync(companyId: number): Promise<Record<stri
       pendingSheetSyncs.delete(companyId);
       const batch = pendingSheetSyncResolvers.get(companyId) || [];
       pendingSheetSyncResolvers.delete(companyId);
+      if (shouldSkipInboundSheetSync(companyId)) {
+        const skipped = { skipped: true, reason: 'outbound_write_guard' };
+        batch.forEach((w) => w.resolve(skipped));
+        return;
+      }
       try {
         const result = await syncCompanyGoogleSheet(companyId);
         batch.forEach((w) => w.resolve(result));
@@ -1023,6 +1258,105 @@ export function scheduleCompanySheetSync(companyId: number): Promise<Record<stri
 
     pendingSheetSyncs.set(companyId, timer);
   });
+}
+
+/**
+ * Push task changes from the app back to the connected master Google Sheet.
+ * Matches rows by Unique ID (or Task ID). Non-blocking — callers should .catch().
+ */
+export async function pushTaskToCompanySheet(companyId: number, taskId: number): Promise<boolean> {
+  const conn = await getCompanySheetConnection(companyId);
+  if (!conn?.syncEnabled || !conn.tasksTab || !isMasterSheetMode(conn)) return false;
+  if (!isGoogleSheetsConfigured()) return false;
+
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, companyId },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      scheduledDate: true,
+      moveInDate: true,
+      budget: true,
+      uniqueIdentifier: true,
+      assignedUser: { select: { email: true } },
+      taskAssignments: { select: { user: { select: { email: true } } } },
+      property: { select: { notes: true } },
+    },
+  });
+  if (!task?.uniqueIdentifier) return false;
+
+  const sheets = await getSheetsClient(true);
+  const headers = await getSheetHeaders(conn.spreadsheetId, conn.tasksTab);
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: conn.spreadsheetId,
+    range: `'${conn.tasksTab}'!A2:ZZ10000`,
+  });
+  const rows = res.data.values || [];
+
+  const uniqueCol = findHeaderIndex(headers, 'Unique ID', 'unique_id', 'unique id');
+  const taskIdCol = findHeaderIndex(headers, 'Task ID', 'task_id', 'task id');
+  const matchKey = task.uniqueIdentifier.trim();
+
+  let rowIndex = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const uniqueVal = uniqueCol >= 0 ? String(row[uniqueCol] || '').trim() : '';
+    const taskIdVal = taskIdCol >= 0 ? String(row[taskIdCol] || '').trim() : '';
+    if (uniqueVal === matchKey || (taskIdVal && taskIdVal === matchKey)) {
+      rowIndex = i;
+      break;
+    }
+  }
+  if (rowIndex < 0) return false;
+
+  const sheetRowNumber = rowIndex + 2;
+  const updates: { col: number; value: string | number }[] = [];
+
+  const setCell = (candidates: string[], value: string | number | null | undefined) => {
+    if (value === undefined || value === null) return;
+    const col = findHeaderIndex(headers, ...candidates);
+    if (col >= 0) updates.push({ col, value });
+  };
+
+  setCell(['Title', 'title'], task.title);
+  setCell(['Description', 'description'], task.description || '');
+  setCell(['Status', 'status'], task.status);
+  setCell(['Assigned User Email', 'assigned_user_email'], formatAssigneeEmailsForSheet(task));
+  if (task.scheduledDate) {
+    setCell(['Scheduled Date', 'scheduled_date'], dateToSheetSerial(new Date(task.scheduledDate)));
+  }
+  if (task.moveInDate) {
+    setCell(['Move In Date', 'move_in_date'], dateToSheetSerial(new Date(task.moveInDate)));
+  }
+  if (task.budget != null) setCell(['Budget', 'budget'], Number(task.budget));
+
+  const propertyRef = extractPropertySheetRef(task.property?.notes);
+  if (propertyRef) setCell(['Property ID', 'property_id'], propertyRef);
+
+  if (!updates.length) return false;
+
+  markOutboundSheetWrite(companyId);
+
+  const data: sheets_v4.Schema$ValueRange[] = updates.map(({ col, value }) => ({
+    range: `'${conn.tasksTab}'!${columnLetter(col)}${sheetRowNumber}`,
+    values: [[value]],
+  }));
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: conn.spreadsheetId,
+    requestBody: { valueInputOption: 'USER_ENTERED', data },
+  });
+
+  return true;
+}
+
+export function schedulePushTaskToCompanySheet(companyId: number, taskId: number) {
+  pushTaskToCompanySheet(companyId, taskId).catch((err) =>
+    console.warn(`[sheet-push] task ${taskId} for company ${companyId}:`, err?.message || err)
+  );
 }
 
 export async function saveMasterSheetConfiguration(

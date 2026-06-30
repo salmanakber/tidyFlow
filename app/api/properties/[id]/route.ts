@@ -28,6 +28,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     },
     include: {
       company: { select: { id: true, name: true } },
+      tasks: {
+        where: { status: { not: 'ARCHIVED' } },
+        orderBy: [{ scheduledDate: 'desc' }, { createdAt: 'desc' }],
+        take: 50,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          scheduledDate: true,
+          moveInDate: true,
+          assignedUserId: true,
+          uniqueIdentifier: true,
+          assignedUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+        },
+      },
     },
   });
 

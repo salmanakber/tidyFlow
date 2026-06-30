@@ -116,6 +116,9 @@ export async function POST(request: NextRequest) {
 
     await sendTaskAssignmentNotifications(task.id, [cleaner.id]);
 
+    const { schedulePushTaskToCompanySheet } = await import('@/lib/google-sheets');
+    schedulePushTaskToCompanySheet(task.companyId, task.id);
+
     return NextResponse.json({ 
       success: true, 
       data: { 
