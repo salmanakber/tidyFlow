@@ -61,10 +61,16 @@ export async function emitCompanyEvent(
   await emitRealtimeEvent({ type, companyId, payload });
 }
 
+export interface TaskSyncChangeDetail {
+  taskId: number;
+  changed: Record<string, unknown>;
+}
+
 export interface SheetSyncDelta {
   companyId: number;
   tasksCreated: number[];
   tasksUpdated: number[];
+  tasksUpdatedDetails?: TaskSyncChangeDetail[];
   propertiesCreated: number[];
   propertiesUpdated: number[];
   stats?: Record<string, unknown>;
@@ -72,8 +78,15 @@ export interface SheetSyncDelta {
 
 /** Emit per-record socket events after Google Sheet sync (company-scoped). */
 export async function emitSheetSyncDelta(delta: SheetSyncDelta): Promise<void> {
-  const { companyId, tasksCreated, tasksUpdated, propertiesCreated, propertiesUpdated, stats } =
-    delta;
+  const {
+    companyId,
+    tasksCreated,
+    tasksUpdated,
+    tasksUpdatedDetails = [],
+    propertiesCreated,
+    propertiesUpdated,
+    stats,
+  } = delta;
 
   await emitCompanyEvent('sheet:sync', companyId, {
     ...stats,
@@ -85,12 +98,27 @@ export async function emitSheetSyncDelta(delta: SheetSyncDelta): Promise<void> {
     source: 'google_sheet',
   });
 
-  for (const taskId of tasksCreated) {
-    await emitTaskEvent('task:created', companyId, taskId, { source: 'google_sheet' });
+  const detailedIds = new Set(tasksUpdatedDetails.map((d) => d.taskId));
+  for (const detail of tasksUpdatedDetails) {
+    const payload = { ...detail.changed, source: 'google_sheet' };
+    if (detail.changed.status !== undefined) {
+      await emitTaskEvent('task:status', companyId, detail.taskId, payload);
+    }
+    await emitTaskEvent('task:updated', companyId, detail.taskId, payload);
   }
-  for (const taskId of tasksUpdated) {
-    await emitTaskEvent('task:updated', companyId, taskId, { source: 'google_sheet' });
-  }
+
+  await Promise.all(
+    tasksUpdated
+      .filter((taskId) => !detailedIds.has(taskId))
+      .map((taskId) => emitTaskEvent('task:updated', companyId, taskId, { source: 'google_sheet' }))
+  );
+
+  await Promise.all(
+    tasksCreated.map((taskId) =>
+      emitTaskEvent('task:created', companyId, taskId, { source: 'google_sheet' })
+    )
+  );
+
   for (const propertyId of propertiesCreated) {
     await emitPropertyEvent('property:created', companyId, propertyId, { source: 'google_sheet' });
   }

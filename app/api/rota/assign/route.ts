@@ -88,9 +88,17 @@ export async function POST(request: NextRequest) {
 
     const updatedTask = await prisma.task.update({
       where: { id: task.id },
-      data: { assignedUserId: cleaner.id },
+      data: {
+        assignedUserId: cleaner.id,
+        status: task.status === 'PLANNED' || task.status === 'DRAFT' ? 'ASSIGNED' : task.status,
+        taskAssignments: {
+          deleteMany: {},
+          create: [{ userId: cleaner.id }],
+        },
+      },
       include: {
         property: true,
+        taskAssignments: { select: { user: { select: { email: true } } } },
         assignedUser: { 
           select: { 
             firstName: true, 
@@ -116,8 +124,10 @@ export async function POST(request: NextRequest) {
 
     await sendTaskAssignmentNotifications(task.id, [cleaner.id]);
 
-    const { schedulePushTaskToCompanySheet } = await import('@/lib/google-sheets');
-    schedulePushTaskToCompanySheet(task.companyId, task.id);
+    const { schedulePushTaskToCompanySheet, buildAssigneeEmailsForSheet } = await import('@/lib/google-sheets');
+    schedulePushTaskToCompanySheet(task.companyId, task.id, {
+      assigneeEmails: buildAssigneeEmailsForSheet(updatedTask),
+    });
 
     return NextResponse.json({ 
       success: true, 

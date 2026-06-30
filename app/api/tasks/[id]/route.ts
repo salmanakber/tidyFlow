@@ -448,13 +448,22 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const { emitTaskEvent } = await import('@/lib/realtime');
-    await emitTaskEvent('task:updated', task.companyId, id, {
+    const updatePayload: Record<string, unknown> = {
       status: updated.status,
       title: updated.title,
-    });
+      description: updated.description,
+      scheduledDate: updated.scheduledDate,
+      propertyId: updated.propertyId,
+    };
+    if (status !== undefined && status !== task.status) {
+      await emitTaskEvent('task:status', task.companyId, id, updatePayload);
+    }
+    await emitTaskEvent('task:updated', task.companyId, id, updatePayload);
 
-    const { schedulePushTaskToCompanySheet } = await import('@/lib/google-sheets');
-    schedulePushTaskToCompanySheet(task.companyId, id);
+    const { schedulePushTaskToCompanySheet, buildAssigneeEmailsForSheet } = await import('@/lib/google-sheets');
+    schedulePushTaskToCompanySheet(task.companyId, id, {
+      assigneeEmails: buildAssigneeEmailsForSheet(updated),
+    });
 
     return NextResponse.json({ success: true, data: { task: updated } });
   } catch (error) {

@@ -114,21 +114,38 @@ const VALID_TASK_STATUSES = new Set([
   'AWAITING',
 ]);
 
-/** Skip inbound webhook sync briefly after we write outbound updates (avoids sync loops). */
-const outboundSheetWriteGuard = new Map<number, number>();
+/** Per-row skip after outbound push — avoids whole-sheet sync blackout. */
+const outboundSheetRowGuard = new Map<number, Map<string, number>>();
 
-export function markOutboundSheetWrite(companyId: number, durationMs = 8000) {
-  outboundSheetWriteGuard.set(companyId, Date.now() + durationMs);
+export function markOutboundSheetRow(companyId: number, uniqueId: string, durationMs = 1800) {
+  if (!uniqueId.trim()) return;
+  if (!outboundSheetRowGuard.has(companyId)) {
+    outboundSheetRowGuard.set(companyId, new Map());
+  }
+  outboundSheetRowGuard.get(companyId)!.set(uniqueId.trim(), Date.now() + durationMs);
 }
 
-export function shouldSkipInboundSheetSync(companyId: number): boolean {
-  const until = outboundSheetWriteGuard.get(companyId);
+function shouldSkipInboundSheetRow(companyId: number, uniqueId: string): boolean {
+  const key = uniqueId.trim();
+  if (!key) return false;
+  const rowMap = outboundSheetRowGuard.get(companyId);
+  const until = rowMap?.get(key);
   if (!until) return false;
   if (Date.now() > until) {
-    outboundSheetWriteGuard.delete(companyId);
+    rowMap!.delete(key);
     return false;
   }
   return true;
+}
+
+/** @deprecated Whole-company guard — prefer markOutboundSheetRow */
+export function markOutboundSheetWrite(companyId: number, durationMs = 8000) {
+  void companyId;
+  void durationMs;
+}
+
+export function shouldSkipInboundSheetSync(_companyId: number): boolean {
+  return false;
 }
 
 const ARCHIVE_TASK_STATUSES = new Set([
@@ -226,6 +243,115 @@ function formatAssigneeEmailsForSheet(task: {
   add(task.assignedUser?.email);
   for (const a of task.taskAssignments || []) add(a.user.email);
   return ordered.join(', ');
+}
+
+export interface TaskSyncChangeDetail {
+  taskId: number;
+  changed: Record<string, unknown>;
+}
+
+function collectTaskFieldChanges(
+  existing: {
+    title: string;
+    status: string;
+    description: string | null;
+    scheduledDate: Date | null;
+    moveInDate: Date | null;
+    budget: unknown;
+    assignedUserId: number | null;
+  },
+  next: {
+    title: string;
+    status: string;
+    description: string | null;
+    scheduledDate: Date | null;
+    moveInDate: Date | null;
+    budget: unknown;
+    assignedUserId?: number;
+  }
+): Record<string, unknown> {
+  const changed: Record<string, unknown> = {};
+  if (existing.title !== next.title) changed.title = next.title;
+  if (existing.status !== next.status) changed.status = next.status;
+  if ((existing.description || '') !== (next.description || '')) changed.description = next.description;
+  if (existing.scheduledDate?.getTime() !== next.scheduledDate?.getTime()) {
+    changed.scheduledDate = next.scheduledDate?.toISOString() ?? null;
+  }
+  if (existing.moveInDate?.getTime() !== next.moveInDate?.getTime()) {
+    changed.moveInDate = next.moveInDate?.toISOString() ?? null;
+  }
+  const existingBudget = existing.budget != null ? Number(existing.budget) : null;
+  const nextBudget = next.budget != null ? Number(next.budget) : null;
+  if (existingBudget !== nextBudget) changed.budget = nextBudget;
+  const nextAssigned = next.assignedUserId ?? existing.assignedUserId;
+  if (existing.assignedUserId !== nextAssigned) changed.assignedUserId = nextAssigned;
+  return changed;
+}
+
+/** Exported for API routes to pass fresh assignee data into sheet push (avoids re-fetch race). */
+export function buildAssigneeEmailsForSheet(task: {
+  assignedUser?: { email: string } | null;
+  taskAssignments?: Array<{ user: { email: string } }>;
+}): string {
+  return formatAssigneeEmailsForSheet(task);
+}
+
+function findAssigneeEmailColumnIndex(headers: string[]): number {
+  const exact = findHeaderIndex(
+    headers,
+    'Assigned User Email',
+    'assigned_user_email',
+    'Assigned Cleaner Email',
+    'Assign Cleaner Email',
+    'Assign Cleaners Email',
+    'Cleaner Email',
+    'Cleaner Emails',
+    'Assignee Email',
+    'Assigned Email'
+  );
+  if (exact >= 0) return exact;
+
+  for (let i = 0; i < headers.length; i++) {
+    const h = normalizeHeaderKey(headers[i]);
+    if (!h) continue;
+    if (
+      (h.includes('assign') && h.includes('email')) ||
+      (h.includes('cleaner') && h.includes('email')) ||
+      h === 'assignee' ||
+      h === 'assignee email'
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function pickAssigneeEmailFromRow(data: Record<string, string>): string {
+  const direct = pickField(
+    data,
+    'Assigned User Email',
+    'assigned_user_email',
+    'Assigned Cleaner Email',
+    'Assign Cleaner Email',
+    'Assign Cleaners Email',
+    'Cleaner Email',
+    'Cleaner Emails',
+    'Assignee Email',
+    'Assigned Email'
+  );
+  if (direct) return direct;
+
+  for (const [key, value] of Object.entries(data)) {
+    if (!value?.trim()) continue;
+    const k = normalizeHeaderKey(key);
+    if (
+      (k.includes('assign') && k.includes('email')) ||
+      (k.includes('cleaner') && k.includes('email'))
+    ) {
+      return value.trim();
+    }
+  }
+  return '';
 }
 
 export function detectMasterSheetTabs(tabNames: string[]) {
@@ -722,6 +848,7 @@ export async function syncCompanySheet(companyId: number) {
   let rowErrors = 0;
   const tasksCreated: number[] = [];
   const tasksUpdated: number[] = [];
+  const tasksUpdatedDetails: TaskSyncChangeDetail[] = [];
 
   for (const row of taskRows) {
     try {
@@ -740,8 +867,20 @@ export async function syncCompanySheet(companyId: number) {
         data['task_id'] ||
         `${propertyRef}-${title || 'task'}`;
 
+      if (shouldSkipInboundSheetRow(companyId, uniqueId)) continue;
+
       const existingTask = await prisma.task.findFirst({
         where: { companyId, uniqueIdentifier: uniqueId },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          description: true,
+          scheduledDate: true,
+          moveInDate: true,
+          budget: true,
+          assignedUserId: true,
+        },
       });
 
       const statusRaw = normalizeSheetStatus(data['Status'] || data['status'] || 'PLANNED');
@@ -770,7 +909,7 @@ export async function syncCompanySheet(companyId: number) {
       const scheduledDate = parseSheetDate(data['Scheduled Date'] || data['scheduled_date']);
       const moveInDate = parseSheetDate(data['Move In Date'] || data['move_in_date']);
 
-      const assigneeRaw = data['Assigned User Email'] || data['assigned_user_email'];
+      const assigneeRaw = pickAssigneeEmailFromRow(data);
       const cleanerIds = await resolveCleanerIdsFromEmails(companyId, assigneeRaw);
       const assignedUserId = cleanerIds[0];
 
@@ -832,9 +971,19 @@ export async function syncCompanySheet(companyId: number) {
 
       let syncedTaskId: number;
       if (existingTask) {
+        const fieldChanges = collectTaskFieldChanges(existingTask, {
+          ...taskPayload,
+          assignedUserId: assignedUserId ?? existingTask.assignedUserId ?? undefined,
+        });
         const updated = await prisma.task.update({ where: { id: existingTask.id }, data: taskPayload });
         syncedTaskId = updated.id;
-        tasksUpdated.push(existingTask.id);
+        if (Object.keys(fieldChanges).length > 0) {
+          tasksUpdated.push(existingTask.id);
+          tasksUpdatedDetails.push({
+            taskId: existingTask.id,
+            changed: { ...fieldChanges, propertyId: property.id },
+          });
+        }
       } else {
         const created = await prisma.task.create({ data: { companyId, ...taskPayload } });
         syncedTaskId = created.id;
@@ -865,6 +1014,7 @@ export async function syncCompanySheet(companyId: number) {
     companyId,
     tasksCreated,
     tasksUpdated,
+    tasksUpdatedDetails,
     propertiesCreated,
     propertiesUpdated,
   };
@@ -1200,6 +1350,7 @@ export async function syncCompanyGoogleSheet(companyId: number) {
     companyId,
     tasksCreated: (result.tasksCreated as number[]) || [],
     tasksUpdated: (result.tasksUpdated as number[]) || [],
+    tasksUpdatedDetails: (result.tasksUpdatedDetails as TaskSyncChangeDetail[]) || [],
     propertiesCreated: (result.propertiesCreated as number[]) || [],
     propertiesUpdated: (result.propertiesUpdated as number[]) || [],
     stats: {
@@ -1214,49 +1365,73 @@ export async function syncCompanyGoogleSheet(companyId: number) {
   return result;
 }
 
-const SHEET_SYNC_DEBOUNCE_MS = 2500;
+const SHEET_SYNC_DEBOUNCE_MS = 600;
 const pendingSheetSyncs = new Map<number, NodeJS.Timeout>();
 const pendingSheetSyncResolvers = new Map<
   number,
   { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }[]
 >();
+const sheetSyncInFlight = new Set<number>();
 
-/**
- * Debounced sheet sync for webhooks — Google fires many notifications per edit.
- * Coalesces bursts into one sync and emits socket events once.
- */
-export function scheduleCompanySheetSync(companyId: number): Promise<Record<string, unknown>> {
-  if (shouldSkipInboundSheetSync(companyId)) {
-    return Promise.resolve({ skipped: true, reason: 'outbound_write_guard' });
+async function executeCompanySheetSync(companyId: number): Promise<Record<string, unknown>> {
+  sheetSyncInFlight.add(companyId);
+  try {
+    return await syncCompanyGoogleSheet(companyId);
+  } finally {
+    sheetSyncInFlight.delete(companyId);
+  }
+}
+
+function flushSheetSyncWaiters(companyId: number, result: Record<string, unknown>) {
+  const batch = pendingSheetSyncResolvers.get(companyId) || [];
+  pendingSheetSyncResolvers.delete(companyId);
+  batch.forEach((w) => w.resolve(result));
+}
+
+function rejectSheetSyncWaiters(companyId: number, error: Error) {
+  const batch = pendingSheetSyncResolvers.get(companyId) || [];
+  pendingSheetSyncResolvers.delete(companyId);
+  batch.forEach((w) => w.reject(error));
+}
+
+async function runSheetSyncBatch(companyId: number) {
+  pendingSheetSyncs.delete(companyId);
+  try {
+    const result = await executeCompanySheetSync(companyId);
+    flushSheetSyncWaiters(companyId, result);
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    rejectSheetSyncWaiters(companyId, error);
   }
 
+  if (pendingSheetSyncResolvers.has(companyId)) {
+    scheduleTrailingSheetSync(companyId);
+  }
+}
+
+function scheduleTrailingSheetSync(companyId: number) {
+  if (pendingSheetSyncs.has(companyId)) return;
+  const timer = setTimeout(() => {
+    void runSheetSyncBatch(companyId);
+  }, SHEET_SYNC_DEBOUNCE_MS);
+  pendingSheetSyncs.set(companyId, timer);
+}
+
+/**
+ * Google Sheet webhook sync — leading edge (immediate first run) + trailing debounce for bursts.
+ */
+export function scheduleCompanySheetSync(companyId: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const waiters = pendingSheetSyncResolvers.get(companyId) || [];
     waiters.push({ resolve, reject });
     pendingSheetSyncResolvers.set(companyId, waiters);
 
-    const existing = pendingSheetSyncs.get(companyId);
-    if (existing) clearTimeout(existing);
+    if (!sheetSyncInFlight.has(companyId) && !pendingSheetSyncs.has(companyId)) {
+      void runSheetSyncBatch(companyId);
+      return;
+    }
 
-    const timer = setTimeout(async () => {
-      pendingSheetSyncs.delete(companyId);
-      const batch = pendingSheetSyncResolvers.get(companyId) || [];
-      pendingSheetSyncResolvers.delete(companyId);
-      if (shouldSkipInboundSheetSync(companyId)) {
-        const skipped = { skipped: true, reason: 'outbound_write_guard' };
-        batch.forEach((w) => w.resolve(skipped));
-        return;
-      }
-      try {
-        const result = await syncCompanyGoogleSheet(companyId);
-        batch.forEach((w) => w.resolve(result));
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        batch.forEach((w) => w.reject(error));
-      }
-    }, SHEET_SYNC_DEBOUNCE_MS);
-
-    pendingSheetSyncs.set(companyId, timer);
+    scheduleTrailingSheetSync(companyId);
   });
 }
 
@@ -1264,7 +1439,11 @@ export function scheduleCompanySheetSync(companyId: number): Promise<Record<stri
  * Push task changes from the app back to the connected master Google Sheet.
  * Matches rows by Unique ID (or Task ID). Non-blocking — callers should .catch().
  */
-export async function pushTaskToCompanySheet(companyId: number, taskId: number): Promise<boolean> {
+export async function pushTaskToCompanySheet(
+  companyId: number,
+  taskId: number,
+  hints?: { assigneeEmails?: string }
+): Promise<boolean> {
   const conn = await getCompanySheetConnection(companyId);
   if (!conn?.syncEnabled || !conn.tasksTab || !isMasterSheetMode(conn)) return false;
   if (!isGoogleSheetsConfigured()) return false;
@@ -1324,7 +1503,18 @@ export async function pushTaskToCompanySheet(companyId: number, taskId: number):
   setCell(['Title', 'title'], task.title);
   setCell(['Description', 'description'], task.description || '');
   setCell(['Status', 'status'], task.status);
-  setCell(['Assigned User Email', 'assigned_user_email'], formatAssigneeEmailsForSheet(task));
+
+  const assigneeEmails =
+    hints?.assigneeEmails ?? formatAssigneeEmailsForSheet(task);
+  const assigneeCol = findAssigneeEmailColumnIndex(headers);
+  if (assigneeCol >= 0) {
+    updates.push({ col: assigneeCol, value: assigneeEmails });
+  } else if (assigneeEmails) {
+    console.warn(
+      `[sheet-push] Task ${taskId}: assignee emails resolved but no matching column in sheet headers:`,
+      headers.filter(Boolean).slice(0, 20)
+    );
+  }
   if (task.scheduledDate) {
     setCell(['Scheduled Date', 'scheduled_date'], dateToSheetSerial(new Date(task.scheduledDate)));
   }
@@ -1338,7 +1528,7 @@ export async function pushTaskToCompanySheet(companyId: number, taskId: number):
 
   if (!updates.length) return false;
 
-  markOutboundSheetWrite(companyId);
+  markOutboundSheetRow(companyId, matchKey);
 
   const data: sheets_v4.Schema$ValueRange[] = updates.map(({ col, value }) => ({
     range: `'${conn.tasksTab}'!${columnLetter(col)}${sheetRowNumber}`,
@@ -1353,8 +1543,12 @@ export async function pushTaskToCompanySheet(companyId: number, taskId: number):
   return true;
 }
 
-export function schedulePushTaskToCompanySheet(companyId: number, taskId: number) {
-  pushTaskToCompanySheet(companyId, taskId).catch((err) =>
+export function schedulePushTaskToCompanySheet(
+  companyId: number,
+  taskId: number,
+  hints?: { assigneeEmails?: string }
+) {
+  pushTaskToCompanySheet(companyId, taskId, hints).catch((err) =>
     console.warn(`[sheet-push] task ${taskId} for company ${companyId}:`, err?.message || err)
   );
 }

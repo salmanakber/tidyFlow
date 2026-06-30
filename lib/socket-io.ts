@@ -125,7 +125,11 @@ function deliverToSockets(
 }
 
 function runBroadcast(ioInstance: SocketIOServer, event: RealtimeEvent): void {
-  const data = { ...event, at: new Date().toISOString() };
+  const data = {
+    ...event,
+    ...(event.payload || {}),
+    at: new Date().toISOString(),
+  };
 
   if (event.userId) {
     const sockets = userSockets().get(event.userId);

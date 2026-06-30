@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: 'Sync notification received' });
     }
     
-    if (resourceState === 'update') {
+    if (resourceState === 'update' || resourceState === 'change') {
       console.log('[Webhook] ✅ Received CHANGE notification from Google Drive');
       console.log('[Webhook] Channel ID:', channelId);
       console.log('[Webhook] Resource ID:', resourceId);
