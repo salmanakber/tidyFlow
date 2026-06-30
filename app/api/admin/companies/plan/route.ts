@@ -3,8 +3,12 @@ import prisma from '@/lib/prisma';
 import { requireAuth } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 
-function isPlatformAdmin(role: string) {
-  return [UserRole.SUPER_ADMIN, UserRole.DEVELOPER, UserRole.ADMIN_UNIQUE].includes(role as UserRole);
+function isPlatformAdmin(role: any) {
+  return (
+    role === UserRole.SUPER_ADMIN ||
+    role === UserRole.DEVELOPER ||
+    role === UserRole.ADMIN_UNIQUE
+  );
 }
 
 export async function PATCH(request: NextRequest) {
