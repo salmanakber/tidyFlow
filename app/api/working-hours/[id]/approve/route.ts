@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
-import { requireAuth } from '@/lib/rbac';
+import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
+import { approveWorkingHoursSubmission } from '@/lib/task-time-log';
+import { createNotification } from '@/lib/notifications';
 
-/**
- * POST /api/working-hours/[id]/approve
- * Approve or reject working hours submission (for managers/owners)
- */
+// POST /api/working-hours/[id]/approve
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
@@ -17,83 +15,65 @@ export async function POST(
   const { tokenUser } = auth;
   const role = tokenUser.role as UserRole;
 
-  // Only owners, managers, and company admins can approve
-  if (role !== UserRole.OWNER && role !== UserRole.COMPANY_ADMIN && role !== UserRole.MANAGER && role !== UserRole.DEVELOPER) {
-    return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
+  if (
+    role !== UserRole.OWNER &&
+    role !== UserRole.DEVELOPER &&
+    role !== UserRole.COMPANY_ADMIN &&
+    role !== UserRole.MANAGER
+  ) {
+    return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
+  }
+
+  const submissionId = Number(params.id);
+  if (Number.isNaN(submissionId)) {
+    return NextResponse.json({ success: false, message: 'Invalid id' }, { status: 400 });
   }
 
   try {
-    const { id } = await params;
+    const companyId = requireCompanyScope(tokenUser);
+    if (!companyId) {
+      return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+    }
+
     const body = await request.json();
-    const { status } = body; // 'approved' or 'rejected'
+    const action = (body.action as 'approve' | 'reject') || 'approve';
 
-    if (!status || !['approved', 'rejected'].includes(status)) {
-      return NextResponse.json({ success: false, message: 'status must be "approved" or "rejected"' }, { status: 400 });
+    if (action !== 'approve' && action !== 'reject') {
+      return NextResponse.json({ success: false, message: 'Invalid action' }, { status: 400 });
     }
 
-    const submission = await prisma.workingHoursSubmission.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
+    const updated = await approveWorkingHoursSubmission({
+      submissionId,
+      companyId,
+      approvedBy: tokenUser.userId,
+      action,
     });
 
-    if (!submission) {
-      return NextResponse.json({ success: false, message: 'Working hours submission not found' }, { status: 404 });
+    if (action === 'approve') {
+      await createNotification({
+        userId: updated.userId,
+        title: 'Hours Approved',
+        message: `Your logged hours (${Number(updated.hours).toFixed(2)}h) have been approved and are ready for payroll.`,
+        type: 'task_update',
+        metadata: { submissionId: updated.id },
+      }).catch(() => {});
     }
-
-    const updated = await prisma.workingHoursSubmission.update({
-      where: { id: parseInt(id) },
-      data: {
-        status,
-        approvedBy: tokenUser.userId,
-        approvedAt: new Date(),
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        approver: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-    });
 
     return NextResponse.json({
       success: true,
-      message: `Working hours ${status} successfully`,
+      message: action === 'approve' ? 'Hours approved' : 'Hours rejected',
       data: {
         id: updated.id,
-        userId: updated.userId,
-        user: updated.user,
-        date: updated.date.toISOString(),
-        hours: Number(updated.hours),
-        description: updated.description,
         status: updated.status,
-        approvedBy: updated.approvedBy,
-        approver: updated.approver,
-        approvedAt: updated.approvedAt?.toISOString(),
+        hours: Number(updated.hours),
+        approvedAt: updated.approvedAt?.toISOString() ?? null,
       },
     });
   } catch (error: any) {
-    console.error('Error approving working hours:', error);
-    return NextResponse.json({ success: false, message: error.message || 'Internal server error' }, { status: 500 });
+    console.error('[working-hours/approve]', error);
+    return NextResponse.json(
+      { success: false, message: error.message || 'Internal server error' },
+      { status: 400 }
+    );
   }
 }
-
-
-

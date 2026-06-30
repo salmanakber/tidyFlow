@@ -82,7 +82,18 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       newValues: { checklistAcknowledgedAt: updatedTask.checklistAcknowledgedAt },
     })
 
-    return NextResponse.json({ 
+    const { emitTaskEvent } = await import("@/lib/realtime")
+    await emitTaskEvent("task:checklist", task.companyId, taskId, {
+      acknowledged: true,
+      checklistAcknowledgedAt: updatedTask.checklistAcknowledgedAt,
+    })
+    if (updatedTask.status !== task.status) {
+      await emitTaskEvent("task:status", task.companyId, taskId, {
+        status: updatedTask.status,
+      })
+    }
+
+    return NextResponse.json({
       success: true, 
       data: { 
         task: updatedTask,

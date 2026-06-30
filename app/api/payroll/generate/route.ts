@@ -3,6 +3,20 @@ import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { createNotification } from '@/lib/notifications';
+import { getCompanyInvoiceSettings } from '@/lib/invoice-settings';
+import {
+  calcProRataSalary,
+  countUnpaidLeaveDays,
+} from '@/lib/payroll-calculations';
+import {
+  findActiveRulesForPeriod,
+  rulesToSnapshots,
+  createLineItemsForPayroll,
+  recalcPayrollTotals,
+  legacySummaryFromRecalc,
+  type OneTimeLineItemInput,
+  type PayrollLineItemSnapshot,
+} from '@/lib/payroll-rules';
 
 /**
  * POST /api/payroll/generate
@@ -28,19 +42,11 @@ export async function POST(request: NextRequest) {
       fixedSalary, // Fixed salary amount (used when multiple users selected or single user with fixed salary)
       payrollType, // 'hourly' or 'fixed' - explicitly set by user
       hourlyRate, // Hourly rate for hourly employees
-      // HR Fields
-      hraAllowance,
-      transportAllowance,
-      bonus,
-      otherAllowances,
       overtimeHours,
       overtimeRate,
-      incomeTax,
-      socialSecurity,
-      insurance,
-      loanRepayment,
-      unpaidLeaveDeduction,
-      otherDeductions,
+      useAutoTax = true,
+      autoApproveHours = false,
+      employeeAdjustments = {}, // { [userId]: OneTimeLineItemInput[] }
     } = body;
 
     if (!startDate || !endDate) {
@@ -49,6 +55,8 @@ export async function POST(request: NextRequest) {
 
     const companyId = requireCompanyScope(tokenUser);
     if (!companyId) return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+
+    const invoiceSettings = await getCompanyInvoiceSettings(companyId);
 
     const periodStart = new Date(startDate);
     const periodEnd = new Date(endDate);
@@ -69,6 +77,10 @@ export async function POST(request: NextRequest) {
           lastName: true,
           email: true,
           role: true,
+          defaultHourlyRate: true,
+          basicSalary: true,
+          payrollWorkerType: true,
+          hireDate: true,
         },
       });
     } else {
@@ -85,6 +97,10 @@ export async function POST(request: NextRequest) {
           lastName: true,
           email: true,
           role: true,
+          defaultHourlyRate: true,
+          basicSalary: true,
+          payrollWorkerType: true,
+          hireDate: true,
         },
       });
     }
@@ -95,9 +111,26 @@ export async function POST(request: NextRequest) {
 
     const payrollRecordsToCreate = [];
     const errors = [];
+    const createdPayrollRecords: any[] = [];
 
     for (const employee of employees) {
       try {
+        if (autoApproveHours) {
+          await prisma.workingHoursSubmission.updateMany({
+            where: {
+              userId: employee.id,
+              companyId,
+              date: { gte: periodStart, lte: periodEnd },
+              status: 'pending',
+            },
+            data: {
+              status: 'approved',
+              approvedBy: tokenUser.userId,
+              approvedAt: new Date(),
+            },
+          });
+        }
+
         // Check if payroll record already exists for this period
         const existing = await prisma.payrollRecord.findFirst({
           where: {
@@ -122,17 +155,30 @@ export async function POST(request: NextRequest) {
         // If payrollType is explicitly provided, use it
         if (payrollType === 'fixed') {
           finalPayrollType = 'fixed';
-          if (!fixedSalary || fixedSalary <= 0) {
+          const salary = fixedSalary && fixedSalary > 0
+            ? Number(fixedSalary)
+            : employee.basicSalary
+              ? Number(employee.basicSalary)
+              : null;
+          if (!salary || salary <= 0) {
             errors.push(`Fixed salary required for ${employee.firstName} ${employee.lastName}`);
             continue;
           }
-          finalFixedSalary = Number(fixedSalary);
+          const unpaidLeaveDays = await countUnpaidLeaveDays(employee.id, periodStart, periodEnd);
+          const proRata = calcProRataSalary(
+            salary,
+            periodStart,
+            periodEnd,
+            employee.hireDate,
+            unpaidLeaveDays,
+          );
+          finalFixedSalary = proRata.proRataSalary;
           totalAmount = finalFixedSalary;
         } else {
           // Hourly payroll - use submitted working hours
           finalPayrollType = 'hourly';
 
-          // Get working hours submissions for the period (approved and pending, exclude paid)
+          // Get approved working hours only (auto-logged hours require manager approval)
           const workingHours = await prisma.workingHoursSubmission.findMany({
             where: {
               userId: employee.id,
@@ -140,7 +186,7 @@ export async function POST(request: NextRequest) {
                 gte: periodStart,
                 lte: periodEnd,
               },
-              status: { in: ['approved', 'pending'] }, // Count both approved and pending hours (exclude paid)
+              status: 'approved',
             },
             select: {
               hours: true,
@@ -148,24 +194,39 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          // Calculate total hours from submissions
+          const pendingInPeriod = await prisma.workingHoursSubmission.count({
+            where: {
+              userId: employee.id,
+              date: { gte: periodStart, lte: periodEnd },
+              status: 'pending',
+            },
+          });
+
+          // Calculate total hours from approved submissions
           totalHours = workingHours.reduce((sum, wh) => sum + Number(wh.hours), 0);
 
-          // If no submitted hours, skip (or use 0)
-          if (totalHours === 0) {
-            errors.push(`No working hours submitted for ${employee.firstName} ${employee.lastName} in this period`);
-            continue;
+          // Fallback: sum GPS-tracked task assignment durations (approved submissions only path preferred)
+          if (totalHours === 0 && pendingInPeriod === 0) {
+            const { sumTaskHoursForPeriod } = await import('@/lib/task-time-log');
+            totalHours = await sumTaskHoursForPeriod(employee.id, periodStart, periodEnd);
           }
 
-          // Warn if there are pending hours
-          const pendingHoursCount = workingHours.filter(wh => wh.status === 'pending').length;
-          if (pendingHoursCount > 0) {
-            console.log(`⚠️ Warning: ${pendingHoursCount} pending working hours submissions for ${employee.firstName} ${employee.lastName} - including in payroll calculation`);
+          if (totalHours === 0) {
+            if (pendingInPeriod > 0) {
+              errors.push(
+                `${employee.firstName} ${employee.lastName} has ${pendingInPeriod} day(s) of hours awaiting approval — approve before generating payroll`
+              );
+            } else {
+              errors.push(`No approved working hours for ${employee.firstName} ${employee.lastName} in this period`);
+            }
+            continue;
           }
 
           // Get hourly rate
           if (hourlyRate && hourlyRate > 0) {
             finalHourlyRate = Number(hourlyRate);
+          } else if (employee.defaultHourlyRate) {
+            finalHourlyRate = Number(employee.defaultHourlyRate);
           } else {
             // Try to get from most recent payroll record
             const recentPayroll = await prisma.payrollRecord.findFirst({
@@ -195,42 +256,59 @@ export async function POST(request: NextRequest) {
           totalAmount = regularPay + otPayFromCalc;
         }
 
-        // Calculate allowances
-        const hra = Number(hraAllowance) || 0;
-        const transport = Number(transportAllowance) || 0;
-        const bonusAmount = Number(bonus) || 0;
-        const otherAllow = Number(otherAllowances) || 0;
-        const totalAllowances = hra + transport + bonusAmount + otherAllow;
-
-        // Calculate overtime (additional overtime beyond auto-calculated)
-        let otHours = 0;
+        // Overtime (additional beyond auto-calculated hourly OT)
+        let otHours = Number(overtimeHours) || 0;
         let otRate = 0;
         let otAmount = 0;
         if (finalPayrollType === 'fixed') {
-          otHours = Number(overtimeHours) || 0;
           otRate = Number(overtimeRate) || 0;
-          otAmount = otHours * otRate;
         } else {
-          // For hourly, use provided overtime (if any) in addition to auto-calculated
-          otHours = Number(overtimeHours) || 0;
           otRate = Number(overtimeRate) || (finalHourlyRate ? finalHourlyRate * 1.5 : 0);
-          otAmount = otHours * otRate;
         }
+        otAmount = otHours * otRate;
 
-        // Calculate gross salary
-        const grossSalary = totalAmount + totalAllowances + otAmount;
+        // Active recurring rules for this employee + period
+        const activeRules = await findActiveRulesForPeriod(
+          employee.id,
+          companyId,
+          periodStart,
+          periodEnd,
+        );
+        const ruleSnapshots = rulesToSnapshots(activeRules);
 
-        // Calculate deductions
-        const tax = Number(incomeTax) || 0;
-        const socialSec = Number(socialSecurity) || 0;
-        const ins = Number(insurance) || 0;
-        const loan = Number(loanRepayment) || 0;
-        const unpaidLeave = Number(unpaidLeaveDeduction) || 0;
-        const otherDed = Number(otherDeductions) || 0;
-        const totalDeductions = tax + socialSec + ins + loan + unpaidLeave + otherDed;
+        // One-time adjustments from request (per employee)
+        const adjustmentsRaw = (employeeAdjustments as Record<string, OneTimeLineItemInput[]>)?.[String(employee.id)]
+          || (employeeAdjustments as Record<string, OneTimeLineItemInput[]>)?.[employee.id as unknown as string]
+          || [];
+        const oneTimeSnapshots: PayrollLineItemSnapshot[] = (Array.isArray(adjustmentsRaw) ? adjustmentsRaw : []).map((a) => ({
+          sourceRuleId: null,
+          name: String(a.name).trim(),
+          type: a.type,
+          amount: Number(a.amount),
+          isRecurring: false,
+          description: a.description ?? null,
+        }));
 
-        // Calculate net salary
-        const netSalary = Math.max(0, grossSalary - totalDeductions);
+        const allSnapshots = [...ruleSnapshots, ...oneTimeSnapshots];
+
+        const totals = recalcPayrollTotals(
+          allSnapshots,
+          {
+            payrollType: finalPayrollType,
+            hoursWorked: finalPayrollType === 'hourly' ? parseFloat(totalHours.toFixed(2)) : null,
+            hourlyRate: finalPayrollType === 'hourly' ? finalHourlyRate : null,
+            fixedSalary: finalPayrollType === 'fixed' ? finalFixedSalary : null,
+            overtimeAmount: otAmount,
+            payrollWorkerType: employee.payrollWorkerType,
+            companyId,
+            useAutoTax,
+          },
+          invoiceSettings.payrollTaxRules,
+          invoiceSettings.payrollDefaultTaxRuleId,
+          invoiceSettings.payrollTaxEnabled,
+        );
+
+        const legacy = legacySummaryFromRecalc(totals, allSnapshots);
 
         payrollRecordsToCreate.push({
           userId: employee.id,
@@ -241,26 +319,12 @@ export async function POST(request: NextRequest) {
           hoursWorked: finalPayrollType === 'hourly' ? parseFloat(totalHours.toFixed(2)) : null,
           hourlyRate: finalPayrollType === 'hourly' ? finalHourlyRate : null,
           fixedSalary: finalPayrollType === 'fixed' ? finalFixedSalary : null,
-          totalAmount: parseFloat(netSalary.toFixed(2)), // Store net salary as totalAmount for backward compatibility
           status: 'pending',
-          // HR Fields - using spread operator for optional fields
-          ...(hra ? { hraAllowance: hra } : {}),
-          ...(transport ? { transportAllowance: transport } : {}),
-          ...(bonusAmount ? { bonus: bonusAmount } : {}),
-          ...(otherAllow ? { otherAllowances: otherAllow } : {}),
           ...(otHours ? { overtimeHours: otHours } : {}),
           ...(otRate ? { overtimeRate: otRate } : {}),
           ...(otAmount ? { overtimeAmount: otAmount } : {}),
-          ...(grossSalary ? { grossSalary } : {}),
-          ...(tax ? { incomeTax: tax } : {}),
-          ...(socialSec ? { socialSecurity: socialSec } : {}),
-          ...(ins ? { insurance: ins } : {}),
-          ...(loan ? { loanRepayment: loan } : {}),
-          ...(unpaidLeave ? { unpaidLeaveDeduction: unpaidLeave } : {}),
-          ...(otherDed ? { otherDeductions: otherDed } : {}),
-          ...(totalDeductions ? { totalDeductions } : {}),
-          ...(netSalary ? { netSalary } : {}),
-          // Store employee info for expense creation
+          ...legacy,
+          lineItemSnapshots: allSnapshots,
           employeeFirstName: employee.firstName,
           employeeLastName: employee.lastName,
         } as any);
@@ -271,17 +335,35 @@ export async function POST(request: NextRequest) {
 
     if (payrollRecordsToCreate.length > 0) {
       // Create payroll records and corresponding expense entries
-      const createdPayrollRecords = [];
-      
       for (const payrollDataWithEmployee of payrollRecordsToCreate) {
-        const { employeeFirstName, employeeLastName, ...payrollData } = payrollDataWithEmployee as any;
+        const {
+          employeeFirstName,
+          employeeLastName,
+          lineItemSnapshots,
+          ...payrollDataToCreate
+        } = payrollDataWithEmployee as any;
 
         try {
-          // Create payroll record
-          const { employeeFirstName, employeeLastName, ...payrollDataToCreate } = payrollData as any;
           const payrollRecord = await prisma.payrollRecord.create({
             data: payrollDataToCreate as any,
           });
+
+          if (lineItemSnapshots?.length) {
+            await createLineItemsForPayroll(payrollRecord.id, lineItemSnapshots);
+          }
+
+          if (payrollDataToCreate.payrollType === 'hourly') {
+            await prisma.workingHoursSubmission.updateMany({
+              where: {
+                userId: payrollDataToCreate.userId,
+                companyId: payrollDataToCreate.companyId,
+                date: { gte: periodStart, lte: periodEnd },
+                status: 'approved',
+                payrollRecordId: null,
+              },
+              data: { payrollRecordId: payrollRecord.id },
+            });
+          }
 
           // Create corresponding expense entry for each payroll record
           try {
@@ -289,11 +371,11 @@ export async function POST(request: NextRequest) {
             
             const expense = await prisma.expense.create({
               data: {
-                userId: payrollData.userId,
-                companyId: payrollData.companyId,
+                userId: payrollDataToCreate.userId,
+                companyId: payrollDataToCreate.companyId,
                 taskId: null, // Payroll is not tied to a specific task
                 category: 'Payroll',
-                amount: payrollData.totalAmount,
+                amount: payrollDataToCreate.totalAmount,
                 description: periodDescription,
                 receiptUrl: null,
                 status: 'pending', // Match payroll status
@@ -313,22 +395,22 @@ export async function POST(request: NextRequest) {
             const endDateStr = new Date(periodEnd).toLocaleDateString('en-GB');
             
             await createNotification({
-              userId: payrollData.userId,
+              userId: payrollDataToCreate.userId,
               title: 'New Payroll Generated',
-              message: `A payroll record has been generated for you for the period ${startDateStr} to ${endDateStr}. Amount: £${Number(payrollData.totalAmount).toFixed(2)}`,
+              message: `A payroll record has been generated for you for the period ${startDateStr} to ${endDateStr}. Amount: £${Number(payrollDataToCreate.totalAmount).toFixed(2)}`,
               type: 'payment_alert',
               metadata: {
                 payrollRecordId: payrollRecord.id,
                 status: 'pending',
-                amount: Number(payrollData.totalAmount),
+                amount: Number(payrollDataToCreate.totalAmount),
               },
               screenRoute: 'Payroll',
               screenParams: { payrollRecordId: payrollRecord.id },
             });
 
-            console.log(`✅ Sent payroll generation notification to user ${payrollData.userId}`);
+            console.log(`✅ Sent payroll generation notification to user ${payrollDataToCreate.userId}`);
           } catch (notifError) {
-            console.error(`Error sending payroll generation notification to user ${payrollData.userId}:`, notifError);
+            console.error(`Error sending payroll generation notification to user ${payrollDataToCreate.userId}:`, notifError);
             // Don't fail payroll creation if notification fails
           }
 
@@ -345,9 +427,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
-        generated: payrollRecordsToCreate.length,
-        records: payrollRecordsToCreate.length,
+        generated: createdPayrollRecords.length,
+        records: createdPayrollRecords,
         errors: errors.length > 0 ? errors : undefined,
+        message:
+          createdPayrollRecords.length > 0
+            ? `Generated ${createdPayrollRecords.length} payroll record(s)`
+            : errors[0] || 'No payroll records generated',
       },
     }, { status: 200 });
   } catch (error) {

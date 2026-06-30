@@ -4,6 +4,7 @@
  */
 import { initializeRecurringJobsWorker } from './recurring-jobs-worker';
 import { recoverRecurringJobs } from './recurring-jobs-recovery';
+import { initializeAutomationWorker } from './automation-worker';
 
 let initialized = false;
 
@@ -19,6 +20,9 @@ export async function initializeRecurringJobsSystem() {
     // Initialize the worker
     initializeRecurringJobsWorker();
     console.log('[Recurring Jobs Init] ✓ Worker initialized');
+
+    initializeAutomationWorker();
+    console.log('[Recurring Jobs Init] ✓ Automation worker initialized');
 
     // Run recovery to ensure all active jobs have scheduled executions
     // This will gracefully handle Redis connection errors

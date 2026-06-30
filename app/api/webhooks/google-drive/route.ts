@@ -77,13 +77,41 @@ export async function POST(request: NextRequest) {
       console.log('[Webhook] Channel ID:', channelId);
       console.log('[Webhook] Resource ID:', resourceId);
       console.log('[Webhook] Resource URI:', resourceUri);
-      
+
       if (!resourceId) {
         console.log('[Webhook] ⚠️ Missing X-Goog-Resource-ID header');
         return NextResponse.json({ success: false, message: 'Missing resourceId' }, { status: 400 });
       }
 
-      // Find which company(s) have this resource ID
+      // Prefer unified companyGoogleSheet connection (emits realtime socket events)
+      const unifiedConnection = await prisma.companyGoogleSheet.findFirst({
+        where: {
+          OR: [
+            { watchResourceId: resourceId },
+            ...(channelId ? [{ watchChannelId: channelId }] : []),
+          ],
+        },
+      });
+
+      if (unifiedConnection) {
+        const { scheduleCompanySheetSync } = await import('@/lib/google-sheets');
+        scheduleCompanySheetSync(unifiedConnection.companyId).catch(async (error: Error) => {
+          console.error('[Webhook] unified sheet sync failed:', error.message);
+          await prisma.companyGoogleSheet.update({
+            where: { companyId: unifiedConnection.companyId },
+            data: { lastSyncError: error.message },
+          });
+        });
+        return NextResponse.json({
+          success: true,
+          resourceId,
+          resourceState,
+          route: 'unified',
+          companyId: unifiedConnection.companyId,
+        });
+      }
+
+      // Legacy systemSetting-based watches (older installs)
       const watchSettings = await prisma.systemSetting.findMany({
         where: { category: 'google_drive_watch' },
       });

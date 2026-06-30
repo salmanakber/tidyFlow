@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
   const { tokenUser } = auth;
   const role = tokenUser.role as UserRole;
+  
   if (!(role === UserRole.OWNER || role === UserRole.MANAGER || role === UserRole.SUPER_ADMIN || role === UserRole.CLEANER)) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
@@ -84,10 +85,17 @@ export async function GET(request: NextRequest) {
 
     
 
-    const tasks = await prisma.task.findMany({
-      where,
-      orderBy: [{ scheduledDate: 'asc' }, { id: 'asc' }],
-      include: {
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const [tasks, total] = await Promise.all([
+      prisma.task.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ scheduledDate: 'asc' }, { id: 'asc' }],
+        include: {
         property: {
           select: {
             id: true,
@@ -105,6 +113,7 @@ export async function GET(request: NextRequest) {
             firstName: true,
             lastName: true,
             email: true,
+            profileImage: true,
           },
         },
         // @ts-ignore - taskAssignments relation exists in schema but Prisma client may need regeneration
@@ -116,6 +125,7 @@ export async function GET(request: NextRequest) {
                 firstName: true,
                 lastName: true,
                 email: true,
+                profileImage: true,
               },
             },
           },
@@ -130,7 +140,9 @@ export async function GET(request: NextRequest) {
           orderBy: { order: 'asc' },
         },
       },
-    });
+    }),
+      prisma.task.count({ where }),
+    ]);
     console.log('[Tasks API] Found', tasks.length, 'tasks');
     if (tasks.length > 0) {
       console.log('[Tasks API] Sample task:', {
@@ -142,7 +154,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ success: true, data: { tasks }, downloadUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/pdf/download` });
+    return NextResponse.json({
+      success: true,
+      data: { tasks },
+      pagination: { page, limit, total, hasMore: skip + tasks.length < total },
+      downloadUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/pdf/download`,
+    });
   } catch (error) {
     console.error('Tasks GET error:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
@@ -272,6 +289,14 @@ export async function POST(request: NextRequest) {
       const { sendTaskAssignmentNotifications } = await import('@/lib/notifications');
       await sendTaskAssignmentNotifications(task.id, cleanerIds.map(id => Number(id)));
     }
+
+    const { emitTaskEvent } = await import('@/lib/realtime');
+    await emitTaskEvent('task:created', companyId!, task.id, {
+      title: task.title,
+      status: task.status,
+      propertyId: task.propertyId,
+      scheduledDate: task.scheduledDate,
+    });
 
     return NextResponse.json({ success: true, data: { task } }, { status: 201 });
   } catch (error) {

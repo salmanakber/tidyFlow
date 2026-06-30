@@ -54,8 +54,10 @@ export async function GET(
       return NextResponse.json({ success: false, message: 'Not authorized to access this invoice' }, { status: 403 });
     }
 
-    // If invoice already exists, return it
-    if (payroll.invoiceUrl) {
+    // If invoice already exists, return it (unless regenerate requested)
+    const forceRegenerate = request.nextUrl.searchParams.get('regenerate') === 'true';
+
+    if (payroll.invoiceUrl && !forceRegenerate) {
       return NextResponse.json({
         success: true,
         data: {
@@ -66,9 +68,18 @@ export async function GET(
       });
     }
 
+    if (forceRegenerate && payroll.invoiceUrl) {
+      await prisma.payrollRecord.update({
+        where: { id: payroll.id },
+        data: { invoiceUrl: null } as any,
+      });
+    }
+
     // Generate invoice PDF
     const result = await generatePayrollInvoicePDF({
       id: payroll.id,
+      userId: payroll.userId,
+      companyId: payroll.companyId,
       user: payroll.user,
       company: payroll.company,
       periodStart: payroll.periodStart,
@@ -77,9 +88,22 @@ export async function GET(
       hoursWorked: payroll.hoursWorked ? Number(payroll.hoursWorked) : null,
       hourlyRate: payroll.hourlyRate ? Number(payroll.hourlyRate) : null,
       fixedSalary: payroll.fixedSalary ? Number(payroll.fixedSalary) : null,
+      grossSalary: payroll.grossSalary ? Number(payroll.grossSalary) : null,
+      totalDeductions: payroll.totalDeductions ? Number(payroll.totalDeductions) : null,
       totalAmount: Number(payroll.totalAmount),
       status: payroll.status,
       paidAt: payroll.paidAt,
+      paymentMethod: (payroll as { paymentMethod?: string | null }).paymentMethod ?? null,
+      hraAllowance: payroll.hraAllowance ? Number(payroll.hraAllowance) : null,
+      transportAllowance: payroll.transportAllowance ? Number(payroll.transportAllowance) : null,
+      bonus: payroll.bonus ? Number(payroll.bonus) : null,
+      otherAllowances: payroll.otherAllowances ? Number(payroll.otherAllowances) : null,
+      overtimeAmount: payroll.overtimeAmount ? Number(payroll.overtimeAmount) : null,
+      incomeTax: payroll.incomeTax ? Number(payroll.incomeTax) : null,
+      socialSecurity: payroll.socialSecurity ? Number(payroll.socialSecurity) : null,
+      insurance: payroll.insurance ? Number(payroll.insurance) : null,
+      loanRepayment: payroll.loanRepayment ? Number(payroll.loanRepayment) : null,
+      otherDeductions: payroll.otherDeductions ? Number(payroll.otherDeductions) : null,
     });
 
     if (!result.success || !result.pdfUrl) {

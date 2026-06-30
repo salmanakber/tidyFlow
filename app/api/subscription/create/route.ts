@@ -2,29 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
-import { createCustomer, createSubscriptionWithTrial, createSubscriptionInstant, calculateBilling, createStripeInstance, decrypt } from '@/lib/stripe';
+import { createCustomer, createSubscriptionWithTrial, createSubscriptionInstant, createStripeInstance } from '@/lib/stripe';
 import Stripe from 'stripe';
-
-// Helper function to get Stripe secret key from SystemSetting with env fallback
-async function getStripeSecretKey(): Promise<string> {
-  try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: 'stripe_secret_key' },
-    });
-
-    if (setting) {
-      return setting.isEncrypted 
-        ? decrypt(setting.value) 
-        : setting.value;
-    }
-  } catch (error) {
-    console.warn('Failed to fetch Stripe secret key from settings:', error);
-  }
-
-  // Fallback to environment variable
-  return process.env.STRIPE_SECRET_KEY || '';
-}
-console.log('getStripeSecretKey', getStripeSecretKey());
+import { getStripeSecretKey, getStripePriceIdForTier } from '@/lib/stripe-settings';
 
 // Initialize Stripe instance (will be created in route handler with proper key)
 let stripeInstance: Stripe | null = null;
@@ -62,7 +42,8 @@ export async function POST(request: NextRequest) {
       companyName, 
       email, 
       paymentMethodId,
-      useTrial = true // Default to trial, but allow instant subscription
+      useTrial = true,
+      planTier: requestedTier,
     } = body;
 
     if (!companyId || !companyName || !email || !paymentMethodId) {
@@ -101,50 +82,34 @@ export async function POST(request: NextRequest) {
       return sum + (prop.unitCount || 1);
     }, 0);
 
-    // Get pricing from admin configuration
-    const adminConfig = await prisma.adminConfiguration.findUnique({
-      where: { companyId },
-    });
+    // Plan-based flat monthly pricing (property limits enforced separately)
+    const { getPlanLimits } = await import('@/lib/subscription');
+    const { getCompanyCurrency } = await import('@/lib/company-config');
+    const tier = (requestedTier || company.planTier || 'STANDARD').toUpperCase();
+    const limits = await getPlanLimits(tier);
+    const billingCurrency = await getCompanyCurrency(companyId);
 
-    // Get default pricing from SystemSetting if not in AdminConfiguration
-    let defaultBasePrice = 55.00;
-    let defaultPricePerUnit = 1.00;
-    
-    try {
-      const basePriceSetting = await prisma.systemSetting.findUnique({
-        where: { key: 'base_monthly_price' },
-      });
-      const pricePerPropertySetting = await prisma.systemSetting.findUnique({
-        where: { key: 'price_per_property' },
-      });
-    
-      if (basePriceSetting) {
-        defaultBasePrice = parseFloat(basePriceSetting.value) || 55.00;
-      } else {
-        // Fallback to env var
-        defaultBasePrice = parseFloat(process.env.BASE_MONTHLY_PRICE || '55');
-      }
-      
-      if (pricePerPropertySetting) {
-        defaultPricePerUnit = parseFloat(pricePerPropertySetting.value) || 1.00;
-      } else {
-        // Fallback to env var
-        defaultPricePerUnit = parseFloat(process.env.PRICE_PER_PROPERTY || '1');
-      }
-    } catch (error) {
-      console.warn('Failed to fetch default pricing from SystemSetting, using defaults:', error);
+    if (propertyCount > limits.maxProperties) {
+      return NextResponse.json({
+        success: false,
+        message: `You have ${propertyCount} properties but ${limits.label} allows ${limits.maxProperties}. Upgrade your plan or remove properties.`,
+      }, { status: 400 });
     }
 
-    // Calculate pricing - use AdminConfiguration first, then SystemSetting, then company default, then hardcoded
-    const basePrice = adminConfig && adminConfig.subscriptionBasePrice
-      ? Number(adminConfig.subscriptionBasePrice)
-      : Number(defaultBasePrice) || Number(company.basePrice) || 55.00;
-    
-    const pricePerUnit = adminConfig && adminConfig.propertyPricePerUnit
-      ? Number(adminConfig.propertyPricePerUnit)
-      : Number(defaultPricePerUnit) || 1.00;
+    const totalAmount = limits.monthlyPrice;
+    const billing = {
+      basePrice: totalAmount,
+      propertyCount,
+      propertyFee: 0,
+      totalAmount,
+      planTier: tier,
+      planLabel: limits.label,
+    };
 
-    // Check if already has active subscription
+    await prisma.company.update({
+      where: { id: companyId },
+      data: { planTier: tier, basePrice: totalAmount },
+    });
     const existingBilling = await prisma.billingRecord.findFirst({
       where: {
         companyId,
@@ -163,18 +128,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Calculate billing based on actual property count
-    const propertyFee = propertyCount * pricePerUnit;
-    const totalAmount = basePrice + propertyFee;
-    
-    const billing = {
-      basePrice,
-      propertyCount,
-      propertyFee,
-      totalAmount,
-    };
-
-    // Create or get Stripe customer
+    // Check if already has active subscription
     let customerId: string;
     const billingRecord = await prisma.billingRecord.findFirst({
       where: { companyId },
@@ -187,12 +141,19 @@ export async function POST(request: NextRequest) {
       await stripeInstance!.customers.update(customerId, {
         email,
         name: companyName,
-        metadata: { companyId: companyId.toString() },
+        metadata: { companyId: companyId.toString(), preferredCurrency: billingCurrency },
       });
     } else {
       const customer = await createCustomer(email, companyName, companyId, stripeInstance);
       customerId = customer.id;
     }
+
+    await stripeInstance!.customers.update(customerId, {
+      metadata: {
+        companyId: companyId.toString(),
+        preferredCurrency: billingCurrency,
+      },
+    });
 
     // Attach payment method to customer
     await stripeInstance!.paymentMethods.attach(paymentMethodId, {
@@ -206,45 +167,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Get Stripe price IDs from SystemSetting with env fallback
-    let stripeBasePriceId: { value: string } | null = null;
-    let stripePropertyPriceId: { value: string } | null = null;
-    
-    try {
-      stripeBasePriceId = await prisma.systemSetting.findUnique({
-        where: { key: 'stripe_base_price_id' },
-        select: { value: true },
-      });
-      stripePropertyPriceId = await prisma.systemSetting.findUnique({
-        where: { key: 'stripe_property_price_id' },
-        select: { value: true },
-      });
-    } catch (error) {
-      console.warn('Failed to fetch Stripe price IDs from settings:', error);
-    }
-    
-    // Fallback to environment variables if not in settings
-    const basePriceId = stripeBasePriceId?.value || process.env.STRIPE_PRICE_ID_BASE_55_PRICE || process.env.STRIPE_BASE_PRICE_ID || '';
-    const propertyPriceId = stripePropertyPriceId?.value || process.env.STRIPE_PRICE_ID_PROPERTY_BASE || process.env.STRIPE_PROPERTY_PRICE_ID || '';
-    
-
-    
+    // Stripe price for selected plan tier + company currency
+    const basePriceId = await getStripePriceIdForTier(tier, billingCurrency);
 
     if (!basePriceId) {
       return NextResponse.json({ 
         success: false, 
-        message: 'Stripe base price ID not configured. Please configure it in Admin Settings.' 
+        message: `Stripe price ID not configured for ${limits.label} (${billingCurrency}). Add it in Admin → Stripe Billing.` 
       }, { status: 500 });
     }
 
-    if (!propertyPriceId) {
-      return NextResponse.json({ 
-        success: false, 
-        message: 'Stripe property price ID not configured. Please configure it in Admin Settings.' 
-      }, { status: 500 });
-    }
-
-    // Create subscription with or without trial based on user choice
+    const propertyPriceId = '';
+    const propertyCountForStripe = 0;
     let subscription;
     let trialEndsAt: Date | null = null;
     let isTrialPeriod = false;
@@ -256,7 +190,7 @@ export async function POST(request: NextRequest) {
         customerId,
         basePriceId,
         propertyPriceId,
-        propertyCount,
+        propertyCountForStripe,
         TRIAL_DAYS,
         stripeInstance
       );
@@ -271,7 +205,7 @@ export async function POST(request: NextRequest) {
         customerId,
         basePriceId,
         propertyPriceId,
-        propertyCount,
+        propertyCountForStripe,
         stripeInstance
       );
       

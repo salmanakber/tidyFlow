@@ -5,9 +5,9 @@ import prisma from '@/lib/prisma';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { phoneNumber, email, otp } = body;
+    const { phoneNumber, email, otp, purpose } = body;
 
-    const identifier = phoneNumber || email;
+    const identifier = phoneNumber?.trim() || email?.toLowerCase().trim();
     
     if (!identifier || !otp) {
       return NextResponse.json(
@@ -15,7 +15,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const isValid = await verifyOTP(identifier, otp);
+
+    const normalizedEmail = email?.toLowerCase().trim();
+    const otpIdentifier = normalizedEmail
+      ? (purpose === 'password_reset'
+          ? `password_reset_${normalizedEmail}`
+          : purpose === 'login'
+            ? `login_${normalizedEmail}`
+            : normalizedEmail)
+      : identifier;
+
+    const isValid = await verifyOTP(otpIdentifier, otp);
     
     if (!isValid) {
       return NextResponse.json(
@@ -24,11 +34,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find user by email (phoneNumber not in User model yet)
-    const user = await prisma.user.findFirst({
-      where: { email: email as unknown as string },
-      include: { company: true },
-    });
+    const user = normalizedEmail
+      ? await prisma.user.findUnique({
+          where: { email: normalizedEmail },
+          include: { company: true },
+        })
+      : null;
 
     if (!user) {
       return NextResponse.json(

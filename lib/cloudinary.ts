@@ -27,7 +27,8 @@ export async function uploadPhotoToCloudinary(
   taskId: number,
   userId: number,
   photoType: 'before' | 'after',
-  timestamp: Date
+  timestamp: Date,
+  options?: { watermarkText?: string | null }
 ): Promise<CloudinaryUploadResult> {
   try {
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
@@ -41,6 +42,27 @@ export async function uploadPhotoToCloudinary(
     const publicId = `mayaops/photos/task-${taskId}/${photoType}/${userId}_${timestamp.getTime()}`;
 
     // Use upload_stream for better memory efficiency with large files
+    const transformations: Record<string, unknown>[] = [
+      { quality: 'auto' },
+      { fetch_format: 'auto' },
+    ];
+
+    const watermark = options?.watermarkText?.trim();
+    if (watermark) {
+      transformations.push({
+        overlay: {
+          font_family: 'Arial',
+          font_size: 36,
+          font_weight: 'bold',
+          text: watermark.slice(0, 80),
+        },
+        opacity: 45,
+        gravity: 'south_east',
+        x: 24,
+        y: 24,
+      });
+    }
+
     const result = await new Promise<any>((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -48,11 +70,7 @@ export async function uploadPhotoToCloudinary(
           folder: `mayaops/photos/task-${taskId}/${photoType}`,
           resource_type: 'image',
           overwrite: false,
-          // Optional: Add transformations
-          transformation: [
-            { quality: 'auto' },
-            { fetch_format: 'auto' },
-          ],
+          transformation: transformations,
           // Add context/metadata
           context: {
             taskId: taskId.toString(),
@@ -147,6 +165,60 @@ export async function uploadAvatarToCloudinary(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Cloudinary avatar upload failed',
+    };
+  }
+}
+
+/**
+ * Upload company logo for invoice PDFs
+ */
+export async function uploadCompanyLogoToCloudinary(
+  photoBuffer: Buffer,
+  companyId: number
+): Promise<CloudinaryUploadResult> {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return { success: false, error: 'Cloudinary credentials are not configured' };
+    }
+
+    const publicId = `mayaops/company-logos/company-${companyId}_${Date.now()}`;
+
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: publicId,
+          folder: 'mayaops/company-logos',
+          resource_type: 'image',
+          overwrite: true,
+          transformation: [
+            { width: 400, height: 200, crop: 'limit' },
+            { quality: 'auto' },
+            { fetch_format: 'auto' },
+          ],
+          context: {
+            companyId: companyId.toString(),
+            type: 'invoice_logo',
+          },
+        },
+        (error, res) => {
+          if (error) reject(error);
+          else resolve(res);
+        }
+      );
+      uploadStream.end(photoBuffer);
+    });
+
+    return {
+      success: true,
+      url: result.secure_url,
+      secureUrl: result.secure_url,
+      publicId: result.public_id,
+    };
+  } catch (error) {
+    console.error('Cloudinary logo upload error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Logo upload failed',
     };
   }
 }

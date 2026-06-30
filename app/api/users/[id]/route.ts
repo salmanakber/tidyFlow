@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { requireAuth, canAccessCompany, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { sendUserAccountUpdatedEmail } from '@/lib/email';
+import { applyPayrollUserFields, PAYROLL_USER_SELECT } from '@/lib/user-payroll-fields';
 
 // Helper: check if requester can manage target user
 function canManage(requester: { role: UserRole; companyId?: number | null }, target: { role: UserRole; companyId?: number | null }) {
@@ -42,7 +43,17 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   try {
     const user = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, email: true, firstName: true, lastName: true, role: true, companyId: true, isActive: true, createdAt: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        companyId: true,
+        isActive: true,
+        createdAt: true,
+        ...PAYROLL_USER_SELECT,
+      },
     });
     if (!user) return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
 
@@ -54,7 +65,72 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       }
     }
 
-    return NextResponse.json({ success: true, data: { user } });
+    let reviewStats: {
+      averageRating: number | null;
+      count: number;
+      recent: Array<{
+        id: number;
+        rating: number;
+        comment: string | null;
+        clientName: string | null;
+        createdAt: Date;
+        task?: { id: number; title: string; property?: { address: string } | null } | null;
+      }>;
+    } | null = null;
+
+    if (user.role === UserRole.CLEANER) {
+      const feedbackWhere = {
+        OR: [
+          { cleanerUserId: id },
+          {
+            cleanerUserId: null,
+            task: {
+              OR: [
+                { assignedUserId: id },
+                { taskAssignments: { some: { userId: id } } },
+              ],
+            },
+          },
+        ],
+      };
+
+      const [agg, recent, totalCount] = await Promise.all([
+        prisma.clientFeedback.aggregate({
+          where: feedbackWhere,
+          _avg: { rating: true },
+        }),
+        prisma.clientFeedback.findMany({
+          where: feedbackWhere,
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+          select: {
+            id: true,
+            rating: true,
+            comment: true,
+            clientName: true,
+            createdAt: true,
+            task: {
+              select: {
+                id: true,
+                title: true,
+                property: { select: { address: true } },
+              },
+            },
+          },
+        }),
+        prisma.clientFeedback.count({ where: feedbackWhere }),
+      ]);
+
+      reviewStats = {
+        averageRating: agg._avg.rating
+          ? Math.round(agg._avg.rating * 10) / 10
+          : null,
+        count: totalCount,
+        recent,
+      };
+    }
+
+    return NextResponse.json({ success: true, data: { user, reviewStats } });
   } catch (error) {
     console.error('User GET error:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
@@ -138,6 +214,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       }
     }
 
+    const payrollErr = applyPayrollUserFields(data, body);
+    if (payrollErr) {
+      return NextResponse.json({ success: false, message: payrollErr }, { status: 400 });
+    }
+
     // Get the user before update to compare changes
     const userBeforeUpdate = await prisma.user.findUnique({
       where: { id },
@@ -147,7 +228,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const updated = await prisma.user.update({
       where: { id },
       data,
-      select: { id: true, email: true, firstName: true, lastName: true, role: true, companyId: true, isActive: true, createdAt: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        companyId: true,
+        isActive: true,
+        createdAt: true,
+        ...PAYROLL_USER_SELECT,
+      },
     });
 
     // Send update email if there were meaningful changes

@@ -37,6 +37,9 @@ model User {
   salaryType         String?  @map("salary_type") // "monthly" or "hourly"
   basicSalary        Decimal? @map("basic_salary") @db.Decimal(10, 2) // Monthly basic salary
   defaultHourlyRate  Decimal? @map("default_hourly_rate") @db.Decimal(10, 2) // Default hourly rate if hourly employee
+  payrollWorkerType  String?  @default("hourly") @map("payroll_worker_type") // hourly, paye_uk, w2, contractor_1099
+  hireDate           DateTime? @map("hire_date")
+  payrollDefaults    String?  @map("payroll_defaults") @db.Text // deprecated — use EmployeePayrollRule
 
   // Relations
   company                 Company?                 @relation(fields: [companyId], references: [id])
@@ -55,6 +58,7 @@ model User {
   receivedMessages        ChatMessage[]            @relation("ReceivedMessages")
   announcements           Announcement[]
   payrollRecords          PayrollRecord[]
+  payrollRules            EmployeePayrollRule[]
   expenses                Expense[]                @relation("UserExpenses")
   expenseApprovals        Expense[]                @relation("ExpenseApprovals")
   routes                  Route[]
@@ -67,6 +71,12 @@ model User {
   accountDeletionRequests AccountDeletionRequest[]
   adminPermissions        AdminPermission[]
   grantedPermissions      AdminPermission[] @relation("PermissionGrants")
+  sosAlerts               SOSAlert[]
+  cleanerAIProfile        CleanerAIProfile?
+  supplyUsages            SupplyUsage[]
+  acknowledgedSosAlerts   SOSAlert[]        @relation("SOSAcknowledgedBy")
+  reviewedPhotoScores     AIPhotoScore[]    @relation("PhotoScoreReviewer")
+  clientFeedbackReceived  ClientFeedback[]  @relation("CleanerClientFeedback")
 
   @@index([email])
   @@index([companyId])
@@ -78,6 +88,7 @@ model Company {
   id                 Int       @id @default(autoincrement())
   name               String
   subscriptionStatus String    @default("active") @map("subscription_status")
+  planTier           String    @default("STANDARD") @map("plan_tier") // STARTUP, STANDARD, PREMIUM
   basePrice          Decimal   @default(55.00) @map("base_price") @db.Decimal(10, 2)
   propertyCount      Int       @default(0) @map("property_count")
   trialEndsAt        DateTime? @map("trial_ends_at")
@@ -94,10 +105,17 @@ model Company {
   adminConfiguration      AdminConfiguration?
   announcements           Announcement[]
   payrollRecords          PayrollRecord[]
+  employeePayrollRules    EmployeePayrollRule[]
   expenses                Expense[]
   checklistTemplates      ChecklistTemplate[]
   workingHoursSubmissions WorkingHoursSubmission[] @relation("WorkingHoursSubmissions")
   recurringJobs            RecurringJob[]
+  supplyItems              SupplyItem[]
+  aiInsights               AIInsight[]
+  aiConfiguration          AIConfiguration?
+  clientInvoices             ClientInvoice[]
+  invoiceSettings            CompanyInvoiceSettings?
+  googleSheetConnection      CompanyGoogleSheet?
 
   @@map("companies")
 }
@@ -115,6 +133,10 @@ model Property {
   pricePerUnit       Decimal   @default(1.00) @map("price_per_unit") @db.Decimal(10, 2) // Price per unit (e.g., £1 per unit)
   totalPrice         Decimal   @default(1.00) @map("total_price") @db.Decimal(10, 2) // Calculated: unitCount * pricePerUnit
   notes              String?   @db.Text
+  clientName         String?   @map("client_name")
+  clientEmail        String?   @map("client_email")
+  clientPhone        String?   @map("client_phone")
+  defaultServiceRate Decimal?  @map("default_service_rate") @db.Decimal(10, 2)
   isActive           Boolean   @default(true) @map("is_active")
   googleSheetUrl     String?   @map("google_sheet_url") @db.Text
   googleSheetId      String?   @map("google_sheet_id")
@@ -132,6 +154,7 @@ model Property {
   noteRecords    Note[]                  @relation("PropertyNotes")
   requiredSkills PropertyRequiredSkill[]
   recurringJobs  RecurringJob[]
+  clientInvoices ClientInvoice[]
 
   @@index([companyId])
   @@index([sheetSyncEnabled])
@@ -180,7 +203,9 @@ model Task {
   chatMessages            ChatMessage[]
   expenses                Expense[]
   clientFeedback          ClientFeedback[]
+  clientInvoices          ClientInvoice[]
   pdfRecords              PDFRecord[]
+  reviewRequests          ReviewRequest[]
   workingHoursSubmissions WorkingHoursSubmissionTask[] // Working hours submissions that reference this task // Working hours submissions that reference this task
 
   @@unique([propertyId, uniqueIdentifier]) // Ensure unique identifier is unique per property (NULL values are allowed)
@@ -201,12 +226,35 @@ model TaskAssignment {
   userId    Int      @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
 
+  // Automated GPS time tracking (per cleaner per task)
+  startedAt             DateTime? @map("started_at")
+  endedAt               DateTime? @map("ended_at")
+  startLatitude         Decimal?  @map("start_latitude") @db.Decimal(10, 8)
+  startLongitude        Decimal?  @map("start_longitude") @db.Decimal(11, 8)
+  endLatitude           Decimal?  @map("end_latitude") @db.Decimal(10, 8)
+  endLongitude          Decimal?  @map("end_longitude") @db.Decimal(11, 8)
+  startWithinGeofence   Boolean?  @map("start_within_geofence")
+  endWithinGeofence     Boolean?  @map("end_within_geofence")
+  startDistanceMeters   Decimal?  @map("start_distance_meters") @db.Decimal(10, 2)
+  endDistanceMeters     Decimal?  @map("end_distance_meters") @db.Decimal(10, 2)
+  durationMinutes       Int?      @map("duration_minutes")
+  editedDurationMinutes Int?      @map("edited_duration_minutes")
+  editedBy              Int?      @map("edited_by")
+  editedAt              DateTime? @map("edited_at")
+  payrollLoggedAt       DateTime? @map("payroll_logged_at")
+  trackerActive         Boolean   @default(false) @map("tracker_active")
+  onBreak               Boolean   @default(false) @map("on_break")
+  breakStartedAt        DateTime? @map("break_started_at")
+  totalBreakMinutes     Int       @default(0) @map("total_break_minutes")
+  workSessions          Json?     @map("work_sessions")
+
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User @relation("TaskAssignments", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, userId])
   @@index([taskId])
   @@index([userId])
+  @@index([endedAt])
   @@map("task_assignments")
 }
 
@@ -306,8 +354,9 @@ model Photo {
   createdAt     DateTime  @default(now()) @map("created_at")
 
   // Relations
-  task Task @relation(fields: [taskId], references: [id])
-  user User @relation(fields: [userId], references: [id])
+  task         Task          @relation(fields: [taskId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  aiPhotoScore AIPhotoScore?
 
   @@index([taskId])
   @@index([userId])
@@ -419,7 +468,7 @@ model AdminConfiguration {
   notificationTemplate  String?  @map("notification_template") @db.Text
   dataRetentionDays     Int      @default(365) @map("data_retention_days")
   // Pricing Configuration
-  currency              String   @default("GBP") // Currency code (GBP, USD, EUR, etc.)
+  currency              String   @default("USD") // Currency code (GBP, USD, EUR, etc.)
   subscriptionBasePrice Decimal  @default(55.00) @map("subscription_base_price") @db.Decimal(10, 2) // Base subscription price
   propertyPricePerUnit  Decimal  @default(1.00) @map("property_price_per_unit") @db.Decimal(10, 2) // Default price per property unit
   createdAt             DateTime @default(now()) @map("created_at")
@@ -438,7 +487,8 @@ model LocationLog {
   latitude             Decimal  @db.Decimal(10, 8)
   longitude            Decimal  @db.Decimal(11, 8)
   distanceFromProperty Decimal? @map("distance_from_property") @db.Decimal(10, 2)
-  withinGeofence       Boolean  @default(false) @map("within_geofence")
+  withinGeofence       Boolean? @map("within_geofence")
+  checkType            String   @default("check") @map("check_type") // "start", "complete", "check", "sos"
   createdAt            DateTime @default(now()) @map("created_at")
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
@@ -497,6 +547,7 @@ model UserPreferences {
   autoSync           Boolean  @default(true) @map("auto_sync")
   locationTracking   Boolean  @default(true) @map("location_tracking")
   biometricAuth      Boolean  @default(false) @map("biometric_auth")
+  language           String   @default("en") // en, es, pt, ar
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -713,9 +764,12 @@ model WorkingHoursSubmission {
   date        DateTime // Date for which hours are submitted
   hours       Decimal   @db.Decimal(10, 2) // Hours worked on this date
   description String?   @db.Text // Optional description/notes
-  status      String    @default("pending") @map("status") // pending, approved, rejected
+  status      String    @default("pending") @map("status") // pending, approved, rejected, paid, locked
   approvedBy  Int?      @map("approved_by")
   approvedAt  DateTime? @map("approved_at")
+  lockedAt    DateTime? @map("locked_at")
+  lockedBy    Int?      @map("locked_by")
+  payrollRecordId Int?  @map("payroll_record_id")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
@@ -763,6 +817,9 @@ model PayrollRecord {
   totalAmount Decimal   @map("total_amount") @db.Decimal(10, 2)
   status      String    @default("pending") // pending, approved, paid
   paidAt      DateTime? @map("paid_at")
+  lockedAt    DateTime? @map("locked_at")
+  lockedBy    Int?      @map("locked_by")
+  paymentExportRef String? @map("payment_export_ref")
   invoiceUrl  String?   @map("invoice_url") // URL to generated invoice PDF
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
@@ -803,12 +860,60 @@ model PayrollRecord {
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lineItems PayrollLineItem[]
 
   @@index([userId])
   @@index([companyId])
   @@index([status])
   @@index([periodStart, periodEnd])
   @@map("payroll_records")
+}
+
+// Recurring payroll rules per employee (allowances & deductions with effective dates)
+model EmployeePayrollRule {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  companyId      Int       @map("company_id")
+  name           String
+  type           String    // "allowance" | "deduction"
+  amount         Decimal   @db.Decimal(10, 2)
+  effectiveStart DateTime  @map("effective_start")
+  effectiveEnd   DateTime? @map("effective_end")
+  status         String    @default("active") // "active" | "inactive"
+  description    String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  snapshots PayrollLineItem[]
+
+  @@index([userId])
+  @@index([companyId])
+  @@index([status])
+  @@index([effectiveStart, effectiveEnd])
+  @@map("employee_payroll_rules")
+}
+
+// Snapshot line items on a payroll record (from rules + one-time adjustments)
+model PayrollLineItem {
+  id              Int      @id @default(autoincrement())
+  payrollRecordId Int      @map("payroll_record_id")
+  sourceRuleId    Int?     @map("source_rule_id")
+  name            String
+  type            String   // "allowance" | "deduction"
+  amount          Decimal  @db.Decimal(10, 2)
+  isRecurring     Boolean  @default(false) @map("is_recurring")
+  description     String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  payrollRecord PayrollRecord        @relation(fields: [payrollRecordId], references: [id], onDelete: Cascade)
+  sourceRule    EmployeePayrollRule? @relation(fields: [sourceRuleId], references: [id], onDelete: SetNull)
+
+  @@index([payrollRecordId])
+  @@index([sourceRuleId])
+  @@map("payroll_line_items")
 }
 
 // Phase 2: Expense tracking
@@ -871,19 +976,22 @@ model ChecklistTemplate {
   @@map("checklist_templates")
 }
 
-// Phase 2: Client feedback
+// Phase 2: Client feedback (linked to assigned cleaner)
 model ClientFeedback {
-  id          Int      @id @default(autoincrement())
-  taskId      Int      @map("task_id")
-  rating      Int // 1-5 stars
-  comment     String?  @db.Text
-  clientName  String?  @map("client_name")
-  clientEmail String?  @map("client_email")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id            Int      @id @default(autoincrement())
+  taskId        Int      @map("task_id")
+  cleanerUserId Int?     @map("cleaner_user_id")
+  rating        Int // 1-5 stars
+  comment       String?  @db.Text
+  clientName    String?  @map("client_name")
+  clientEmail   String?  @map("client_email")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task    Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  cleaner User? @relation("CleanerClientFeedback", fields: [cleanerUserId], references: [id], onDelete: SetNull)
 
   @@index([taskId])
+  @@index([cleanerUserId])
   @@index([rating])
   @@map("client_feedback")
 }
@@ -994,4 +1102,329 @@ model AdminPermission {
   @@index([permissionId])
   @@index([isActive])
   @@map("admin_permissions")
+}
+
+// SOS Safety Alerts
+model SOSAlert {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  companyId      Int       @map("company_id")
+  taskId         Int?      @map("task_id")
+  latitude       Decimal   @db.Decimal(10, 8)
+  longitude      Decimal   @db.Decimal(11, 8)
+  status         String    @default("active") // active, acknowledged, resolved
+  acknowledgedBy Int?      @map("acknowledged_by")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  resolvedAt     DateTime? @map("resolved_at")
+  notes          String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user         User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  acknowledged User? @relation("SOSAcknowledgedBy", fields: [acknowledgedBy], references: [id])
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([status])
+  @@map("sos_alerts")
+}
+
+// AI Photo Verification Scores
+model AIPhotoScore {
+  id           Int       @id @default(autoincrement())
+  photoId      Int       @unique @map("photo_id")
+  score        Int       // 0-100 quality score
+  flags        String?   @db.Text // JSON array of issue flags
+  summary      String?   @db.Text
+  provider     String    @default("groq")
+  model        String?
+  reviewStatus String    @default("pending") @map("review_status") // pending, approved, rejected
+  reviewedBy   Int?      @map("reviewed_by")
+  reviewedAt   DateTime? @map("reviewed_at")
+  reviewNote   String?   @map("review_note") @db.Text
+  analyzedAt   DateTime  @default(now()) @map("analyzed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  photo    Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("PhotoScoreReviewer", fields: [reviewedBy], references: [id])
+
+  @@index([score])
+  @@index([reviewStatus])
+  @@map("ai_photo_scores")
+}
+
+// Cleaner Intelligence Profile (TidyFlow AI)
+model CleanerAIProfile {
+  id                  Int      @id @default(autoincrement())
+  userId              Int      @unique @map("user_id")
+  companyId           Int      @map("company_id")
+  qualityScore        Float    @default(0) @map("quality_score")
+  punctualityScore    Float    @default(0) @map("punctuality_score")
+  reliabilityScore    Float    @default(0) @map("reliability_score")
+  clientSatisfaction  Float    @default(0) @map("client_satisfaction")
+  avgCompletionMins   Float?   @map("avg_completion_mins")
+  tasksCompleted      Int      @default(0) @map("tasks_completed")
+  strengths           String?  @db.Text // JSON array
+  weaknesses          String?  @db.Text // JSON array
+  preferredTaskTypes  String?  @db.Text @map("preferred_task_types") // JSON array
+  aiSummary           String?  @db.Text @map("ai_summary")
+  lastCalculatedAt    DateTime @default(now()) @map("last_calculated_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([qualityScore])
+  @@map("cleaner_ai_profiles")
+}
+
+// Proactive AI Business Insights
+model AIInsight {
+  id          Int       @id @default(autoincrement())
+  companyId   Int       @map("company_id")
+  type        String    // client_risk, workforce, revenue, supply, operations
+  severity    String    @default("medium") // low, medium, high, critical
+  title       String
+  message     String    @db.Text
+  entityType  String?   @map("entity_type") // user, property, task, client
+  entityId    Int?      @map("entity_id")
+  metadata    String?   @db.Text // JSON
+  dismissedAt DateTime? @map("dismissed_at")
+  dismissedBy Int?      @map("dismissed_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([type])
+  @@index([severity])
+  @@map("ai_insights")
+}
+
+// Company AI Configuration (Groq backend control)
+model AIConfiguration {
+  id                    Int      @id @default(autoincrement())
+  companyId             Int      @unique @map("company_id")
+  enabled               Boolean  @default(true)
+  provider              String   @default("groq")
+  model                 String   @default("llama-3.3-70b-versatile")
+  visionModel           String   @default("meta-llama/llama-4-scout-17b-16e-instruct") @map("vision_model")
+  photoVerification     Boolean  @default(true) @map("photo_verification")
+  assignmentRecommend   Boolean  @default(true) @map("assignment_recommend")
+  insightsEnabled       Boolean  @default(true) @map("insights_enabled")
+  minPhotoScore         Int      @default(60) @map("min_photo_score")
+  groqApiKey            String?  @map("groq_api_key") @db.Text
+  googleApiKey          String?  @map("google_api_key") @db.Text
+  googleModel           String?  @map("google_model")
+  googleVisionModel     String?  @map("google_vision_model")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("ai_configurations")
+}
+
+// Supply Management
+model SupplyItem {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  name         String
+  unit         String   @default("units")
+  currentStock Int      @default(0) @map("current_stock")
+  minStock     Int      @default(5) @map("min_stock")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  usages  SupplyUsage[]
+
+  @@index([companyId])
+  @@map("supply_items")
+}
+
+model SupplyUsage {
+  id           Int      @id @default(autoincrement())
+  supplyItemId Int      @map("supply_item_id")
+  userId       Int      @map("user_id")
+  taskId       Int?     @map("task_id")
+  quantity     Int      @default(1)
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  supplyItem SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([supplyItemId])
+  @@index([userId])
+  @@map("supply_usages")
+}
+
+// Client review requests (public vs private flow)
+model ReviewRequest {
+  id            Int       @id @default(autoincrement())
+  taskId        Int       @map("task_id")
+  token         String    @unique
+  rating        Int?      // 1-5, null until submitted
+  comment       String?   @db.Text
+  isPublic      Boolean   @default(true) @map("is_public")
+  redirectUrl   String?   @map("redirect_url") @db.Text // Google review URL for 4-5 stars
+  submittedAt   DateTime? @map("submitted_at")
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([token])
+  @@map("review_requests")
+}
+
+// Platform subscription tier limits (SaaS admin configurable)
+model SubscriptionPlanLimit {
+  id                   Int      @id @default(autoincrement())
+  tier                 String   @unique // STARTUP, STANDARD, PREMIUM
+  label                String   @default("Standard")
+  maxCleaners          Int      @default(25) @map("max_cleaners")
+  maxProperties        Int      @default(50) @map("max_properties")
+  maxManagers          Int      @default(10) @map("max_managers")
+  aiRequestsPerMonth   Int      @default(500) @map("ai_requests_per_month")
+  aiPhotoAnalysis      Boolean  @default(true) @map("ai_photo_analysis")
+  aiInsights           Boolean  @default(true) @map("ai_insights")
+  aiAssignment         Boolean  @default(true) @map("ai_assignment")
+  aiTaskSuggestions    Boolean  @default(true) @map("ai_task_suggestions")
+  invoicesEnabled      Boolean  @default(true) @map("invoices_enabled")
+  maxInvoicesPerMonth  Int      @default(50) @map("max_invoices_per_month")
+  aiInvoiceAssist      Boolean  @default(false) @map("ai_invoice_assist")
+  maxPhotoVerificationsPerMonth Int @default(100) @map("max_photo_verifications_per_month")
+  maxPdfGenerationsPerMonth     Int @default(50) @map("max_pdf_generations_per_month")
+  monthlyPrice                  Decimal @default(55.00) @map("monthly_price") @db.Decimal(10, 2)
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("subscription_plan_limits")
+}
+
+// Per-company AI activity cache — skip AI when fingerprint unchanged
+model AIActivityCache {
+  id                  Int      @id @default(autoincrement())
+  companyId           Int      @map("company_id")
+  feature             String
+  scopeKey            String   @map("scope_key")
+  activityFingerprint String   @map("activity_fingerprint")
+  cachedResult        String?  @db.Text @map("cached_result")
+  lastActivityAt      DateTime @default(now()) @map("last_activity_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([companyId, feature, scopeKey], map: "ai_activity_cache_unique")
+  @@index([companyId])
+  @@map("ai_activity_cache")
+}
+
+// Monthly AI usage tracking per company
+model AIUsageLog {
+  id        Int      @id @default(autoincrement())
+  companyId Int      @map("company_id")
+  feature   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@map("ai_usage_logs")
+}
+
+// Client-facing invoices (per task / property)
+model ClientInvoice {
+  id            Int       @id @default(autoincrement())
+  companyId     Int       @map("company_id")
+  taskId        Int?      @map("task_id")
+  propertyId    Int?      @map("property_id")
+  invoiceNumber String    @unique @map("invoice_number")
+  clientName    String    @map("client_name")
+  clientEmail   String?   @map("client_email")
+  clientPhone   String?   @map("client_phone")
+  clientAddress String?   @map("client_address") @db.Text
+  lineItems     String    @db.Text // JSON array { description, quantity, unitPrice, amount }
+  subtotal      Decimal   @db.Decimal(10, 2)
+  taxRate       Decimal   @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount     Decimal   @default(0) @map("tax_amount") @db.Decimal(10, 2)
+  totalAmount   Decimal   @map("total_amount") @db.Decimal(10, 2)
+  currency      String    @default("GBP")
+  status        String    @default("draft") // draft, sent, paid, void
+  notes         String?   @db.Text
+  pdfUrl        String?   @map("pdf_url") @db.Text
+  sentAt        DateTime? @map("sent_at")
+  paidAt        DateTime? @map("paid_at")
+  dueDate       DateTime? @map("due_date")
+  aiGenerated   Boolean   @default(false) @map("ai_generated")
+  createdById   Int?      @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task     Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  property Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([taskId])
+  @@index([status])
+  @@map("client_invoices")
+}
+
+// Per-company invoice branding, numbering, and tax rules
+model CompanyInvoiceSettings {
+  id                    Int      @id @default(autoincrement())
+  companyId             Int      @unique @map("company_id")
+  companyDisplayName    String?  @map("company_display_name")
+  logoUrl               String?  @map("logo_url") @db.Text
+  address               String?  @db.Text
+  phone                 String?
+  email                 String?
+  website               String?
+  taxRegistrationNumber String?  @map("tax_registration_number")
+  invoicePrefix         String   @default("INV-") @map("invoice_prefix")
+  nextInvoiceNumber     Int      @default(1) @map("next_invoice_number")
+  taxEnabled            Boolean  @default(false) @map("tax_enabled")
+  taxRules              String   @default("[]") @map("tax_rules") @db.Text // JSON TaxRule[]
+  defaultTaxRuleId      String?  @map("default_tax_rule_id")
+  payrollPrefix         String   @default("PAY-") @map("payroll_prefix")
+  nextPayrollNumber     Int      @default(1) @map("next_payroll_number")
+  payrollTaxEnabled     Boolean  @default(false) @map("payroll_tax_enabled")
+  payrollTaxRules       String   @default("[]") @map("payroll_tax_rules") @db.Text
+  payrollDefaultTaxRuleId String? @map("payroll_default_tax_rule_id")
+  invoiceLanguage       String   @default("en") @map("invoice_language")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_invoice_settings")
+}
+
+// One Google Sheet connection per company (master data source)
+model CompanyGoogleSheet {
+  id                Int       @id @default(autoincrement())
+  companyId         Int       @unique @map("company_id")
+  spreadsheetId     String    @map("spreadsheet_id")
+  spreadsheetUrl    String    @map("spreadsheet_url") @db.Text
+  spreadsheetTitle  String?   @map("spreadsheet_title")
+  propertiesTab     String    @default("Properties") @map("properties_tab")
+  tasksTab          String    @default("Tasks") @map("tasks_tab")
+  propertiesMapping String?   @map("properties_mapping") @db.Text // JSON column map
+  tasksMapping      String?   @map("tasks_mapping") @db.Text // JSON { columnMapping, propertyIdColumn, actionColumn }
+  propertyIdColumn  String?   @map("property_id_column")
+  actionColumn      String?   @map("action_column")
+  uniqueColumn      String?   @map("unique_column")
+  watchChannelId    String?   @map("watch_channel_id")
+  watchResourceId   String?   @map("watch_resource_id")
+  watchExpiration   DateTime? @map("watch_expiration")
+  syncEnabled       Boolean   @default(true) @map("sync_enabled")
+  lastSyncedAt      DateTime? @map("last_synced_at")
+  lastSyncError     String?   @map("last_sync_error") @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([spreadsheetId])
+  @@map("company_google_sheets")
 }

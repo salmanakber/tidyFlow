@@ -7,6 +7,9 @@ import ProtectedPage from "@/components/ProtectedPage"
 import { usePermissions } from "@/lib/hooks/usePermissions"
 import { hasPermission, PERMISSIONS } from "@/lib/permissions"
 import RequirePermission from "@/components/RequirePermission"
+import AIRecommendationsPanel from "@/components/AIRecommendationsPanel"
+import TaskPhotoAIPanel from "@/components/TaskPhotoAIPanel"
+import TaskReviewLinkPanel from "@/components/TaskReviewLinkPanel"
 
 import { 
   Plus, Search, Calendar, Filter, LayoutList, Grid, 
@@ -566,6 +569,25 @@ function TaskDrawer({ isOpen, onClose, task, properties, users, onSave, onError,
                         <UserIcon className="absolute right-3 top-3 text-gray-400 pointer-events-none" size={16} />
                       </div>
                   </div>
+
+                  {(task?.id || formData.propertyId) && (
+                    <AIRecommendationsPanel
+                      taskId={task?.id}
+                      propertyId={!task?.id ? formData.propertyId : undefined}
+                      scheduledDate={formData.scheduledDate || undefined}
+                      compact
+                      onAssign={(cleanerId) =>
+                        setFormData({ ...formData, assignedUserId: String(cleanerId) })
+                      }
+                    />
+                  )}
+
+                  {task?.id && <TaskPhotoAIPanel taskId={task.id} />}
+
+                  {task?.id &&
+                    ["SUBMITTED", "QA_REVIEW", "APPROVED", "COMPLETED"].includes(task.status) && (
+                      <TaskReviewLinkPanel taskId={task.id} />
+                    )}
 
                   <div className={`p-4 rounded-xl border transition-all ${formData.isRecurring ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}>
                       <label className="flex items-center gap-3 cursor-pointer">

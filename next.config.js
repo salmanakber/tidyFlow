@@ -4,7 +4,10 @@ const path = require('path');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  
+  experimental: {
+    serverComponentsExternalPackages: ['arabic-persian-reshaper', 'pdfkit'],
+  },
+
   async headers() {
     return [
       {
@@ -20,9 +23,11 @@ const nextConfig = {
   },
   webpack: (config, { isServer, webpack }) => {
     if (isServer) {
-      // PDFKit uses native Node.js modules which are available in serverless
-      // Only externalize canvas if you're not using it
-      config.externals = [...(config.externals || []), 'canvas'];
+      config.externals = [
+        ...(Array.isArray(config.externals) ? config.externals : [config.externals].filter(Boolean)),
+        'canvas',
+        'arabic-persian-reshaper',
+      ];
       
       // Copy PDFKit font files to the server build
       // The path structure in Next.js builds can vary, so we copy to multiple possible locations
@@ -39,6 +44,11 @@ const nextConfig = {
             {
               from: pdfkitDataPath,
               to: path.resolve(__dirname, '.next/server/chunks/data'),
+              noErrorOnMissing: true,
+            },
+            {
+              from: path.resolve(__dirname, 'assets/fonts'),
+              to: path.resolve(__dirname, '.next/server/assets/fonts'),
               noErrorOnMissing: true,
             },
           ],

@@ -35,6 +35,6 @@ export async function sendSMS(options: SMSOptions): Promise<boolean> {
 }
 
 export async function sendOTP(phoneNumber: string, otp: string): Promise<boolean> {
-  const message = `Your MayaOps verification code is: ${otp}. Valid for 10 minutes.`;
+  const message = `Your TidyFlow verification code is: ${otp}. Valid for 10 minutes.`;
   return sendSMS({ to: phoneNumber, message });
 }

@@ -44,6 +44,9 @@ export async function storeOTP(
  */
 export async function verifyOTP(identifier: string, otp: string): Promise<boolean> {
   try {
+    const normalizedOtp = String(otp).trim();
+    if (!normalizedOtp) return false;
+
     // Find the most recent unused OTP for this identifier
     const storedOTP = await prisma.oTP.findFirst({
       where: {
@@ -69,7 +72,7 @@ export async function verifyOTP(identifier: string, otp: string): Promise<boolea
     });
 
     // Check if OTP matches
-    if (storedOTP.otp !== otp) {
+    if (storedOTP.otp !== normalizedOtp) {
       // Mark as used after max attempts (security measure)
       if (storedOTP.attempts + 1 >= 5) {
         await prisma.oTP.update({

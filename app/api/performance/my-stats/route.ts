@@ -33,7 +33,18 @@ export async function GET(request: NextRequest) {
 
     const feedback = await prisma.clientFeedback.findMany({
       where: {
-        task: { assignedUserId: tokenUser.userId },
+        OR: [
+          { cleanerUserId: tokenUser.userId },
+          {
+            cleanerUserId: null,
+            task: {
+              OR: [
+                { assignedUserId: tokenUser.userId },
+                { taskAssignments: { some: { userId: tokenUser.userId } } },
+              ],
+            },
+          },
+        ],
         createdAt: { gte: thirtyDaysAgo },
       },
     });
@@ -42,11 +53,45 @@ export async function GET(request: NextRequest) {
       ? feedback.reduce((sum, f) => sum + f.rating, 0) / feedback.length
       : 0;
 
-    const onTimeRate = tasksCompleted > 0 ? 85 : 0; // Mock calculation
+    const locationLogs = await prisma.locationLog.findMany({
+      where: {
+        userId: tokenUser.userId,
+        checkType: { in: ['start', 'complete'] },
+        createdAt: { gte: thirtyDaysAgo },
+      },
+      select: { withinGeofence: true },
+    });
+
+    const onTimeRate =
+      locationLogs.length > 0
+        ? Math.round(
+            (locationLogs.filter((l) => l.withinGeofence).length / locationLogs.length) * 100
+          )
+        : tasksCompleted > 0
+          ? 100
+          : 0;
+
+    const aiProfile = await prisma.cleanerAIProfile.findUnique({
+      where: { userId: tokenUser.userId },
+    });
 
     return NextResponse.json({
       success: true,
-      data: { tasksCompleted, avgQAScore, onTimeRate, customerRating },
+      data: {
+        tasksCompleted,
+        avgQAScore,
+        onTimeRate,
+        customerRating,
+        aiProfile: aiProfile
+          ? {
+              qualityScore: aiProfile.qualityScore,
+              punctualityScore: aiProfile.punctualityScore,
+              reliabilityScore: aiProfile.reliabilityScore,
+              clientSatisfaction: aiProfile.clientSatisfaction,
+              aiSummary: aiProfile.aiSummary,
+            }
+          : null,
+      },
     });
   } catch (error) {
     console.error('Performance stats error:', error);

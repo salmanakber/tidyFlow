@@ -1,443 +1,295 @@
-import prisma from './prisma';
-import { UserRole } from '@prisma/client';
+import prisma from '@/lib/prisma';
+import { emitRealtimeEvent } from '@/lib/realtime';
 
-export interface NotificationPayload {
+export interface CreateNotificationInput {
   userId: number;
   title: string;
   message: string;
-  type: 'task_assigned' | 'task_reminder' | 'missing_photos' | 'qa_result' | 'payment_alert' | 'high_severity_issue' | 'task_updated' | 'task_created';
-  metadata?: Record<string, any>;
-  screenRoute?: string; // e.g., 'TaskDetail', 'IssueDetail', etc.
-  screenParams?: Record<string, any>; // e.g., { taskId: 123 }
+  type: string;
+  metadata?: Record<string, unknown>;
+  screenRoute?: string;
+  screenParams?: Record<string, unknown>;
 }
 
-/**
- * Helper function to determine screen route based on notification type and metadata
- */
-function getScreenRoute(type: string, metadata?: Record<string, any>): { route?: string; params?: Record<string, any> } {
-  if (!metadata) return {};
+function buildMetadata(input: CreateNotificationInput): string {
+  const meta: Record<string, unknown> = { ...(input.metadata || {}) };
+  if (input.screenRoute) meta.screenRoute = input.screenRoute;
+  if (input.screenParams) meta.screenParams = input.screenParams;
+  return JSON.stringify(meta);
+}
 
-  switch (type) {
-    case 'task_assigned':
-    case 'task_reminder':
-    case 'missing_photos':
-    case 'qa_result':
-    case 'task_updated':
-    case 'task_created':
-      if (metadata.taskId) {
-        return { route: 'TaskDetail', params: { taskId: metadata.taskId } };
-      }
-      break;
-    case 'high_severity_issue':
-      if (metadata.taskId) {
-        return { route: 'TaskDetail', params: { taskId: metadata.taskId } };
-      }
-      if (metadata.noteId) {
-        return { route: 'IssueDetail', params: { issueId: metadata.noteId } };
-      }
-      break;
-    case 'payment_alert':
-      // Payment alerts might not have a specific screen
-      break;
+export async function createNotification(input: CreateNotificationInput) {
+  const notification = await prisma.notification.create({
+    data: {
+      userId: input.userId,
+      title: input.title,
+      message: input.message,
+      type: input.type,
+      status: 'unread',
+      metadata: buildMetadata(input),
+    },
+  });
+
+  // Push via Expo — one delivery per user (most recently updated device)
+  try {
+    const tokens = await prisma.deviceToken.findMany({
+      where: { userId: input.userId, isActive: true, expoPushToken: { not: null } },
+      select: { expoPushToken: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const seen = new Set<string>();
+    const pushTokens: string[] = [];
+    for (const row of tokens) {
+      const token = row.expoPushToken;
+      if (!token || seen.has(token)) continue;
+      seen.add(token);
+      pushTokens.push(token);
+      break; // single active device per user avoids duplicate pushes
+    }
+    if (pushTokens.length > 0) {
+      await sendExpoPush(pushTokens, input.title, input.message, input.metadata);
+    }
+  } catch (err) {
+    console.warn('Push notification failed:', err);
   }
 
-  return {};
-}
-
-export async function createNotification(payload: NotificationPayload & { sendEmail?: boolean }) {
-  try {
-    // Determine screen route if not provided
-    const screenInfo = payload.screenRoute 
-      ? { route: payload.screenRoute, params: payload.screenParams || {} }
-      : getScreenRoute(payload.type, payload.metadata);
-
-    // Get user preferences and email
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-      select: { email: true, firstName: true, lastName: true },
-    });
-
-    // Store notification in database
-    const notification = await prisma.notification.create({
-      data: {
-        userId: payload.userId,
-        title: payload.title,
-        message: payload.message,
-        type: payload.type,
-        status: 'unread',
-        metadata: payload.metadata ? JSON.stringify({
-          ...payload.metadata,
-          screenRoute: screenInfo.route,
-          screenParams: screenInfo.params,
-        }) : JSON.stringify({
-          screenRoute: screenInfo.route,
-          screenParams: screenInfo.params,
-        }),
-      },
-    });
-
-    // Check user preferences for email notifications
-    const preferences = await prisma.userPreferences.findUnique({
-      where: { userId: payload.userId },
-      select: { emailNotifications: true },
-    });
-
-    const shouldSendEmail = (preferences?.emailNotifications ?? true) && payload.sendEmail !== false && user?.email;
-
-    if (shouldSendEmail) {
-      try {
-        // Import email service
-        const { sendEmail } = await import('./email');
-        
-        // Generate email HTML based on notification type
-        const emailHtml = generateEmailTemplate(payload, user);
-        
-        // await sendEmail({
-        //   to: user!.email,
-        //   subject: payload.title,
-        //   html: emailHtml,
-        // });
-        
-        console.log(`📧 Email sent: ${payload.type} to ${user!.email}`);
-      } catch (emailError) {
-        console.error('Error sending email notification:', emailError);
-        // Don't fail the notification creation if email fails
-      }
-    }
-
-    // Send push notification (Expo or FCM based on admin settings)
-    try {
-      // Check admin settings for notification provider preference
-      const notificationProvider = await prisma.systemSetting.findUnique({
-        where: { key: 'notification_provider' },
-        select: { value: true },
-      });
-
-      const provider = notificationProvider?.value || 'expo'; // Default to Expo
-
-      // Include screen route and params in push notification data for deep linking
-      const pushMetadata = {
-        ...payload.metadata,
-        screenRoute: screenInfo.route,
-        screenParams: screenInfo.params,
-      };
-
-        // Use Expo for push notifications (default)
-        const { sendExpoPushNotification } = await import('./expo-push');
-        await sendExpoPushNotification(payload.userId, payload.title, payload.message, pushMetadata);
-      
-    } catch (pushError) {
-      console.error('Error sending push notification:', pushError);
-      // Don't fail the notification creation if push fails
-    }
-    
-    console.log(`📧 Notification created: ${payload.type} for user ${payload.userId} (ID: ${notification.id})`);
-    console.log(`   Title: ${payload.title}`);
-    console.log(`   Screen: ${screenInfo.route || 'none'}`);
-
-    return {
-      success: true,
+  emitRealtimeEvent({
+    type: 'notification:new',
+    userId: input.userId,
+    payload: {
       notificationId: notification.id,
-    };
-  } catch (error) {
-    console.error('Error creating notification:', error);
-    // Don't throw - notifications shouldn't break the main flow
-    return {
-      success: false,
-      notificationId: null,
-    };
-  }
+      title: input.title,
+      message: input.message,
+      type: input.type,
+      screenRoute: input.screenRoute,
+      screenParams: input.screenParams,
+    },
+  }).catch(() => {});
+
+  return notification;
 }
 
-function generateEmailTemplate(payload: NotificationPayload, user: { firstName: string | null; lastName: string | null; email: string } | null): string {
-  const userName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User' : 'User';
-  
-  return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background-color: #00838F; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { padding: 20px; background-color: #f9f9f9; border-radius: 0 0 8px 8px; }
-          .button { display: inline-block; padding: 12px 24px; background-color: #00838F; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${payload.title}</h1>
-          </div>
-          <div class="content">
-            <p>Hi ${userName},</p>
-            <p>${payload.message}</p>
-            <p style="text-align: center; margin-top: 30px;">
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.mayaops.com'}" class="button">View Details</a>
-            </p>
-          </div>
-          <div class="footer">
-            <p>© 2025 MayaOps. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-    </html>
-  `;
+async function sendExpoPush(
+  tokens: string[],
+  title: string,
+  body: string,
+  data?: Record<string, unknown>
+) {
+  const messages = tokens.map((to) => ({
+    to,
+    sound: 'default',
+    title,
+    body,
+    data: data || {},
+  }));
+
+  await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(messages),
+  });
 }
 
-export async function sendTaskAssignmentNotification(taskId: number, userId: number) {
-  try {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: true,
-        assignedUser: true,
-      },
-    });
+export async function sendTaskAssignmentNotifications(taskId: number, cleanerIds: number[]) {
+  const uniqueIds = [...new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0))];
+  if (uniqueIds.length === 0) return;
 
-    if (!task) return;
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      title: true,
+      scheduledDate: true,
+      property: { select: { address: true } },
+    },
+  });
+  if (!task) return;
 
+  const dateStr = task.scheduledDate
+    ? new Date(task.scheduledDate).toLocaleDateString('en-GB')
+    : 'TBD';
+
+  for (const userId of uniqueIds) {
     await createNotification({
       userId,
       title: 'New Task Assigned',
-      message: `You have been assigned to: ${task.title}${task.property?.address ? ` at ${task.property.address}` : ''}`,
-      type: 'task_assigned',
+      message: `You have been assigned "${task.title}" at ${task.property?.address || 'property'} on ${dateStr}.`,
+      type: 'task_assignment',
       metadata: { taskId },
       screenRoute: 'TaskDetail',
       screenParams: { taskId },
     });
-  } catch (error) {
-    console.error('Error sending task assignment notification:', error);
   }
 }
 
-/**
- * Send task assignment notifications to multiple cleaners
- */
-export async function sendTaskAssignmentNotifications(taskId: number, userIds: number[]) {
-  try {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: true,
-      },
-    });
+export async function sendTaskUpdatedNotification(
+  taskId: number,
+  cleanerIds: number[],
+  reason: 'assignment' | 'status' | 'update'
+) {
+  const uniqueIds = [...new Set(cleanerIds.map((id) => Number(id)).filter((id) => id > 0))];
+  if (uniqueIds.length === 0) return;
 
-    if (!task) return;
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { title: true, status: true, property: { select: { address: true } } },
+  });
+  if (!task) return;
 
-    // Send notification to each assigned cleaner
-    await Promise.all(
-      userIds.map(userId =>
-        createNotification({
-          userId,
-          title: 'New Task Assigned',
-          message: `You have been assigned to: ${task.title}${task.property?.address ? ` at ${task.property.address}` : ''}`,
-          type: 'task_assigned',
-          metadata: { taskId },
-          screenRoute: 'TaskDetail',
-          screenParams: { taskId },
-        })
-      )
-    );
-  } catch (error) {
-    console.error('Error sending task assignment notifications:', error);
-  }
-}
+  const titles: Record<string, string> = {
+    assignment: 'Task Assignment Updated',
+    status: 'Task Status Updated',
+    update: 'Task Updated',
+  };
 
-export async function sendTaskReminderNotification(taskId: number, hoursBeforeTask: number) {
-  try {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: true,
-        assignedUser: true,
-      },
-    });
-
-    if (!task || !task.assignedUser) return;
-
-    await createNotification({
-      userId: task.assignedUser.id,
-      title: `Task Reminder - ${hoursBeforeTask}h`,
-      message: `Reminder: ${task.title}${task.property?.address ? ` at ${task.property.address}` : ''}${task.scheduledDate ? ` scheduled for ${task.scheduledDate.toLocaleString()}` : ''}`,
-      type: 'task_reminder',
-      metadata: { taskId, hoursBeforeTask },
-      screenRoute: 'TaskDetail',
-      screenParams: { taskId },
-    });
-  } catch (error) {
-    console.error('Error sending task reminder notification:', error);
-  }
-}
-
-export async function sendMissingPhotosNotification(taskId: number, userId: number, currentCount: number, requiredCount: number) {
-  try {
+  for (const userId of uniqueIds) {
     await createNotification({
       userId,
-      title: 'Missing Photos',
-      message: `Task requires ${requiredCount} photos. You have uploaded ${currentCount}. Please upload ${requiredCount - currentCount} more.`,
-      type: 'missing_photos',
-      metadata: { taskId, currentCount, requiredCount },
+      title: titles[reason] || 'Task Updated',
+      message: `"${task.title}" — ${task.status.replace(/_/g, ' ')}${task.property?.address ? ` · ${task.property.address}` : ''}`,
+      type: reason === 'assignment' ? 'task_assignment' : 'task_updated',
+      metadata: { taskId, reason },
       screenRoute: 'TaskDetail',
       screenParams: { taskId },
     });
-  } catch (error) {
-    console.error('Error sending missing photos notification:', error);
   }
 }
 
-export async function sendQAResultNotification(taskId: number, userId: number, approved: boolean, feedback?: string) {
-  try {
-    await createNotification({
-      userId,
-      title: approved ? 'Task Approved' : 'Task Rejected',
-      message: approved 
-        ? `Your task has been approved!` 
-        : `Your task needs revision. Feedback: ${feedback || 'Please check the details.'}`,
-      type: 'qa_result',
-      metadata: { taskId, approved, feedback },
-      screenRoute: 'TaskDetail',
-      screenParams: { taskId },
-    });
-  } catch (error) {
-    console.error('Error sending QA result notification:', error);
-  }
-}
-
-export async function sendHighSeverityIssueNotification(companyId: number, taskId: number, noteId: number) {
-  // Get all admins and managers for the company
-  const admins = await prisma.user.findMany({
+export async function notifyManagersClientReview(input: {
+  companyId: number;
+  taskId: number;
+  rating: number;
+  propertyAddress?: string;
+}) {
+  const managers = await prisma.user.findMany({
     where: {
-      companyId,
-      role: {
-        in: [UserRole.COMPANY_ADMIN, UserRole.MANAGER],
-      },
+      companyId: input.companyId,
+      role: { in: ['MANAGER', 'COMPANY_ADMIN', 'OWNER'] },
       isActive: true,
     },
     select: { id: true },
   });
 
-  const note = await prisma.note.findUnique({
-    where: { id: noteId },
-    select: { content: true, category: true },
-  });
-
-  for (const admin of admins) {
+  const stars = '★'.repeat(input.rating);
+  for (const manager of managers) {
     await createNotification({
-      userId: admin.id,
-      title: 'High Severity Issue Reported',
-      message: `A high severity issue has been reported for task #${taskId}${note?.category ? ` (${note.category})` : ''}: ${note?.content?.substring(0, 100) || 'See details'}`,
-      type: 'high_severity_issue',
-      metadata: { taskId, noteId, companyId },
+      userId: manager.id,
+      title: input.rating >= 4 ? 'Positive Client Review' : 'Client Feedback Received',
+      message: `${stars} (${input.rating}/5) for a completed job${input.propertyAddress ? ` at ${input.propertyAddress}` : ''}.`,
+      type: 'qa_result',
+      metadata: { taskId: input.taskId, rating: input.rating, source: 'client_review' },
       screenRoute: 'TaskDetail',
-      screenParams: { taskId },
+      screenParams: { taskId: input.taskId },
     });
   }
 }
 
-export async function sendPaymentAlertNotification(companyId: number, adminUserIds: number[], reason: string) {
-  try {
-    for (const adminId of adminUserIds) {
-      await createNotification({
-        userId: adminId,
-        title: 'Payment Alert',
-        message: `Payment issue for company #${companyId}: ${reason}`,
-        type: 'payment_alert',
-        metadata: { companyId, reason },
-        screenRoute: 'Billing',
-      });
-    }
-  } catch (error) {
-    console.error('Error sending payment alert notifications:', error);
-  }
-}
-
-/**
- * Send notification when a task is created
- */
-export async function sendTaskCreatedNotification(taskId: number, creatorUserId: number, assignedUserIds: number[]) {
-  try {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: true,
-      },
-    });
-
-    if (!task) return;
-
-    // Notify assigned cleaners
-    await sendTaskAssignmentNotifications(taskId, assignedUserIds);
-
-    // Optionally notify managers/admins that a task was created
-    // This can be added if needed
-  } catch (error) {
-    console.error('Error sending task created notifications:', error);
-  }
-}
-
-/**
- * Send notification when a task is updated (e.g., cleaner assignment changed)
- */
-export async function sendTaskUpdatedNotification(taskId: number, userIds: number[], updateType: 'assignment' | 'status' | 'details') {
-  try {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: true,
-      },
-    });
-
-    if (!task) return;
-
-    let title = 'Task Updated';
-    let message = `Task "${task.title}" has been updated`;
-
-    switch (updateType) {
-      case 'assignment':
-        title = 'Task Assignment Updated';
-        message = `You have been assigned to task: ${task.title}${task.property?.address ? ` at ${task.property.address}` : ''}`;
-        break;
-      case 'status':
-        title = 'Task Status Changed';
-        message = `Task "${task.title}" status changed to ${task.status}`;
-        break;
-      case 'details':
-        title = 'Task Details Updated';
-        message = `Task "${task.title}" details have been updated`;
-        break;
-    }
-
-    await Promise.all(
-      userIds.map(userId =>
-        createNotification({
-          userId,
-          title,
-          message,
-          type: 'task_updated',
-          metadata: { taskId, updateType },
-          screenRoute: 'TaskDetail',
-          screenParams: { taskId },
-        })
-      )
-    );
-  } catch (error) {
-    console.error('Error sending task updated notifications:', error);
-  }
-}
-
-export async function scheduleTaskReminders(taskId: number) {
-  // In production, this would use a job queue (Bull, BullMQ) or cron scheduler
-  // to send reminders 24h and 1h before task
-  
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    select: { scheduledDate: true, assignedUserId: true },
+export async function notifyManagersSheetStatusBlocked(input: {
+  companyId: number;
+  taskTitle: string;
+  requestedStatus: string;
+  propertyRef?: string;
+  spreadsheetTitle?: string;
+}) {
+  const managers = await prisma.user.findMany({
+    where: {
+      companyId: input.companyId,
+      role: { in: ['MANAGER', 'COMPANY_ADMIN', 'OWNER'] },
+      isActive: true,
+    },
+    select: { id: true },
   });
 
-  if (!task || !task.scheduledDate || !task.assignedUserId) return;
+  const statusLabel = input.requestedStatus.replace(/_/g, ' ');
+  const message = `"${input.taskTitle}" could not be set to ${statusLabel} from Google Sheets — no cleaner is assigned. Add a cleaner email in the Assigned User Email column, then sync again.`;
 
-  console.log(`📅 Scheduled reminders for task ${taskId}`);
-  // Queue jobs for 24h and 1h before task.scheduledDate
+  for (const manager of managers) {
+    await createNotification({
+      userId: manager.id,
+      title: 'Sheet sync: status blocked',
+      message,
+      type: 'sheet_sync_warning',
+      metadata: {
+        taskTitle: input.taskTitle,
+        requestedStatus: input.requestedStatus,
+        propertyRef: input.propertyRef,
+      },
+      screenRoute: 'PropertySelection',
+    });
+  }
+}
+
+export async function notifyTaskApproved(input: {
+  taskId: number;
+  companyId: number;
+  approvedByUserId: number;
+}) {
+  const task = await prisma.task.findUnique({
+    where: { id: input.taskId },
+    select: {
+      title: true,
+      assignedUserId: true,
+      taskAssignments: { select: { userId: true } },
+    },
+  });
+  if (!task) return;
+
+  const cleanerIds = new Set<number>();
+  if (task.assignedUserId) cleanerIds.add(task.assignedUserId);
+  task.taskAssignments.forEach((a) => cleanerIds.add(a.userId));
+
+  for (const userId of cleanerIds) {
+    await createNotification({
+      userId,
+      title: 'Task Approved',
+      message: `Your task "${task.title}" has been approved. Great work!`,
+      type: 'task_completed',
+      metadata: { taskId: input.taskId },
+      screenRoute: 'TaskDetail',
+      screenParams: { taskId: input.taskId },
+    });
+  }
+}
+
+/** Notify company managers (and optionally the actor) for task activity history. */
+export async function notifyTaskActivity(input: {
+  companyId: number;
+  taskId: number;
+  title: string;
+  message: string;
+  type: string;
+  actorUserId?: number;
+  metadata?: Record<string, unknown>;
+  notifyManagers?: boolean;
+  notifyActor?: boolean;
+}) {
+  const userIds = new Set<number>();
+  if (input.notifyActor !== false && input.actorUserId) {
+    userIds.add(input.actorUserId);
+  }
+
+  if (input.notifyManagers !== false) {
+    const managers = await prisma.user.findMany({
+      where: {
+        companyId: input.companyId,
+        role: { in: ['MANAGER', 'COMPANY_ADMIN', 'OWNER'] },
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    for (const m of managers) {
+      if (m.id !== input.actorUserId) userIds.add(m.id);
+    }
+  }
+
+  for (const userId of userIds) {
+    await createNotification({
+      userId,
+      title: input.title,
+      message: input.message,
+      type: input.type,
+      metadata: { taskId: input.taskId, ...input.metadata },
+      screenRoute: 'TaskDetail',
+      screenParams: { taskId: input.taskId },
+    }).catch(() => {});
+  }
 }

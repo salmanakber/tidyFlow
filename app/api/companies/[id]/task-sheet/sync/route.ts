@@ -1,177 +1,162 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import {
+  getCompanySheetConnection,
+  registerSheetWatch,
+  saveMasterSheetConfiguration,
+  saveTaskSheetConfiguration,
+  syncCompanyGoogleSheet,
+} from '@/lib/google-sheets';
 import { UserRole } from '@prisma/client';
-import { importTasksFromCompanySheet, TaskColumnMapping } from '@/lib/google-sheets-tasks';
-import prisma from '@/lib/prisma';
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
+  const role = auth.tokenUser.role as UserRole;
+  if (!['OWNER', 'MANAGER', 'COMPANY_ADMIN', 'SUPER_ADMIN', 'DEVELOPER'].includes(role)) {
+    return NextResponse.json(
+      { success: false, message: 'Only owners and managers can configure Google Sheets sync' },
+      { status: 403 }
+    );
+  }
 
-  // Only allow COMPANY_ADMIN, MANAGER, OWNER, DEVELOPER, SUPER_ADMIN
-  if (
-    role !== UserRole.COMPANY_ADMIN &&
-    role !== UserRole.MANAGER &&
-    role !== UserRole.OWNER &&
-    role !== UserRole.DEVELOPER &&
-    role !== UserRole.SUPER_ADMIN
-  ) {
+  const companyId = Number(params.id);
+  const tokenCompanyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
+  if (tokenCompanyId && tokenCompanyId !== companyId) {
     return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
   }
 
   try {
-    const companyId = parseInt(params.id);
-    
-    // Verify company exists and user has access
-    if (role !== UserRole.SUPER_ADMIN && role !== UserRole.OWNER && role !== UserRole.DEVELOPER) {
-      const userCompanyId = requireCompanyScope(tokenUser);
-      if (userCompanyId !== companyId) {
-        return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
-      }
-    }
-
     const body = await request.json();
-    const { 
-      spreadsheetId, 
-      sheetName, 
-      columnMapping, 
-      propertyIdColumn,
-      actionColumn,
-      syncOnly, // If true, use stored configuration
-    } = body;
-
-    // If syncOnly is true, use stored configuration
-    if (syncOnly) {
-      const spreadsheetIdSetting = await prisma.systemSetting.findUnique({
-        where: { key: `company_${companyId}_task_sheet_id` },
-      });
-      const sheetNameSetting = await prisma.systemSetting.findUnique({
-        where: { key: `company_${companyId}_task_sheet_name` },
-      });
-      const mappingSetting = await prisma.systemSetting.findUnique({
-        where: { key: `company_${companyId}_task_sheet_mapping` },
-      });
-      const propertyIdColumnSetting = await prisma.systemSetting.findUnique({
-        where: { key: `company_${companyId}_task_sheet_property_id_column` },
-      });
-      const actionColumnSetting = await prisma.systemSetting.findUnique({
-        where: { key: `company_${companyId}_task_sheet_action_column` },
-      });
-
-      if (
-        !spreadsheetIdSetting ||
-        !sheetNameSetting ||
-        !mappingSetting ||
-        !propertyIdColumnSetting ||
-        !propertyIdColumnSetting.value ||
-        !actionColumnSetting ||
-        !actionColumnSetting.value
-      ) {
-        return NextResponse.json({ 
-          success: false, 
-          message: 'Task sheet not configured. Please configure spreadsheetId, sheetName, mapping, propertyIdColumn, and actionColumn.' 
-        }, { status: 400 });
-      }
-
-      const storedSpreadsheetId = spreadsheetIdSetting.value;
-      const storedSheetName = sheetNameSetting.value;
-      const storedColumnMapping = JSON.parse(mappingSetting.value) as TaskColumnMapping;
-      const storedPropertyIdColumn = propertyIdColumnSetting.value;
-      const storedActionColumn = actionColumnSetting.value;
-
-      // Import tasks from company sheet using stored config
-      const importResult = await importTasksFromCompanySheet(
-        companyId,
-        storedSpreadsheetId,
-        storedSheetName,
-        storedColumnMapping,
-        storedPropertyIdColumn,
-        storedActionColumn
-      );
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          companyId,
-          importResult,
-        },
-      });
-    }
-
-    // Otherwise, use provided configuration
-    if (!spreadsheetId || !sheetName || !columnMapping || !propertyIdColumn || !actionColumn) {
-      return NextResponse.json({ 
-        success: false, 
-        message: 'spreadsheetId, sheetName, columnMapping, propertyIdColumn, and actionColumn are required' 
-      }, { status: 400 });
-    }
-
-    // Import tasks from company sheet
-    const importResult = await importTasksFromCompanySheet(
-      companyId,
+    const {
+      syncOnly,
+      templateMode,
       spreadsheetId,
       sheetName,
-      columnMapping as TaskColumnMapping,
+      propertiesTab,
+      tasksTab,
+      columnMapping,
       propertyIdColumn,
-      actionColumn
-    );
+      actionColumn,
+      sheetUrl,
+    } = body;
 
-    // Store company-level sheet configuration in SystemSettings
-    await prisma.systemSetting.upsert({
-      where: { key: `company_${companyId}_task_sheet_id` },
-      update: { value: spreadsheetId },
-      create: { key: `company_${companyId}_task_sheet_id`, value: spreadsheetId, category: 'google_sheets' },
-    });
-    
-    await prisma.systemSetting.upsert({
-      where: { key: `company_${companyId}_task_sheet_name` },
-      update: { value: sheetName },
-      create: { key: `company_${companyId}_task_sheet_name`, value: sheetName, category: 'google_sheets' },
-    });
-    
-    await prisma.systemSetting.upsert({
-      where: { key: `company_${companyId}_task_sheet_mapping` },
-      update: { value: JSON.stringify(columnMapping) },
-      create: { key: `company_${companyId}_task_sheet_mapping`, value: JSON.stringify(columnMapping), category: 'google_sheets' },
-    });
-    
-    await prisma.systemSetting.upsert({
-      where: { key: `company_${companyId}_task_sheet_property_id_column` },
-      update: { value: propertyIdColumn },
-      create: { key: `company_${companyId}_task_sheet_property_id_column`, value: propertyIdColumn, category: 'google_sheets' },
-    });
-    
-    await prisma.systemSetting.upsert({
-      where: { key: `company_${companyId}_task_sheet_action_column` },
-      update: { value: actionColumn },
-      create: { key: `company_${companyId}_task_sheet_action_column`, value: actionColumn, category: 'google_sheets' },
-    });
-
-    // Set up Google Drive watch for this sheet
-    try {
-      const { setupWatchChannel } = await import('@/lib/google-drive-watch');
-      await setupWatchChannel(spreadsheetId, companyId, 'task');
-      console.log(`✅ Set up watch channel for company ${companyId} task sheet`);
-    } catch (error: any) {
-      console.error(`⚠️ Failed to set up watch channel for company ${companyId} task sheet:`, error.message);
-      // Don't fail the request if watch setup fails
+    if (syncOnly) {
+      const conn = await getCompanySheetConnection(companyId);
+      if (!conn) {
+        return NextResponse.json({ success: false, message: 'No sheet configuration found' }, { status: 404 });
+      }
+      const importResult = await syncCompanyGoogleSheet(companyId);
+      return NextResponse.json({ success: true, data: { importResult } });
     }
+
+    if (templateMode) {
+      if (!sheetUrl || !propertiesTab || !tasksTab) {
+        return NextResponse.json(
+          { success: false, message: 'sheetUrl, propertiesTab, and tasksTab are required' },
+          { status: 400 }
+        );
+      }
+
+      const existing = await getCompanySheetConnection(companyId);
+      const resolvedSpreadsheetId = spreadsheetId || existing?.spreadsheetId;
+      if (existing && resolvedSpreadsheetId && existing.spreadsheetId !== resolvedSpreadsheetId) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              'Your company already has a different Google Sheet connected. Disconnect it first in Settings → Google Sheets.',
+          },
+          { status: 409 }
+        );
+      }
+
+      await saveMasterSheetConfiguration(companyId, { sheetUrl, propertiesTab, tasksTab });
+
+      const webhookBase = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+      if (webhookBase) {
+        try {
+          await registerSheetWatch(companyId, `${webhookBase}/api/company/google-sheet/webhook`);
+        } catch {
+          /* non-fatal */
+        }
+      }
+
+      const importResult = await syncCompanyGoogleSheet(companyId);
+      return NextResponse.json({
+        success: true,
+        data: { importResult },
+        message: 'Master sheet connected',
+      });
+    }
+
+    if (!spreadsheetId || !sheetName || !columnMapping || !propertyIdColumn || !actionColumn) {
+      return NextResponse.json(
+        { success: false, message: 'spreadsheetId, sheetName, columnMapping, propertyIdColumn, actionColumn required' },
+        { status: 400 }
+      );
+    }
+
+    const existing = await getCompanySheetConnection(companyId);
+    if (existing && existing.spreadsheetId !== spreadsheetId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            'Your company already has a different Google Sheet connected. Disconnect it first in Settings → Google Sheets.',
+        },
+        { status: 409 }
+      );
+    }
+
+    await saveTaskSheetConfiguration(companyId, {
+      spreadsheetId,
+      sheetName,
+      sheetUrl,
+      columnMapping,
+      propertyIdColumn,
+      actionColumn,
+    });
+
+    const webhookBase = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+    if (webhookBase) {
+      try {
+        await registerSheetWatch(companyId, `${webhookBase}/api/company/google-sheet/webhook`);
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    const importResult = await syncCompanyGoogleSheet(companyId);
 
     return NextResponse.json({
       success: true,
-      data: {
-        companyId,
-        importResult,
-      },
+      data: { importResult },
+      message: 'Task sheet configuration saved',
     });
   } catch (error: any) {
-    console.error('Error syncing company task sheet:', error);
-    return NextResponse.json({ 
-      success: false, 
-      message: error.message || 'Failed to sync company task sheet' 
-    }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: error.message || 'Task sheet sync failed' },
+      { status: 400 }
+    );
   }
+}
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const auth = requireAuth(_request);
+  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+
+  const companyId = Number(params.id);
+  const conn = await getCompanySheetConnection(companyId);
+  return NextResponse.json({
+    success: !!(conn?.propertiesTab || conn?.propertyIdColumn),
+    data: conn,
+  });
 }

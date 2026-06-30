@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
+import AIRecommendationsPanel from "@/components/AIRecommendationsPanel"
 
 interface Task {
   id: number
@@ -56,6 +57,7 @@ export default function RotaBuilderPage() {
   })
   const [draggedTask, setDraggedTask] = useState<Task | null>(null)
   const [showConflicts, setShowConflicts] = useState(false)
+  const [aiTaskId, setAiTaskId] = useState<number | null>(null)
 
   useEffect(() => {
     loadRota()
@@ -354,13 +356,19 @@ export default function RotaBuilderPage() {
                                   <div className="font-medium text-gray-900 truncate">
                                     {task.property.address}
                                   </div>
-                                  <div className="text-gray-600 truncate">{task.title}</div>
-                                  <button
-                                    onClick={() => handleUnassign(task.id)}
-                                    className="mt-1 text-red-600 hover:text-red-800 text-xs"
-                                  >
-                                    Remove
-                                  </button>
+                                <div className="text-gray-600 truncate">{task.title}</div>
+                                <button
+                                  onClick={() => setAiTaskId(task.id)}
+                                  className="mt-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
+                                >
+                                  ✨ AI Recommend
+                                </button>
+                                <button
+                                  onClick={() => handleUnassign(task.id)}
+                                  className="mt-1 text-red-600 hover:text-red-800 text-xs block"
+                                >
+                                  Remove
+                                </button>
                                 </div>
                               ))}
                             </div>
@@ -388,6 +396,12 @@ export default function RotaBuilderPage() {
                                   {task.property.address}
                                 </div>
                                 <div className="text-gray-600 truncate">{task.title}</div>
+                                <button
+                                  onClick={() => setAiTaskId(task.id)}
+                                  className="mt-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
+                                >
+                                  ✨ AI Recommend
+                                </button>
                                 <div className="text-xs text-gray-500 mt-1">Drag to assign</div>
                               </div>
                             ))}
@@ -406,6 +420,26 @@ export default function RotaBuilderPage() {
           </div>
         )}
       </div>
+
+      {aiTaskId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-gray-900">Assign Cleaner</h3>
+              <button onClick={() => setAiTaskId(null)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+            <AIRecommendationsPanel
+              taskId={aiTaskId}
+              onAssign={async (cleanerId) => {
+                await handleAssign(aiTaskId, cleanerId)
+                setAiTaskId(null)
+              }}
+            />
+          </div>
+        </div>
+      )}
     </AdminLayout>
   )
 }

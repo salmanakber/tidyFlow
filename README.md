@@ -209,4 +209,4 @@ Test user credentials (after seeding):
 
 ## Support
 
-For issues or questions, contact the MayaOps development team.
+For issues or questions, contact the TidyFlow (hindaraTech) development team.

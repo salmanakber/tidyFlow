@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { TaskStatus, UserRole } from '@prisma/client';
+import { finalizePhotoReviewsOnTaskApproval } from '@/lib/ai/photo-review';
+import { notifyTaskApproved } from '@/lib/notifications';
+import { invalidateAIActivityCache } from '@/lib/ai/activity-queue';
 
 // PATCH /api/tasks/[id]/status
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
@@ -47,7 +50,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const body = await request.json();
-    const { status } = body as { status?: TaskStatus };
+    const { status, latitude, longitude } = body as {
+      status?: TaskStatus;
+      latitude?: number;
+      longitude?: number;
+    };
     if (!status || !Object.values(TaskStatus).includes(status)) {
       return NextResponse.json({ success: false, message: 'Invalid status' }, { status: 400 });
     }
@@ -69,8 +76,22 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const data: any = { status };
+    const reopening =
+      status === TaskStatus.IN_PROGRESS &&
+      [TaskStatus.SUBMITTED, TaskStatus.APPROVED, TaskStatus.REJECTED, TaskStatus.COMPLETED].includes(
+        task.status
+      );
+
     if (status === TaskStatus.IN_PROGRESS && !task.startedAt) data.startedAt = new Date();
-    if ((status === TaskStatus.APPROVED || status === TaskStatus.ARCHIVED) && !task.completedAt) data.completedAt = new Date();
+    if (reopening) {
+      data.completedAt = null;
+    }
+    if (
+      (status === TaskStatus.SUBMITTED || status === TaskStatus.APPROVED || status === TaskStatus.ARCHIVED) &&
+      !task.completedAt
+    ) {
+      data.completedAt = new Date();
+    }
 
     const updated = await prisma.task.update({
       where: { id },
@@ -82,8 +103,145 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         startedAt: true,
         completedAt: true,
         updatedAt: true,
+        companyId: true,
       },
     });
+
+    if (status === TaskStatus.APPROVED || status === TaskStatus.COMPLETED) {
+      finalizePhotoReviewsOnTaskApproval(id, tokenUser.userId).catch((err) =>
+        console.warn('Photo review finalize:', err)
+      );
+      if (status === TaskStatus.APPROVED) {
+        notifyTaskApproved({
+          taskId: id,
+          companyId: task.companyId,
+          approvedByUserId: tokenUser.userId,
+        }).catch(() => {});
+      }
+      invalidateAIActivityCache(task.companyId).catch(() => {});
+    }
+
+    if (reopening) {
+      const assignments = await prisma.taskAssignment.findMany({
+        where: { taskId: id },
+        select: { userId: true },
+      });
+      const cleanerIds = assignments.map((a) => a.userId);
+      if (task.assignedUserId && !cleanerIds.includes(task.assignedUserId)) {
+        cleanerIds.push(task.assignedUserId);
+      }
+      if (cleanerIds.length > 0) {
+        await prisma.taskAssignment.updateMany({
+          where: { taskId: id, userId: { in: cleanerIds } },
+          data: {
+            startedAt: null,
+            endedAt: null,
+            trackerActive: false,
+            onBreak: false,
+            breakStartedAt: null,
+            totalBreakMinutes: 0,
+            durationMinutes: null,
+          },
+        });
+      }
+    }
+
+    // GPS verification (non-blocking — flags only; cleaners handled via task-time-log)
+    if (latitude != null && longitude != null && role !== UserRole.CLEANER) {
+      const { performLocationCheck } = await import('@/lib/location-check');
+      const checkType =
+        status === TaskStatus.IN_PROGRESS
+          ? 'start'
+          : status === TaskStatus.SUBMITTED || status === TaskStatus.COMPLETED
+            ? 'complete'
+            : 'check';
+
+      performLocationCheck({
+        taskId: id,
+        userId: tokenUser.userId,
+        companyId: task.companyId,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        checkType,
+      }).catch((err) => console.error('GPS check failed:', err));
+    }
+
+    // Per-cleaner automated time logs
+    if (role === UserRole.CLEANER) {
+      const { recordJobStart, recordJobEnd } = await import('@/lib/task-time-log');
+      if (status === TaskStatus.IN_PROGRESS) {
+        recordJobStart({
+          taskId: id,
+          userId: tokenUser.userId,
+          companyId: task.companyId,
+          latitude: latitude != null ? Number(latitude) : undefined,
+          longitude: longitude != null ? Number(longitude) : undefined,
+        }).catch((err) => console.error('Job start time log failed:', err));
+      }
+      if (status === TaskStatus.SUBMITTED) {
+        recordJobEnd({
+          taskId: id,
+          userId: tokenUser.userId,
+          companyId: task.companyId,
+          latitude: latitude != null ? Number(latitude) : undefined,
+          longitude: longitude != null ? Number(longitude) : undefined,
+        }).catch((err) => console.error('Job end time log failed:', err));
+      }
+    }
+
+    const { emitTaskEvent } = await import('@/lib/realtime');
+    await emitTaskEvent('task:status', task.companyId, id, {
+      status: updated.status,
+      startedAt: updated.startedAt,
+      completedAt: updated.completedAt,
+      userId: tokenUser.userId,
+    });
+    await emitTaskEvent('task:updated', task.companyId, id, {
+      status: updated.status,
+      userId: tokenUser.userId,
+    });
+
+    if (reopening) {
+      await emitTaskEvent('task:tracker', task.companyId, id, {
+        action: 'reset',
+        reopened: true,
+      });
+    }
+
+    const { notifyTaskActivity } = await import('@/lib/notifications');
+    const actor = await prisma.user.findUnique({
+      where: { id: tokenUser.userId },
+      select: { firstName: true, lastName: true, role: true },
+    });
+    const actorName = `${actor?.firstName || ''} ${actor?.lastName || ''}`.trim() || 'Someone';
+    await notifyTaskActivity({
+      companyId: task.companyId,
+      taskId: id,
+      title: 'Task status updated',
+      message: `${actorName} changed "${updated.title}" to ${updated.status.replace(/_/g, ' ')}.`,
+      type: 'task_updated',
+      actorUserId: tokenUser.userId,
+      metadata: { status: updated.status },
+      notifyManagers: role !== UserRole.CLEANER,
+      notifyActor: true,
+    }).catch(() => {});
+
+    // Notify assigned cleaners on status changes
+    try {
+      const assignments = await prisma.taskAssignment.findMany({
+        where: { taskId: id },
+        select: { userId: true },
+      });
+      const cleanerIds = [...new Set(assignments.map((a) => a.userId))];
+      if (task.assignedUserId) cleanerIds.push(task.assignedUserId);
+      const uniqueCleanerIds = [...new Set(cleanerIds)];
+      if (uniqueCleanerIds.length > 0) {
+        const { sendTaskUpdatedNotification } = await import('@/lib/notifications');
+        await sendTaskUpdatedNotification(id, uniqueCleanerIds, 'status');
+      }
+    } catch (notifyErr) {
+      console.warn('Status notification failed:', notifyErr);
+    }
 
     return NextResponse.json({ success: true, data: { task: updated } });
   } catch (error) {

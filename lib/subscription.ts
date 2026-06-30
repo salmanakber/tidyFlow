@@ -1,123 +1,567 @@
 import prisma from '@/lib/prisma';
-import { JWTPayload } from '@/lib/auth';
+import crypto from 'crypto';
 
-/**
- * Check if a company has an active subscription or trial
- */
-export async function hasActiveSubscription(companyId: number): Promise<boolean> {
-  try {
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-    });
+export type PlanTier = 'STARTUP' | 'STANDARD' | 'PREMIUM';
 
-    if (!company) return false;
-
-    const now = new Date();
-
-    // Check subscription status first
-    const subscriptionStatus = company.subscriptionStatus;
-    
-    // If subscription is canceled, past_due, unpaid, inactive, incomplete, or incomplete_expired, deny access
-    if (['canceled', 'past_due', 'unpaid', 'inactive', 'incomplete', 'incomplete_expired'].includes(subscriptionStatus)) {
-      return false;
-    }
-
-    // Check if company has active trial (from Company model)
-    // @ts-ignore - Fields exist in schema but types may not be updated
-    if (company.isTrialActive && company.trialEndsAt) {
-      // @ts-ignore
-      const trialEnd = new Date(company.trialEndsAt);
-      if (trialEnd > now) {
-        return true; // Trial is still active
-      } else {
-        // Trial expired - check if there's an active paid subscription
-        if (subscriptionStatus === 'active') {
-          return true;
-        }
-        return false; // Trial expired and no active subscription
-      }
-    }
-
-    // Get latest billing record
-    const billingRecord = await prisma.billingRecord.findFirst({
-      where: {
-        companyId,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (billingRecord) {
-      const status = billingRecord.status;
-      
-      // Check if billing record is active or trialing (exclude incomplete)
-      if (status === 'active' || status === 'trialing') {
-        // @ts-ignore - Fields exist in schema
-        if (billingRecord.isTrialPeriod && billingRecord.trialEndsAt) {
-          // @ts-ignore
-          const trialEnd = new Date(billingRecord.trialEndsAt);
-          if (trialEnd > now) {
-            return true; // Trial still active
-          } else {
-            // Trial expired - check subscription status
-            return subscriptionStatus === 'active';
-          }
-        } else if (status === 'active') {
-          // Check if subscription period hasn't ended
-          // @ts-ignore
-          if (billingRecord.nextBillingDate) {
-            // @ts-ignore
-            const nextBilling = new Date(billingRecord.nextBillingDate);
-            if (nextBilling > now) {
-              return true; // Subscription period still active
-            }
-          } else {
-            return true; // Active subscription without end date
-          }
-        }
-      }
-
-      // If billing record status is failed, canceled, inactive, or incomplete, deny access
-      if (['failed', 'canceled', 'inactive', 'incomplete'].includes(status)) {
-        return false;
-      }
-    }
-
-    // Final check: subscription status must be active or trialing
-    if (subscriptionStatus === 'active' || subscriptionStatus === 'trialing') {
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    console.error('Error checking subscription:', error);
-    return false;
-  }
+export interface PlanLimits {
+  tier: PlanTier;
+  label: string;
+  monthlyPrice: number;
+  maxCleaners: number;
+  maxProperties: number;
+  maxManagers: number;
+  aiRequestsPerMonth: number;
+  aiPhotoAnalysis: boolean;
+  aiInsights: boolean;
+  aiAssignment: boolean;
+  aiTaskSuggestions: boolean;
+  invoicesEnabled: boolean;
+  maxInvoicesPerMonth: number;
+  aiInvoiceAssist: boolean;
+  maxPhotoVerificationsPerMonth: number;
+  maxPdfGenerationsPerMonth: number;
 }
 
-/**
- * Middleware function to require active subscription
- * Returns true if access is allowed, false otherwise
- */
-export async function requireActiveSubscription(tokenUser: JWTPayload): Promise<{ allowed: boolean; message?: string }> {
-  // Super admins and developers always have access (platform owners)
-  if (tokenUser.role === 'SUPER_ADMIN' || tokenUser.role === 'DEVELOPER') {
-    return { allowed: true };
-  }
+export interface PlanUsageSnapshot {
+  planTier: string;
+  label: string;
+  subscriptionActive: boolean;
+  features: {
+    aiPhoto: boolean;
+    aiInsights: boolean;
+    aiAssignment: boolean;
+    aiTaskSuggestions: boolean;
+    invoices: boolean;
+    aiInvoiceAssist: boolean;
+    pdfGeneration: boolean;
+  };
+  planIncludes: {
+    aiPhoto: boolean;
+    aiInsights: boolean;
+    aiAssignment: boolean;
+    aiTaskSuggestions: boolean;
+    invoices: boolean;
+    aiInvoiceAssist: boolean;
+  };
+  remaining: {
+    aiThisMonth: number;
+    invoicesThisMonth: number;
+    photoVerificationsThisMonth: number;
+    pdfGenerationsThisMonth: number;
+  };
+  usage: {
+    cleaners: { current: number; max: number; atLimit: boolean };
+    properties: { current: number; max: number; atLimit: boolean };
+    managers: { current: number; max: number; atLimit: boolean };
+    aiThisMonth: { current: number; max: number; atLimit: boolean };
+    invoicesThisMonth: { current: number; max: number; atLimit: boolean };
+    photoVerificationsThisMonth: { current: number; max: number; atLimit: boolean };
+    pdfGenerationsThisMonth: { current: number; max: number; atLimit: boolean };
+  };
+  blocked: {
+    ai: boolean;
+    invoices: boolean;
+    photoVerification: boolean;
+    pdfGeneration: boolean;
+    addCleaner: boolean;
+    addProperty: boolean;
+    addManager: boolean;
+  };
+  upgradeMessage?: string;
+}
 
-  // Company owners need active subscription/trial
+const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
+  STARTUP: {
+    tier: 'STARTUP',
+    label: 'Startup',
+    monthlyPrice: 29,
+    maxCleaners: 5,
+    maxProperties: 10,
+    maxManagers: 2,
+    aiRequestsPerMonth: 50,
+    aiPhotoAnalysis: true,
+    aiInsights: false,
+    aiAssignment: true,
+    aiTaskSuggestions: true,
+    invoicesEnabled: false,
+    maxInvoicesPerMonth: 5,
+    aiInvoiceAssist: false,
+    maxPhotoVerificationsPerMonth: 30,
+    maxPdfGenerationsPerMonth: 20,
+  },
+  STANDARD: {
+    tier: 'STANDARD',
+    label: 'Standard',
+    monthlyPrice: 79,
+    maxCleaners: 25,
+    maxProperties: 50,
+    maxManagers: 10,
+    aiRequestsPerMonth: 500,
+    aiPhotoAnalysis: true,
+    aiInsights: true,
+    aiAssignment: true,
+    aiTaskSuggestions: true,
+    invoicesEnabled: true,
+    maxInvoicesPerMonth: 50,
+    aiInvoiceAssist: true,
+    maxPhotoVerificationsPerMonth: 200,
+    maxPdfGenerationsPerMonth: 100,
+  },
+  PREMIUM: {
+    tier: 'PREMIUM',
+    label: 'Premium',
+    monthlyPrice: 149,
+    maxCleaners: 999,
+    maxProperties: 999,
+    maxManagers: 999,
+    aiRequestsPerMonth: 99999,
+    aiPhotoAnalysis: true,
+    aiInsights: true,
+    aiAssignment: true,
+    aiTaskSuggestions: true,
+    invoicesEnabled: true,
+    maxInvoicesPerMonth: 99999,
+    aiInvoiceAssist: true,
+    maxPhotoVerificationsPerMonth: 99999,
+    maxPdfGenerationsPerMonth: 99999,
+  },
+};
+
+function startOfMonth() {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** All three tiers for admin UI — merges DB overrides with built-in defaults. */
+export async function getAllSubscriptionPlansForAdmin(): Promise<PlanLimits[]> {
+  const rows = await prisma.subscriptionPlanLimit.findMany({ orderBy: { tier: 'asc' } });
+  const rowMap = new Map(rows.map((r) => [r.tier as PlanTier, r]));
+
+  return (['STARTUP', 'STANDARD', 'PREMIUM'] as PlanTier[]).map((tier) => {
+    const fallback = DEFAULT_LIMITS[tier];
+    const row = rowMap.get(tier);
+    if (!row) return fallback;
+    return {
+      tier,
+      label: row.label || fallback.label,
+      monthlyPrice: Number((row as { monthlyPrice?: unknown }).monthlyPrice ?? fallback.monthlyPrice),
+      maxCleaners: row.maxCleaners,
+      maxProperties: row.maxProperties,
+      maxManagers: row.maxManagers,
+      aiRequestsPerMonth: row.aiRequestsPerMonth,
+      aiPhotoAnalysis: row.aiPhotoAnalysis,
+      aiInsights: row.aiInsights,
+      aiAssignment: row.aiAssignment,
+      aiTaskSuggestions: row.aiTaskSuggestions,
+      invoicesEnabled: row.invoicesEnabled,
+      maxInvoicesPerMonth: row.maxInvoicesPerMonth,
+      aiInvoiceAssist: row.aiInvoiceAssist,
+      maxPhotoVerificationsPerMonth:
+        (row as { maxPhotoVerificationsPerMonth?: number }).maxPhotoVerificationsPerMonth ??
+        fallback.maxPhotoVerificationsPerMonth,
+      maxPdfGenerationsPerMonth:
+        (row as { maxPdfGenerationsPerMonth?: number }).maxPdfGenerationsPerMonth ??
+        fallback.maxPdfGenerationsPerMonth,
+    };
+  });
+}
+
+export async function getPlanLimits(tier?: string | null): Promise<PlanLimits> {
+  const key = (tier?.toUpperCase() || 'STANDARD') as PlanTier;
+  const fallback = DEFAULT_LIMITS[key] || DEFAULT_LIMITS.STANDARD;
+
+  const row = await prisma.subscriptionPlanLimit.findUnique({
+    where: { tier: key },
+  });
+
+  if (!row) return fallback;
+
+  return {
+    tier: key,
+    label: row.label || fallback.label,
+    monthlyPrice: Number((row as { monthlyPrice?: unknown }).monthlyPrice ?? fallback.monthlyPrice),
+    maxCleaners: row.maxCleaners,
+    maxProperties: row.maxProperties,
+    maxManagers: row.maxManagers,
+    aiRequestsPerMonth: row.aiRequestsPerMonth,
+    aiPhotoAnalysis: row.aiPhotoAnalysis,
+    aiInsights: row.aiInsights,
+    aiAssignment: row.aiAssignment,
+    aiTaskSuggestions: row.aiTaskSuggestions,
+    invoicesEnabled: row.invoicesEnabled,
+    maxInvoicesPerMonth: row.maxInvoicesPerMonth,
+    aiInvoiceAssist: row.aiInvoiceAssist,
+    maxPhotoVerificationsPerMonth:
+      (row as { maxPhotoVerificationsPerMonth?: number }).maxPhotoVerificationsPerMonth ??
+      fallback.maxPhotoVerificationsPerMonth,
+    maxPdfGenerationsPerMonth:
+      (row as { maxPdfGenerationsPerMonth?: number }).maxPdfGenerationsPerMonth ??
+      fallback.maxPdfGenerationsPerMonth,
+  };
+}
+
+export async function getCompanyPlan(companyId: number) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: {
+      id: true,
+      name: true,
+      planTier: true,
+      subscriptionStatus: true,
+      isTrialActive: true,
+      trialEndsAt: true,
+    },
+  });
+  if (!company) return null;
+
+  const limits = await getPlanLimits(company.planTier);
+  return { company, limits };
+}
+
+export async function requireActiveSubscription(tokenUser: {
+  companyId?: number | null;
+  role?: string;
+}) {
   if (!tokenUser.companyId) {
-    return { allowed: false, message: 'No company associated with user' };
+    if (['SUPER_ADMIN', 'DEVELOPER', 'OWNER'].includes(tokenUser.role || '')) {
+      return { allowed: true };
+    }
+    return { allowed: false, message: 'Company required' };
   }
 
-  const hasActive = await hasActiveSubscription(tokenUser.companyId);
-  
-  if (!hasActive) {
-    return { 
-      allowed: false, 
-      message: 'Your trial has expired or subscription is inactive. Please subscribe to continue using the platform.' 
+  const company = await prisma.company.findUnique({
+    where: { id: tokenUser.companyId },
+    select: { subscriptionStatus: true, isTrialActive: true, trialEndsAt: true },
+  });
+
+  if (!company) return { allowed: false, message: 'Company not found' };
+
+  const active =
+    company.subscriptionStatus === 'active' ||
+    (company.isTrialActive && company.trialEndsAt && company.trialEndsAt > new Date());
+
+  if (!active) {
+    return { allowed: false, message: 'Subscription inactive. Please renew to continue.' };
+  }
+
+  return { allowed: true };
+}
+
+export async function checkPlanLimit(
+  companyId: number,
+  resource:
+    | 'cleaners'
+    | 'properties'
+    | 'managers'
+    | 'ai_request'
+    | 'invoice'
+    | 'photo_verification'
+    | 'pdf_generation'
+): Promise<{ allowed: boolean; message?: string; limits?: PlanLimits }> {
+  const plan = await getCompanyPlan(companyId);
+  if (!plan) return { allowed: false, message: 'Company not found' };
+
+  const { limits } = plan;
+  const monthStart = startOfMonth();
+
+  if (resource === 'cleaners') {
+    const count = await prisma.user.count({
+      where: { companyId, role: 'CLEANER', isActive: true },
+    });
+    if (count >= limits.maxCleaners) {
+      return {
+        allowed: false,
+        message: `${limits.label} plan allows up to ${limits.maxCleaners} cleaners. Upgrade to add more.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'properties') {
+    const count = await prisma.property.count({ where: { companyId, isActive: true } });
+    if (count >= limits.maxProperties) {
+      return {
+        allowed: false,
+        message: `${limits.label} plan allows up to ${limits.maxProperties} properties. Upgrade to add more.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'managers') {
+    const count = await prisma.user.count({
+      where: { companyId, role: { in: ['MANAGER', 'COMPANY_ADMIN'] }, isActive: true },
+    });
+    if (count >= limits.maxManagers) {
+      return {
+        allowed: false,
+        message: `${limits.label} plan allows up to ${limits.maxManagers} managers.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'ai_request') {
+    const used = await prisma.aIUsageLog.count({
+      where: { companyId, createdAt: { gte: monthStart } },
+    });
+    if (used >= limits.aiRequestsPerMonth) {
+      return {
+        allowed: false,
+        message: `AI usage limit reached (${limits.aiRequestsPerMonth}/month on ${limits.label} plan). Upgrade for more.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'invoice') {
+    if (!limits.invoicesEnabled) {
+      return {
+        allowed: false,
+        message: `${limits.label} plan does not include client invoicing. Upgrade to enable invoices.`,
+        limits,
+      };
+    }
+    const used = await prisma.clientInvoice.count({
+      where: { companyId, createdAt: { gte: monthStart }, status: { not: 'void' } },
+    });
+    if (used >= limits.maxInvoicesPerMonth) {
+      return {
+        allowed: false,
+        message: `Invoice limit reached (${limits.maxInvoicesPerMonth}/month on ${limits.label} plan). Upgrade for more.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'photo_verification') {
+    if (!limits.aiPhotoAnalysis) {
+      return {
+        allowed: false,
+        message: `${limits.label} plan does not include AI photo verification. Upgrade your subscription.`,
+        limits,
+      };
+    }
+    const used = await prisma.aIUsageLog.count({
+      where: { companyId, feature: 'photo_verification', createdAt: { gte: monthStart } },
+    });
+    if (used >= limits.maxPhotoVerificationsPerMonth) {
+      return {
+        allowed: false,
+        message: `Photo verification limit reached (${limits.maxPhotoVerificationsPerMonth}/month on ${limits.label} plan). Upgrade for more.`,
+        limits,
+      };
+    }
+  }
+
+  if (resource === 'pdf_generation') {
+    const used = await prisma.pDFRecord.count({
+      where: {
+        createdAt: { gte: monthStart },
+        task: { companyId },
+      },
+    });
+    if (used >= limits.maxPdfGenerationsPerMonth) {
+      return {
+        allowed: false,
+        message: `PDF generation limit reached (${limits.maxPdfGenerationsPerMonth}/month on ${limits.label} plan). Upgrade for more.`,
+        limits,
+      };
+    }
+  }
+
+  return { allowed: true, limits };
+}
+
+export async function requireAIFeature(
+  companyId: number,
+  feature: 'photo' | 'insights' | 'assignment' | 'task_suggestions'
+): Promise<{ allowed: boolean; message?: string }> {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+
+  const plan = await getCompanyPlan(companyId);
+  if (!plan) return { allowed: false, message: 'Company not found' };
+
+  if (feature === 'photo') {
+    const photoLimit = await checkPlanLimit(companyId, 'photo_verification');
+    if (!photoLimit.allowed) return photoLimit;
+  } else {
+    const usage = await checkPlanLimit(companyId, 'ai_request');
+    if (!usage.allowed) return usage;
+  }
+
+  const flags: Record<string, boolean> = {
+    photo: plan.limits.aiPhotoAnalysis,
+    insights: plan.limits.aiInsights,
+    assignment: plan.limits.aiAssignment,
+    task_suggestions: plan.limits.aiTaskSuggestions,
+  };
+
+  if (!flags[feature]) {
+    return {
+      allowed: false,
+      message: `${plan.limits.label} plan does not include this AI feature. Upgrade your subscription.`,
     };
   }
 
   return { allowed: true };
 }
 
+export async function requirePdfGeneration(companyId: number) {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+  return checkPlanLimit(companyId, 'pdf_generation');
+}
+
+export async function requireInvoiceFeature(companyId: number) {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+  return checkPlanLimit(companyId, 'invoice');
+}
+
+export async function logAIUsage(companyId: number, feature: string) {
+  await prisma.aIUsageLog.create({ data: { companyId, feature } }).catch(() => {});
+
+  try {
+    const plan = await getCompanyPlan(companyId);
+    if (!plan) return;
+    const monthStart = startOfMonth();
+    const used = await prisma.aIUsageLog.count({
+      where: { companyId, createdAt: { gte: monthStart } },
+    });
+    const remaining = Math.max(0, plan.limits.aiRequestsPerMonth - used);
+    if (remaining > 5) return;
+
+    const { enqueuePlanLimitWarning } = await import('./automation-queue');
+    const { notifyOwnersPlanLimitLow } = await import('./automation-worker');
+    const queued = await enqueuePlanLimitWarning(
+      companyId,
+      remaining,
+      plan.limits.aiRequestsPerMonth
+    );
+    if (!queued) {
+      await notifyOwnersPlanLimitLow(companyId, remaining, plan.limits.aiRequestsPerMonth);
+    }
+  } catch (err) {
+    console.warn('Plan limit notification check failed:', err);
+  }
+}
+
+export function hashFingerprint(parts: (string | number | Date | null | undefined)[]): string {
+  const raw = parts.map((p) => (p instanceof Date ? p.toISOString() : String(p ?? ''))).join('|');
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+}
+
+export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsageSnapshot | null> {
+  const plan = await getCompanyPlan(companyId);
+  if (!plan) return null;
+
+  const monthStart = startOfMonth();
+  const [cleaners, properties, managers, aiUsed, invoicesUsed, photoVerificationsUsed, pdfGenerationsUsed] =
+    await Promise.all([
+    prisma.user.count({ where: { companyId, role: 'CLEANER', isActive: true } }),
+    prisma.property.count({ where: { companyId, isActive: true } }),
+    prisma.user.count({
+      where: { companyId, role: { in: ['MANAGER', 'COMPANY_ADMIN'] }, isActive: true },
+    }),
+    prisma.aIUsageLog.count({ where: { companyId, createdAt: { gte: monthStart } } }),
+    prisma.clientInvoice.count({
+      where: { companyId, createdAt: { gte: monthStart }, status: { not: 'void' } },
+    }),
+    prisma.aIUsageLog.count({
+      where: { companyId, feature: 'photo_verification', createdAt: { gte: monthStart } },
+    }),
+    prisma.pDFRecord.count({
+      where: { createdAt: { gte: monthStart }, task: { companyId } },
+    }),
+  ]);
+
+  const { limits, company } = plan;
+  const subscriptionActive =
+    company.subscriptionStatus === 'active' ||
+    !!(company.isTrialActive && company.trialEndsAt && company.trialEndsAt > new Date());
+
+  const aiAtLimit = aiUsed >= limits.aiRequestsPerMonth;
+  const invoicesAtLimit = !limits.invoicesEnabled || invoicesUsed >= limits.maxInvoicesPerMonth;
+  const photoAtLimit =
+    !limits.aiPhotoAnalysis || photoVerificationsUsed >= limits.maxPhotoVerificationsPerMonth;
+  const pdfAtLimit = pdfGenerationsUsed >= limits.maxPdfGenerationsPerMonth;
+
+  return {
+    planTier: company.planTier || 'STANDARD',
+    label: limits.label,
+    subscriptionActive,
+    features: {
+      aiPhoto: limits.aiPhotoAnalysis && !photoAtLimit && subscriptionActive,
+      aiInsights: limits.aiInsights && !aiAtLimit && subscriptionActive,
+      aiAssignment: limits.aiAssignment && !aiAtLimit && subscriptionActive,
+      aiTaskSuggestions: limits.aiTaskSuggestions && !aiAtLimit && subscriptionActive,
+      invoices: limits.invoicesEnabled && !invoicesAtLimit && subscriptionActive,
+      aiInvoiceAssist: limits.aiInvoiceAssist && !aiAtLimit && subscriptionActive,
+      pdfGeneration: !pdfAtLimit && subscriptionActive,
+    },
+    planIncludes: {
+      aiPhoto: limits.aiPhotoAnalysis,
+      aiInsights: limits.aiInsights,
+      aiAssignment: limits.aiAssignment,
+      aiTaskSuggestions: limits.aiTaskSuggestions,
+      invoices: limits.invoicesEnabled,
+      aiInvoiceAssist: limits.aiInvoiceAssist,
+    },
+    remaining: {
+      aiThisMonth: Math.max(0, limits.aiRequestsPerMonth - aiUsed),
+      invoicesThisMonth: Math.max(0, limits.maxInvoicesPerMonth - invoicesUsed),
+      photoVerificationsThisMonth: Math.max(
+        0,
+        limits.maxPhotoVerificationsPerMonth - photoVerificationsUsed
+      ),
+      pdfGenerationsThisMonth: Math.max(0, limits.maxPdfGenerationsPerMonth - pdfGenerationsUsed),
+    },
+    usage: {
+      cleaners: { current: cleaners, max: limits.maxCleaners, atLimit: cleaners >= limits.maxCleaners },
+      properties: {
+        current: properties,
+        max: limits.maxProperties,
+        atLimit: properties >= limits.maxProperties,
+      },
+      managers: { current: managers, max: limits.maxManagers, atLimit: managers >= limits.maxManagers },
+      aiThisMonth: {
+        current: aiUsed,
+        max: limits.aiRequestsPerMonth,
+        atLimit: aiAtLimit,
+      },
+      invoicesThisMonth: {
+        current: invoicesUsed,
+        max: limits.maxInvoicesPerMonth,
+        atLimit: invoicesAtLimit,
+      },
+      photoVerificationsThisMonth: {
+        current: photoVerificationsUsed,
+        max: limits.maxPhotoVerificationsPerMonth,
+        atLimit: photoAtLimit,
+      },
+      pdfGenerationsThisMonth: {
+        current: pdfGenerationsUsed,
+        max: limits.maxPdfGenerationsPerMonth,
+        atLimit: pdfAtLimit,
+      },
+    },
+    blocked: {
+      ai: aiAtLimit || !subscriptionActive,
+      invoices: invoicesAtLimit || !subscriptionActive,
+      photoVerification: photoAtLimit || !subscriptionActive,
+      pdfGeneration: pdfAtLimit || !subscriptionActive,
+      addCleaner: cleaners >= limits.maxCleaners || !subscriptionActive,
+      addProperty: properties >= limits.maxProperties || !subscriptionActive,
+      addManager: managers >= limits.maxManagers || !subscriptionActive,
+    },
+    upgradeMessage: !subscriptionActive
+      ? 'Your subscription is inactive. Renew in Billing to restore features.'
+      : aiAtLimit
+        ? `AI limit reached (${aiUsed}/${limits.aiRequestsPerMonth} this month). Upgrade your plan.`
+        : undefined,
+  };
+}

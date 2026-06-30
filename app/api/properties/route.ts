@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
-import { requireActiveSubscription } from '@/lib/subscription';
+import { requireActiveSubscription, checkPlanLimit } from '@/lib/subscription';
 import { UserRole } from '@prisma/client';
 
 // GET /api/properties
@@ -39,6 +39,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const propertyInclude = {
+      company: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    };
+
     if (role === UserRole.OWNER || role === UserRole.MANAGER || role === UserRole.SUPER_ADMIN || role === UserRole.CLEANER) {
       // Allow companyId from query param for SUPER_ADMIN to view different companies
       if (companyIdParam) {
@@ -47,38 +60,42 @@ export async function GET(request: NextRequest) {
       else {
         where.companyId = tokenUser.companyId;
       }
-      const properties = await prisma.property.findMany({ 
-        where,
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { id: 'asc' } 
+      const [properties, total] = await Promise.all([
+        prisma.property.findMany({ 
+          where,
+          skip,
+          take: limit,
+          include: propertyInclude,
+          orderBy: { id: 'asc' } 
+        }),
+        prisma.property.count({ where }),
+      ]);
+      return NextResponse.json({
+        success: true,
+        data: { properties },
+        pagination: { page, limit, total, hasMore: skip + properties.length < total },
       });
-      return NextResponse.json({ success: true, data: { properties } });
     }
 
     const companyId = requireCompanyScope(tokenUser);
     if (!companyId) return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
 
-    const properties = await prisma.property.findMany({
-      where: { ...where, companyId },
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-      orderBy: { id: 'asc' },
-    });
+    const [properties, total] = await Promise.all([
+      prisma.property.findMany({
+        where: { ...where, companyId },
+        skip,
+        take: limit,
+        include: propertyInclude,
+        orderBy: { id: 'asc' },
+      }),
+      prisma.property.count({ where: { ...where, companyId } }),
+    ]);
 
-    return NextResponse.json({ success: true, data: { properties } });
+    return NextResponse.json({
+      success: true,
+      data: { properties },
+      pagination: { page, limit, total, hasMore: skip + properties.length < total },
+    });
   } catch (error) {
     console.error('Properties GET error:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
@@ -106,6 +123,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const subscriptionCheck = await requireActiveSubscription(tokenUser);
+  if (!subscriptionCheck.allowed) {
+    return NextResponse.json({ success: false, message: subscriptionCheck.message }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { 
@@ -118,7 +140,11 @@ export async function POST(request: NextRequest) {
       companyId: bodyCompanyId,
       unitCount,
       pricePerUnit,
-      googleSheetUrl
+      googleSheetUrl,
+      clientName,
+      clientEmail,
+      clientPhone,
+      defaultServiceRate,
     } = body;
 
     if (!address || !propertyType) {
@@ -134,6 +160,11 @@ export async function POST(request: NextRequest) {
     } else {
       companyId = requireCompanyScope(tokenUser);
       if (!companyId) return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+    }
+
+    const propertyLimit = await checkPlanLimit(companyId, 'properties');
+    if (!propertyLimit.allowed) {
+      return NextResponse.json({ success: false, message: propertyLimit.message }, { status: 403 });
     }
 
     // Get default price per unit from admin configuration
@@ -170,6 +201,10 @@ export async function POST(request: NextRequest) {
         notes,
         // @ts-ignore
         googleSheetUrl: googleSheetUrl || null,
+        clientName: clientName || null,
+        clientEmail: clientEmail || null,
+        clientPhone: clientPhone || null,
+        defaultServiceRate: defaultServiceRate ? Number(defaultServiceRate) : null,
       },
     });
 
@@ -190,120 +225,20 @@ export async function POST(request: NextRequest) {
       data: { propertyCount },
     });
 
-    // Sync with Stripe billing (prorated update)
+    // Track property count for reporting (billing is flat per plan tier, not per property)
     try {
       const billingRecord = await prisma.billingRecord.findFirst({
-        where: { 
-          companyId, 
-          status: { in: ["active", "trialing"] } 
-        },
-        orderBy: { createdAt: "desc" },
+        where: { companyId, status: { in: ['active', 'trialing'] } },
+        orderBy: { createdAt: 'desc' },
       });
-
-      if (billingRecord?.subscriptionId) {
-        const { 
-          updatePropertyUsageQuantity, 
-          addPropertyUsageToSubscription,
-          createStripeInstance,
-          decrypt
-        } = await import("@/lib/stripe");
-        
-        // Get Stripe secret key from SystemSetting
-        let stripeSecretKey = '';
-        try {
-          const secretKeySetting = await prisma.systemSetting.findUnique({
-            where: { key: 'stripe_secret_key' },
-          });
-          if (secretKeySetting) {
-            stripeSecretKey = secretKeySetting.isEncrypted 
-              ? decrypt(secretKeySetting.value) 
-              : secretKeySetting.value;
-          }
-        } catch (error) {
-          console.warn('Failed to fetch Stripe secret key from settings:', error);
-          stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-        }
-        
-        // Get property price ID from SystemSetting
-        let propertyPriceId = '';
-        try {
-          const priceIdSetting = await prisma.systemSetting.findUnique({
-            where: { key: 'stripe_property_price_id' },
-            select: { value: true },
-          });
-          propertyPriceId = priceIdSetting?.value || process.env.STRIPE_PRICE_ID_PROPERTY_BASE || process.env.STRIPE_PROPERTY_PRICE_ID || '';
-        } catch (error) {
-          console.warn('Failed to fetch Stripe property price ID from settings:', error);
-          propertyPriceId = process.env.STRIPE_PRICE_ID_PROPERTY_BASE || process.env.STRIPE_PROPERTY_PRICE_ID || '';
-        }
-        
-        if (propertyPriceId && stripeSecretKey) {
-          // Create Stripe instance with credentials from SystemSetting
-          const stripeInstance = createStripeInstance(stripeSecretKey);
-          
-          // @ts-ignore - Field exists in schema but Prisma client needs regeneration
-          if (billingRecord.propertyUsageItemId) {
-            // Update existing property usage item
-            await updatePropertyUsageQuantity(
-              billingRecord.subscriptionId,
-              // @ts-ignore
-              billingRecord.propertyUsageItemId,
-              propertyCount,
-              stripeInstance
-            );
-          } else if (propertyCount > 0) {
-            // Add property usage item if it doesn't exist
-            const updatedSubscription = await addPropertyUsageToSubscription(
-              billingRecord.subscriptionId,
-              propertyPriceId,
-              propertyCount,
-              stripeInstance
-            );
-            
-            // Find and store the property usage item ID
-            const propertyItem = updatedSubscription.items.data.find(
-              (item) => item.price.id === propertyPriceId
-            );
-            
-            if (propertyItem) {
-              await prisma.billingRecord.update({
-                where: { id: billingRecord.id },
-                data: { 
-                  propertyCount,
-                  // @ts-ignore - Field exists in schema but Prisma client needs regeneration
-                  propertyUsageItemId: propertyItem.id,
-                },
-              });
-            } else {
-              await prisma.billingRecord.update({
-                where: { id: billingRecord.id },
-                data: { propertyCount },
-              });
-            }
-          } else {
-            // No properties, just update the count
-            await prisma.billingRecord.update({
-              where: { id: billingRecord.id },
-              data: { propertyCount },
-            });
-          }
-        } else {
-          // Fallback: just update property count if price ID not configured
-          await prisma.billingRecord.update({
-            where: { id: billingRecord.id },
-            data: { propertyCount },
-          });
-        }
-      } else {
-        // No active subscription, just update property count
-        await prisma.company.update({
-          where: { id: companyId },
+      if (billingRecord) {
+        await prisma.billingRecord.update({
+          where: { id: billingRecord.id },
           data: { propertyCount },
         });
       }
     } catch (error) {
-      console.error("Error syncing Stripe billing:", error);
-      // Don't fail the request if Stripe sync fails
+      console.warn('Failed to update billing property count:', error);
     }
 
     return NextResponse.json({ success: true, data: { property } }, { status: 201 });

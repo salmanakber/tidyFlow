@@ -62,7 +62,7 @@ export async function GET(
     return new NextResponse(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="payroll-${payrollId}.pdf"`,
+        'Content-Disposition': `inline; filename="payroll-${payrollId}.pdf"`,
         'Cache-Control': 'no-store',
       },
     });

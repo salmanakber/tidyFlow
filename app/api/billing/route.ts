@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
   const role = tokenUser.role as UserRole;
   const { searchParams } = new URL(request.url);
   const companyIdParam = searchParams.get('companyId');
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10) || 20));
+  const skip = (page - 1) * limit;
 
   try {
     let companyId: number | null = null;
@@ -47,25 +50,29 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get billing records
-    const billingRecords = await prisma.billingRecord.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-            subscriptionStatus: true,
-            basePrice: true,
-            propertyCount: true,
-            isTrialActive: true,
-            trialEndsAt: true,
+    // Get billing records (paginated)
+    const [billingRecords, totalCount] = await Promise.all([
+      prisma.billingRecord.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip,
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,
+              subscriptionStatus: true,
+              basePrice: true,
+              propertyCount: true,
+              isTrialActive: true,
+              trialEndsAt: true,
+            },
           },
         },
-      },
-    });
+      }),
+      prisma.billingRecord.count({ where }),
+    ]);
 
     
 
@@ -98,8 +105,14 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Get latest billing record for current subscription info
-    const latestBillingRecord = billingRecords.length > 0 ? billingRecords[0] : null;
+    // Get latest billing record for current subscription info (most recent overall)
+    const latestBillingRecord =
+      page === 1 && billingRecords.length > 0
+        ? billingRecords[0]
+        : await prisma.billingRecord.findFirst({
+            where,
+            orderBy: { createdAt: 'desc' },
+          });
 
     return NextResponse.json({
       success: true,
@@ -144,6 +157,13 @@ export async function GET(request: NextRequest) {
         total_revenue: Number(summary._sum.amountPaid || 0),
         total_transactions: summary._count.id,
         failed_payments: failedCount,
+      },
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        hasMore: skip + billingRecords.length < totalCount,
       },
     });
   } catch (error: any) {

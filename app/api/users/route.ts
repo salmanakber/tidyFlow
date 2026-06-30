@@ -4,6 +4,8 @@ import { requireAuth, requireRole, requireCompanyScope } from '@/lib/rbac';
 import { hashPassword, isValidEmail, isValidPassword } from '@/lib/auth';
 import { UserRole } from '@prisma/client';
 import { sendUserAccountCreatedEmail } from '@/lib/email';
+import { checkPlanLimit, requireActiveSubscription } from '@/lib/subscription';
+import { applyPayrollUserFields, PAYROLL_USER_SELECT } from '@/lib/user-payroll-fields';
 
 // GET /api/users
 // List users - Owner/Developer see all; others see only their company
@@ -111,9 +113,31 @@ export async function POST(request: NextRequest) {
   const { tokenUser } = auth;
   const requesterRole = tokenUser.role as UserRole;
 
+  const subscriptionCheck = await requireActiveSubscription(tokenUser);
+  if (!subscriptionCheck.allowed) {
+    return NextResponse.json({ success: false, message: subscriptionCheck.message }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
-    const { email, password, firstName, lastName, role = 'CLEANER', companyId: bodyCompanyId } = body;
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      role = 'CLEANER',
+      companyId: bodyCompanyId,
+      payrollWorkerType,
+      hireDate,
+      basicSalary,
+      defaultHourlyRate,
+      salaryType,
+      bankAccountNumber,
+      bankSortCode,
+      bankName,
+      employeeId,
+      taxId,
+    } = body;
 
     if (!email || !password) {
       return NextResponse.json({ success: false, message: 'Email and password are required' }, { status: 400 });
@@ -157,6 +181,19 @@ export async function POST(request: NextRequest) {
     if (targetCompanyId) {
       const company = await prisma.company.findUnique({ where: { id: targetCompanyId } });
       if (!company) return NextResponse.json({ success: false, message: 'Company not found' }, { status: 404 });
+
+      if (newUserRole === UserRole.CLEANER) {
+        const limit = await checkPlanLimit(targetCompanyId, 'cleaners');
+        if (!limit.allowed) {
+          return NextResponse.json({ success: false, message: limit.message }, { status: 403 });
+        }
+      }
+      if (newUserRole === UserRole.MANAGER || newUserRole === UserRole.COMPANY_ADMIN) {
+        const limit = await checkPlanLimit(targetCompanyId, 'managers');
+        if (!limit.allowed) {
+          return NextResponse.json({ success: false, message: limit.message }, { status: 403 });
+        }
+      }
     }
 
     const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -164,16 +201,43 @@ export async function POST(request: NextRequest) {
 
     const passwordHash = await hashPassword(password);
 
+    const createData: Record<string, unknown> = {
+      email: email.toLowerCase(),
+      passwordHash,
+      firstName,
+      lastName,
+      role: newUserRole,
+      companyId: targetCompanyId ?? undefined,
+    };
+    const payrollErr = applyPayrollUserFields(createData, {
+      payrollWorkerType,
+      hireDate,
+      basicSalary,
+      defaultHourlyRate,
+      salaryType,
+      bankAccountNumber,
+      bankSortCode,
+      bankName,
+      employeeId,
+      taxId,
+    });
+    if (payrollErr) {
+      return NextResponse.json({ success: false, message: payrollErr }, { status: 400 });
+    }
+
     const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        passwordHash,
-        firstName,
-        lastName,
-        role: newUserRole,
-        companyId: targetCompanyId ?? undefined,
+      data: createData as any,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        companyId: true,
+        isActive: true,
+        createdAt: true,
+        ...PAYROLL_USER_SELECT,
       },
-      select: { id: true, email: true, firstName: true, lastName: true, role: true, companyId: true, isActive: true, createdAt: true },
     });
 
     // Send welcome email to the new user

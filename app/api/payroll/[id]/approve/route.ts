@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { requireAuth } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { createNotification } from '@/lib/notifications';
+import { lockHoursForPayrollRecord } from '@/lib/payroll-ledger';
 
 export async function POST(
   request: NextRequest,
@@ -49,6 +50,22 @@ export async function POST(
         paidAt: status === 'paid' ? new Date() : null,
       },
     });
+
+    // Immutable ledger: lock source hours when payroll is approved or paid
+    if (status === 'approved' || status === 'paid') {
+      try {
+        await lockHoursForPayrollRecord(
+          payroll.id,
+          payrollRecord.userId,
+          payrollRecord.periodStart,
+          payrollRecord.periodEnd,
+          tokenUser.userId,
+        );
+        console.log(`✅ Locked working hours for payroll ${payroll.id} (status: ${status})`);
+      } catch (lockError) {
+        console.error('Error locking working hours for payroll:', lockError);
+      }
+    }
 
     // Update corresponding expense entry status to match payroll status
     try {

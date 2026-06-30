@@ -1,42 +1,37 @@
-import { type NextRequest, NextResponse } from "next/server"
-import prisma from "@/lib/prisma"
-import { requireAuth, requireCompanyScope } from "@/lib/rbac"
-import { UserRole } from "@prisma/client"
+import { NextRequest, NextResponse } from 'next/server';
+import prisma from '@/lib/prisma';
+import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { UserRole } from '@prisma/client';
 
-// GET /api/issues
+// GET /api/issues?status=&severity=
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request)
-  if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 })
+  const auth = requireAuth(request);
+  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
-  const { tokenUser } = auth
-  const role = tokenUser.role as UserRole
-  const { searchParams } = new URL(request.url)
+  const role = auth.tokenUser.role as UserRole;
+  if (role === UserRole.CLEANER) {
+    return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
+  }
 
-  const status = searchParams.get("status")
-  const severity = searchParams.get("severity")
+  const companyId = requireCompanyScope(auth.tokenUser);
+  if (!companyId) {
+    return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const status = searchParams.get('status') || undefined;
+  const severity = searchParams.get('severity') || undefined;
 
   try {
-    const companyIdParam = searchParams.get("companyId")
-    let companyId: number | null = null
-    if (role === UserRole.SUPER_ADMIN || role === UserRole.OWNER || role === UserRole.DEVELOPER || role === UserRole.MANAGER) {
-      // Allow companyId from query param for SUPER_ADMIN to view different companies
-      companyId = companyIdParam ? parseInt(companyIdParam) : null
-    } else {
-      companyId = requireCompanyScope(tokenUser)
-      if (!companyId) return NextResponse.json({ success: false, message: "No company scope" }, { status: 403 })
-    }
-
-    const where: any = {
-      noteType: "issue",
-      task: companyId ? { companyId } : {},
-    }
-
-    if (status && status !== "all") where.status = status
-    if (severity) where.severity = severity
-
     const issues = await prisma.note.findMany({
-      where,
+      where: {
+        noteType: 'issue',
+        task: { companyId },
+        ...(status ? { status: status as any } : {}),
+        ...(severity ? { severity: severity as any } : {}),
+      },
       include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
         task: {
           select: {
             id: true,
@@ -44,14 +39,13 @@ export async function GET(request: NextRequest) {
             property: { select: { address: true } },
           },
         },
-        user: { select: { firstName: true, lastName: true, email: true } },
       },
-      orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
-    })
+      orderBy: { createdAt: 'desc' },
+    });
 
-    return NextResponse.json({ success: true, data: { issues } })
+    return NextResponse.json({ success: true, data: issues });
   } catch (error) {
-    console.error("Issues GET error:", error)
-    return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 })
+    console.error('[issues GET]', error);
+    return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
   }
 }

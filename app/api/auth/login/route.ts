@@ -13,7 +13,8 @@ import { UserRole } from '@prisma/client';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, otp } = body;
+    const { password, otp } = body;
+    const email = String(body.email || '').toLowerCase().trim();
 
     // Validate input
     if (!email || !password) {
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     // Find user by email
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email },
       select: {
         id: true,
         email: true,
@@ -109,7 +110,7 @@ const shouldSkipOTP =
       if (!otp) {
         // Generate and send OTP for first-time login
         // Check rate limiting
-        const stats = await getOTPStats(email.toLowerCase(), 60);
+        const stats = await getOTPStats(`login_${email}`, 60);
         if (stats.count >= 5) {
           return NextResponse.json({
             success: false,
@@ -118,7 +119,7 @@ const shouldSkipOTP =
         }
 
         const loginOTP = generateOTP();
-        await storeOTP(`login_${email.toLowerCase()}`, loginOTP, 10);
+        await storeOTP(`login_${email}`, loginOTP, 10);
 
         // Send OTP email
         const userName = user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
@@ -176,7 +177,7 @@ const shouldSkipOTP =
       }
 
       // Verify OTP
-      const otpIdentifier = `login_${email.toLowerCase()}`;
+      const otpIdentifier = `login_${email}`;
       const isOTPValid = await verifyOTP(otpIdentifier, otp);
 
       if (!isOTPValid) {

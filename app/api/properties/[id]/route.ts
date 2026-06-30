@@ -1,365 +1,142 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireActiveSubscription } from '@/lib/subscription';
 import { UserRole } from '@prisma/client';
 
-// GET /api/properties/[id]
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+type RouteParams = { params: { id: string } };
+
+export async function GET(request: NextRequest, { params }: RouteParams) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
+
+  const subscriptionCheck = await requireActiveSubscription(auth.tokenUser);
+  if (!subscriptionCheck.allowed) {
+    return NextResponse.json({ success: false, message: subscriptionCheck.message }, { status: 403 });
+  }
 
   const id = Number(params.id);
-  if (Number.isNaN(id)) return NextResponse.json({ success: false, message: 'Invalid id' }, { status: 400 });
+  const role = auth.tokenUser.role as UserRole;
+  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
 
-  try {
-    const property = await prisma.property.findUnique({ where: { id } , include: {
-      company: {
-        select: {
-          id: true,
-          name: true,
-        },
-        
-      },
-      tasks: true,
-    } });
-    if (!property) return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
+  const property = await prisma.property.findFirst({
+    where: {
+      id,
+      ...(role !== UserRole.SUPER_ADMIN && role !== UserRole.DEVELOPER && companyId
+        ? { companyId }
+        : {}),
+    },
+    include: {
+      company: { select: { id: true, name: true } },
+    },
+  });
 
-    if (!(role === UserRole.OWNER || role === UserRole.DEVELOPER)) {
-      const companyId = requireCompanyScope(tokenUser);
-      if (!companyId || property.companyId !== companyId) {
-        return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
-      }
-    }
-
-    return NextResponse.json({ success: true, data: { property } });
-  } catch (error) {
-    console.error('Property GET error:', error);
-    return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
+  if (!property) {
+    return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
   }
+
+  return NextResponse.json({ success: true, data: { property } });
 }
 
-// PATCH /api/properties/[id]
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  // Check permission for editing properties
-  const { requirePermission, PERMISSIONS } = await import('@/lib/permissions');
-  const permissionCheck = await requirePermission(request, PERMISSIONS.PROPERTIES_EDIT);
-  if (!permissionCheck.allowed) {
-    const auth = requireAuth(request);
-    if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-    const { tokenUser } = auth;
-    const role = tokenUser.role as UserRole;
-    // Allow OWNER, DEVELOPER, and SUPER_ADMIN to bypass permission check
-    if (role !== UserRole.OWNER && role !== UserRole.DEVELOPER && role !== UserRole.SUPER_ADMIN) {
-      return NextResponse.json(
-        { success: false, message: permissionCheck.message },
-        { status: 403 }
-      );
-    }
-  }
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
+
+  const role = auth.tokenUser.role as UserRole;
+  if (![UserRole.OWNER, UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.DEVELOPER, UserRole.SUPER_ADMIN].includes(role)) {
+    return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
+  }
+
+  const subscriptionCheck = await requireActiveSubscription(auth.tokenUser);
+  if (!subscriptionCheck.allowed) {
+    return NextResponse.json({ success: false, message: subscriptionCheck.message }, { status: 403 });
+  }
 
   const id = Number(params.id);
-  if (Number.isNaN(id)) return NextResponse.json({ success: false, message: 'Invalid id' }, { status: 400 });
+  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
 
-  try {
-    const property = await prisma.property.findUnique({ where: { id } });
-    if (!property) return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
+  const existing = await prisma.property.findFirst({
+    where: {
+      id,
+      ...(role !== UserRole.SUPER_ADMIN && role !== UserRole.DEVELOPER && companyId
+        ? { companyId }
+        : {}),
+    },
+  });
 
-    if (!(role === UserRole.OWNER || role === UserRole.DEVELOPER)) {
-      const companyId = requireCompanyScope(tokenUser);
-      if (!companyId || property.companyId !== companyId) {
-        return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
-      }
-    }
-
-    const body = await request.json();
-    const { address, postcode, latitude, longitude, propertyType, notes, isActive, googleSheetUrl } = body;
-
-    const data: any = {};
-    if (address !== undefined) data.address = address;
-    if (postcode !== undefined) data.postcode = postcode;
-    if (latitude !== undefined) data.latitude = latitude !== null ? Number(latitude) : null;
-    if (longitude !== undefined) data.longitude = longitude !== null ? Number(longitude) : null;
-    if (propertyType !== undefined) data.propertyType = propertyType;
-    if (notes !== undefined) data.notes = notes;
-    if (isActive !== undefined) data.isActive = !!isActive;
-    // @ts-ignore
-    if (googleSheetUrl !== undefined) data.googleSheetUrl = googleSheetUrl || null;
-
-    const updated = await prisma.property.update({ where: { id }, data });
-    
-    // Sync property count with Stripe if subscription is active
-    if (updated.companyId) {
-      // Count should be sum of unitCount (each unit counts as a property)
-      const allProperties = await prisma.property.findMany({
-        where: { companyId: updated.companyId },
-        select: { unitCount: true },
-      });
-      
-      const propertyCount = allProperties.reduce((sum, prop) => {
-        // @ts-ignore - Field exists in schema but types may not be updated
-        return sum + (prop.unitCount || 1);
-      }, 0);
-      
-      try {
-        const billingRecord = await prisma.billingRecord.findFirst({
-          where: { 
-            companyId: updated.companyId, 
-            status: { in: ["active", "trialing"] } 
-          },
-          orderBy: { createdAt: "desc" },
-        });
-
-        if (billingRecord?.subscriptionId && billingRecord.propertyUsageItemId) {
-          const { updatePropertyUsageQuantity, createStripeInstance, decrypt } = await import("@/lib/stripe");
-          
-          // Get Stripe secret key from SystemSetting
-          let stripeSecretKey = '';
-          try {
-            const secretKeySetting = await prisma.systemSetting.findUnique({
-              where: { key: 'stripe_secret_key' },
-            });
-            if (secretKeySetting) {
-              stripeSecretKey = secretKeySetting.isEncrypted 
-                ? decrypt(secretKeySetting.value) 
-                : secretKeySetting.value;
-            }
-          } catch (error) {
-            console.warn('Failed to fetch Stripe secret key from settings:', error);
-            stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-          }
-          
-          if (stripeSecretKey) {
-            // Create Stripe instance with credentials from SystemSetting
-            const stripeInstance = createStripeInstance(stripeSecretKey);
-            
-            await updatePropertyUsageQuantity(
-              billingRecord.subscriptionId,
-              billingRecord.propertyUsageItemId,
-              propertyCount,
-              stripeInstance
-            );
-          }
-
-          await prisma.billingRecord.update({
-            where: { id: billingRecord.id },
-            data: { propertyCount },
-          });
-        }
-      } catch (error) {
-        console.error("Error syncing Stripe billing on property update:", error);
-      }
-    }
-    
-    return NextResponse.json({ success: true, data: { property: updated } });
-  } catch (error) {
-    console.error('Property PATCH error:', error);
-    return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
+  if (!existing) {
+    return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
   }
+
+  const body = await request.json();
+  const {
+    address,
+    postcode,
+    latitude,
+    longitude,
+    propertyType,
+    notes,
+    clientName,
+    clientEmail,
+    clientPhone,
+    defaultServiceRate,
+    unitCount,
+    pricePerUnit,
+    googleSheetUrl,
+    isActive,
+  } = body;
+
+  const property = await prisma.property.update({
+    where: { id },
+    data: {
+      ...(address !== undefined ? { address } : {}),
+      ...(postcode !== undefined ? { postcode } : {}),
+      ...(latitude !== undefined ? { latitude: Number(latitude) } : {}),
+      ...(longitude !== undefined ? { longitude: Number(longitude) } : {}),
+      ...(propertyType !== undefined ? { propertyType } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      ...(clientName !== undefined ? { clientName: clientName || null } : {}),
+      ...(clientEmail !== undefined ? { clientEmail: clientEmail || null } : {}),
+      ...(clientPhone !== undefined ? { clientPhone: clientPhone || null } : {}),
+      ...(defaultServiceRate !== undefined
+        ? { defaultServiceRate: defaultServiceRate ? Number(defaultServiceRate) : null }
+        : {}),
+      ...(unitCount !== undefined ? { unitCount: Number(unitCount) } : {}),
+      ...(pricePerUnit !== undefined ? { pricePerUnit: Number(pricePerUnit) } : {}),
+      ...(googleSheetUrl !== undefined ? { googleSheetUrl: googleSheetUrl || null } : {}),
+      ...(isActive !== undefined ? { isActive: !!isActive } : {}),
+    },
+  });
+
+  return NextResponse.json({ success: true, data: { property } });
 }
 
-// DELETE /api/properties/[id]
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
+
+  const role = auth.tokenUser.role as UserRole;
+  if (![UserRole.OWNER, UserRole.MANAGER, UserRole.COMPANY_ADMIN, UserRole.DEVELOPER, UserRole.SUPER_ADMIN].includes(role)) {
+    return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
+  }
 
   const id = Number(params.id);
-  if (Number.isNaN(id)) return NextResponse.json({ success: false, message: 'Invalid id' }, { status: 400 });
+  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
 
-  try {
-    const property = await prisma.property.findUnique({ where: { id } });
-    if (!property) return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
+  const existing = await prisma.property.findFirst({
+    where: {
+      id,
+      ...(role !== UserRole.SUPER_ADMIN && role !== UserRole.DEVELOPER && companyId
+        ? { companyId }
+        : {}),
+    },
+  });
 
-    if (!(role === UserRole.OWNER || role === UserRole.DEVELOPER)) {
-      const companyId = requireCompanyScope(tokenUser);
-      if (!companyId || property.companyId !== companyId) {
-        return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
-      }
-    }
-
-    const companyId = property.companyId;
-
-    // Check for active tasks before archiving
-    const activeTasks = await prisma.task.findMany({
-      where: {
-        propertyId: id,
-        status: {
-          in: ['ASSIGNED', 'IN_PROGRESS'],
-        },
-      },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-      },
-    });
-
-    if (activeTasks.length > 0) {
-      return NextResponse.json({
-        success: false,
-        message: `Cannot archive property. There are ${activeTasks.length} active or assigned task(s). Please complete or cancel them first.`,
-        data: {
-          activeTasks: activeTasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
-        },
-      }, { status: 400 });
-    }
-
-    // Archive the property (set isActive to false instead of deleting)
-    await prisma.property.update({ 
-      where: { id }, 
-      data: { isActive: false } 
-    });
-
-    // Update company property count (sum of unitCount for active properties only)
-    const activeProperties = await prisma.property.findMany({
-      where: { 
-        companyId,
-        isActive: true, // Only count active properties
-      },
-      select: { unitCount: true },
-    });
-    
-    const propertyCount = activeProperties.reduce((sum, prop) => {
-      // @ts-ignore - Field exists in schema but types may not be updated
-      return sum + (prop.unitCount || 1);
-    }, 0);
-    
-    await prisma.company.update({
-      where: { id: companyId },
-      data: { propertyCount },
-    });
-
-    // Sync with Stripe billing (prorated update)
-    try {
-      const billingRecord = await prisma.billingRecord.findFirst({
-        where: { 
-          companyId, 
-          status: { in: ["active", "trialing"] } 
-        },
-        orderBy: { createdAt: "desc" },
-      });
-
-      // @ts-ignore - Field exists in schema but Prisma client needs regeneration
-      if (billingRecord?.subscriptionId && billingRecord.propertyUsageItemId) {
-        const { updatePropertyUsageQuantity, createStripeInstance, decrypt } = await import("@/lib/stripe");
-        
-        // Get Stripe secret key from SystemSetting
-        let stripeSecretKey = '';
-        try {
-          const secretKeySetting = await prisma.systemSetting.findUnique({
-            where: { key: 'stripe_secret_key' },
-          });
-          if (secretKeySetting) {
-            stripeSecretKey = secretKeySetting.isEncrypted 
-              ? decrypt(secretKeySetting.value) 
-              : secretKeySetting.value;
-          }
-        } catch (error) {
-          console.warn('Failed to fetch Stripe secret key from settings:', error);
-          stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
-        }
-        
-        if (stripeSecretKey) {
-          // Create Stripe instance with credentials from SystemSetting
-          const stripeInstance = createStripeInstance(stripeSecretKey);
-          
-          await updatePropertyUsageQuantity(
-            billingRecord.subscriptionId,
-            // @ts-ignore
-            billingRecord.propertyUsageItemId,
-            propertyCount,
-            stripeInstance
-          );
-        }
-
-        await prisma.billingRecord.update({
-          where: { id: billingRecord.id },
-          data: { propertyCount },
-        });
-      }
-    } catch (error) {
-      console.error("Error syncing Stripe billing on property deletion:", error);
-      // Don't fail the request if Stripe sync fails
-    }
-
-    return NextResponse.json({ success: true, message: 'Property archived' });
-  } catch (error) {
-    console.error('Property DELETE error:', error);
-    return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
+  if (!existing) {
+    return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
   }
-}
 
-// PATCH /api/properties/[id]/archive - Archive a property (set isActive to false)
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAuth(request);
-  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
+  await prisma.property.delete({ where: { id } });
 
-  const id = Number(params.id);
-  if (Number.isNaN(id)) return NextResponse.json({ success: false, message: 'Invalid id' }, { status: 400 });
-
-  try {
-    const property = await prisma.property.findUnique({ where: { id } });
-    if (!property) return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
-
-    if (!(role === UserRole.OWNER || role === UserRole.DEVELOPER || role === UserRole.SUPER_ADMIN)) {
-      const companyId = requireCompanyScope(tokenUser);
-      if (!companyId || property.companyId !== companyId) {
-        return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 });
-      }
-    }
-
-    const body = await request.json();
-    const { isActive } = body;
-
-    if (typeof isActive !== 'boolean') {
-      return NextResponse.json({ success: false, message: 'isActive must be a boolean' }, { status: 400 });
-    }
-
-    // If archiving (setting isActive to false), check for active tasks
-    if (isActive === false) {
-      const activeTasks = await prisma.task.findMany({
-        where: {
-          propertyId: id,
-          status: {
-            in: ['ASSIGNED', 'IN_PROGRESS'],
-          },
-        },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-        },
-      });
-
-      if (activeTasks.length > 0) {
-        const taskList = activeTasks.map(t => `Task #${t.id}: ${t.title} (${t.status})`).join('\n');
-        return NextResponse.json({
-          success: false,
-          message: `Cannot archive property. There are ${activeTasks.length} active or assigned task(s). Please complete or cancel them first.`,
-          data: {
-            activeTasks: activeTasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
-          },
-        }, { status: 400 });
-      }
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: { isActive },
-    });
-
-    return NextResponse.json({ success: true, data: { property: updated } });
-  } catch (error) {
-    console.error('Property archive error:', error);
-    return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });
-  }
+  return NextResponse.json({ success: true, message: 'Property deleted' });
 }

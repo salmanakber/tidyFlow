@@ -27,7 +27,10 @@ import {
   Ticket,
   UserMinus,
   Code,
-  Shield
+  Sparkles,
+  Shield,
+  MapPin,
+  CreditCard
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 
@@ -292,6 +295,34 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       icon: BarChart3,
       permission: "reports.view",
       roles: null
+    },
+    { 
+      name: "Subscription Plans", 
+      href: "/admin/subscription", 
+      icon: Shield,
+      permission: null,
+      roles: ["DEVELOPER", "SUPER_ADMIN", "ADMIN_UNIQUE"]
+    },
+    { 
+      name: "Stripe Billing", 
+      href: "/admin/stripe", 
+      icon: CreditCard,
+      permission: null,
+      roles: ["DEVELOPER", "SUPER_ADMIN", "ADMIN_UNIQUE"]
+    },
+    { 
+      name: "Safety & GPS", 
+      href: "/admin/safety", 
+      icon: MapPin,
+      permission: null,
+      roles: ["COMPANY_ADMIN", "OWNER", "MANAGER", "DEVELOPER", "SUPER_ADMIN"]
+    },
+    { 
+      name: "TidyFlow AI", 
+      href: "/admin/ai", 
+      icon: Sparkles,
+      permission: null,
+      roles: ["COMPANY_ADMIN", "OWNER", "MANAGER", "DEVELOPER", "SUPER_ADMIN"]
     },
     { 
       name: "Settings", 

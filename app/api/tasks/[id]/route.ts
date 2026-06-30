@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { TaskStatus, UserRole } from '@prisma/client';
+import { finalizePhotoReviewsOnTaskApproval } from '@/lib/ai/photo-review';
+import { notifyTaskApproved } from '@/lib/notifications';
+import { invalidateAIActivityCache } from '@/lib/ai/activity-queue';
 
 // GET /api/tasks/[id]
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -39,8 +42,20 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
                 firstName: true,
                 lastName: true,
                 email: true,
+                profileImage: true,
               },
             },
+            startedAt: true,
+            endedAt: true,
+            durationMinutes: true,
+            editedDurationMinutes: true,
+            startWithinGeofence: true,
+            endWithinGeofence: true,
+            trackerActive: true,
+            onBreak: true,
+            breakStartedAt: true,
+            totalBreakMinutes: true,
+            workSessions: true,
           },
         },
         photos: {
@@ -51,6 +66,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             caption: true,
             takenAt: true,
             createdAt: true,
+            aiPhotoScore: {
+              select: {
+                score: true,
+                summary: true,
+                flags: true,
+                analyzedAt: true,
+                reviewStatus: true,
+                reviewedAt: true,
+              },
+            },
           },
           orderBy: { takenAt: 'asc' },
         },
@@ -63,6 +88,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             longitude: true,
             propertyType: true,
             isActive: true,
+            clientName: true,
+            clientEmail: true,
+            clientPhone: true,
+            defaultServiceRate: true,
           },
         },
         assignedUser: {
@@ -71,6 +100,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             firstName: true,
             lastName: true,
             email: true,
+            profileImage: true,
           },
         },
         checklists: {
@@ -92,9 +122,56 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           },
           orderBy: { generatedAt: 'desc' },
         },
+        clientFeedback: {
+          select: {
+            id: true,
+            rating: true,
+            comment: true,
+            clientName: true,
+            cleanerUserId: true,
+            createdAt: true,
+            cleaner: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
     if (!task) return NextResponse.json({ success: false, message: 'Task not found' }, { status: 404 });
+
+    // Ensure assignedUserId has a matching taskAssignment row (legacy assignments)
+    if (task.assignedUserId) {
+      const hasPrimaryAssignment = task.taskAssignments.some(
+        (ta) => ta.user.id === task.assignedUserId
+      );
+      if (!hasPrimaryAssignment && task.assignedUser) {
+        const ensured = await prisma.taskAssignment.upsert({
+          where: {
+            taskId_userId: { taskId: task.id, userId: task.assignedUserId },
+          },
+          create: { taskId: task.id, userId: task.assignedUserId },
+          update: {},
+          select: {
+            startedAt: true,
+            endedAt: true,
+            durationMinutes: true,
+            editedDurationMinutes: true,
+            startWithinGeofence: true,
+            endWithinGeofence: true,
+            trackerActive: true,
+            onBreak: true,
+            breakStartedAt: true,
+            totalBreakMinutes: true,
+            workSessions: true,
+          },
+        });
+        task.taskAssignments.push({
+          user: task.assignedUser,
+          ...ensured,
+        });
+      }
+    }
 
     if (!(role === UserRole.OWNER || role === UserRole.DEVELOPER)) {
       const companyId = requireCompanyScope(tokenUser);
@@ -167,9 +244,36 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     const body = await request.json();
     const data: any = {};
-    const { title, description, assignedUserId, assignedUserIds, scheduledDate, status } = body;
+    const { title, description, assignedUserId, assignedUserIds, scheduledDate, moveInDate, status, propertyId, budget } = body;
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
+    if (propertyId !== undefined) {
+      const pid = Number(propertyId);
+      const property = await prisma.property.findFirst({
+        where: { id: pid, companyId: task.companyId },
+      });
+      if (!property) {
+        return NextResponse.json({ success: false, message: 'Property not found' }, { status: 400 });
+      }
+      data.propertyId = pid;
+    }
+    if (budget !== undefined) {
+      data.budget = budget === null || budget === '' ? null : Number(budget);
+    }
+    if (moveInDate !== undefined) {
+      data.moveInDate = moveInDate ? new Date(moveInDate) : null;
+    }
+
+    // Snapshot existing assignees before we replace taskAssignments
+    const previousAssigneeIds = new Set<number>();
+    if (assignedUserId !== undefined || assignedUserIds !== undefined) {
+      const existing = await prisma.taskAssignment.findMany({
+        where: { taskId: id },
+        select: { userId: true },
+      });
+      existing.forEach((a) => previousAssigneeIds.add(a.userId));
+      if (task.assignedUserId) previousAssigneeIds.add(task.assignedUserId);
+    }
 
     // Handle cleaner assignment (support both single and multiple)
     let cleanerIdsToNotify: number[] = [];
@@ -236,6 +340,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         propertyId: true,
         assignedUserId: true,
         scheduledDate: true,
+        moveInDate: true,
+        budget: true,
         createdAt: true,
         updatedAt: true,
         taskAssignments: {
@@ -246,6 +352,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
                 firstName: true,
                 lastName: true,
                 email: true,
+                profileImage: true,
               },
             },
           },
@@ -258,6 +365,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
             caption: true,
             takenAt: true,
             createdAt: true,
+            aiPhotoScore: {
+              select: {
+                score: true,
+                summary: true,
+                flags: true,
+                analyzedAt: true,
+                reviewStatus: true,
+                reviewedAt: true,
+              },
+            },
           },
           orderBy: { takenAt: 'asc' },
         },
@@ -270,6 +387,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
             longitude: true,
             propertyType: true,
             isActive: true,
+            clientName: true,
+            clientEmail: true,
+            clientPhone: true,
+            defaultServiceRate: true,
           },
         },
         assignedUser: {
@@ -278,6 +399,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
             firstName: true,
             lastName: true,
             email: true,
+            profileImage: true,
           },
         },
         checklists: {
@@ -302,11 +424,34 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       },
     });
 
-    // Send notifications if cleaner assignment changed
-    if (cleanerIdsToNotify.length > 0 && (assignedUserId !== undefined || assignedUserIds !== undefined)) {
-      const { sendTaskUpdatedNotification } = await import('@/lib/notifications');
-      await sendTaskUpdatedNotification(updated.id, cleanerIdsToNotify, 'assignment');
+    // Notify only newly assigned cleaners (not everyone on every save)
+    if (assignedUserId !== undefined || assignedUserIds !== undefined) {
+      const newAssigneeIds = [...new Set(cleanerIdsToNotify.map((uid) => Number(uid)))].filter(
+        (uid) => uid > 0 && !previousAssigneeIds.has(uid)
+      );
+      if (newAssigneeIds.length > 0) {
+        const { sendTaskAssignmentNotifications } = await import('@/lib/notifications');
+        await sendTaskAssignmentNotifications(updated.id, newAssigneeIds);
+      }
     }
+
+    if (status === TaskStatus.APPROVED || status === TaskStatus.COMPLETED) {
+      finalizePhotoReviewsOnTaskApproval(id, tokenUser.userId).catch(() => {});
+      if (status === TaskStatus.APPROVED) {
+        notifyTaskApproved({
+          taskId: id,
+          companyId: task.companyId,
+          approvedByUserId: tokenUser.userId,
+        }).catch(() => {});
+      }
+      invalidateAIActivityCache(task.companyId).catch(() => {});
+    }
+
+    const { emitTaskEvent } = await import('@/lib/realtime');
+    await emitTaskEvent('task:updated', task.companyId, id, {
+      status: updated.status,
+      title: updated.title,
+    });
 
     return NextResponse.json({ success: true, data: { task: updated } });
   } catch (error) {

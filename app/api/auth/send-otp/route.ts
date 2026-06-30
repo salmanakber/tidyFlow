@@ -4,25 +4,39 @@ import { sendOTP } from '@/lib/sms';
 import { sendEmail } from '@/lib/email';
 import prisma from '@/lib/prisma';
 
+function resolveOtpIdentifier(
+  purpose: string | undefined,
+  email: string | undefined,
+  phoneNumber: string | undefined
+): string {
+  const normalizedEmail = email?.toLowerCase().trim();
+  if (normalizedEmail) {
+    if (purpose === 'password_reset') return `password_reset_${normalizedEmail}`;
+    if (purpose === 'login') return `login_${normalizedEmail}`;
+    return normalizedEmail;
+  }
+  return phoneNumber!.trim();
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { phoneNumber, email, method } = body;
+    const { phoneNumber, email, method, purpose } = body;
 
-    if (!phoneNumber && !email) {
+    const normalizedEmail = email?.toLowerCase().trim();
+
+    if (!phoneNumber && !normalizedEmail) {
       return NextResponse.json(
         { success: false, message: 'Phone number or email required' },
         { status: 400 }
       );
     }
 
-    // Check if user exists (currently only by email, phoneNumber not in User model)
-    const user = await prisma.user.findFirst({
-      where: { email },
-    });
+    const user = normalizedEmail
+      ? await prisma.user.findUnique({ where: { email: normalizedEmail } })
+      : null;
 
-    console.log("user", email);
-    if (!user) {
+    if (normalizedEmail && !user) {
       return NextResponse.json(
         { success: false, message: 'User not found' },
         { status: 404 }
@@ -30,9 +44,9 @@ export async function POST(request: NextRequest) {
     }
 
     const otp = generateOTP();
-    const identifier = phoneNumber || email;
+    const identifier = resolveOtpIdentifier(purpose, normalizedEmail, phoneNumber);
+    const deliveryMethod = method || (normalizedEmail ? 'email' : 'sms');
     
-    // Check rate limiting (max 5 OTPs per hour per identifier)
     const { getOTPStats } = await import('@/lib/otp');
     const stats = await getOTPStats(identifier, 60);
     if (stats.count >= 5) {
@@ -44,17 +58,25 @@ export async function POST(request: NextRequest) {
     
     await storeOTP(identifier, otp);
 
-    // Send OTP via SMS or Email
-    if (method === 'sms' && phoneNumber) {
+    if (deliveryMethod === 'sms' && phoneNumber) {
       await sendOTP(phoneNumber, otp);
-    } else if (method === 'email' && email) {
+    } else if (normalizedEmail) {
+      const userName = user?.firstName
+        ? `${user.firstName} ${user.lastName || ''}`.trim()
+        : normalizedEmail;
+      const subject =
+        purpose === 'password_reset'
+          ? 'MayaOps - Password Reset OTP'
+          : 'MayaOps - Login Verification Code';
+
       await sendEmail({
-        to: email,
-        subject: 'MayaOps - Verification Code',
+        to: normalizedEmail,
+        subject,
         html: `
           <h2>Your Verification Code</h2>
+          <p>Hi ${userName},</p>
           <p>Your MayaOps verification code is:</p>
-          <h1 style="color: #3B82F6; font-size: 32px;">${otp}</h1>
+          <h1 style="color: #3B82F6; font-size: 32px; letter-spacing: 4px;">${otp}</h1>
           <p>This code will expire in 10 minutes.</p>
         `,
       });

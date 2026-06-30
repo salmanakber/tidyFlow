@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     // Create Stripe instance and cancel subscription
     const stripeInstance = createStripeInstance(stripeSecretKey);
-    await cancelSubscription(billingRecord.subscriptionId);
+    await cancelSubscription(billingRecord.subscriptionId, stripeInstance);
 
     // Update billing record status
     await prisma.billingRecord.update({

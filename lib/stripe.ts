@@ -331,8 +331,9 @@ export async function addPropertyUsageToSubscription(
   return updatedSubscription;
 }
 
-export async function cancelSubscription(subscriptionId: string) {
-  const subscription = await stripe.subscriptions.cancel(subscriptionId);
+export async function cancelSubscription(subscriptionId: string, stripeInstance?: Stripe) {
+  const s = stripeInstance || stripe;
+  const subscription = await s.subscriptions.cancel(subscriptionId);
   return subscription;
 }
 
