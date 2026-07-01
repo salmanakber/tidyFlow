@@ -20,6 +20,29 @@ export interface PDFGenerationResult {
   generatedAt: Date;
 }
 
+// ---------------------------------------------------------------------------
+// TidyFlow brand palette — used across the task report PDF.
+// Primary: deep navy · Secondary: deep amber
+// ---------------------------------------------------------------------------
+const COLORS = {
+  navy: '#132A4C',
+  navyDark: '#0B1A30',
+  amber: '#D98324',
+  amberDark: '#B5691A',
+  amberLight: '#FBEBD9',
+  textDark: '#1F2937',
+  textMuted: '#6B7280',
+  border: '#E2E5EA',
+  bgLight: '#F7F8FA',
+  white: '#FFFFFF',
+  success: '#1E8E5A',
+  successBg: '#DCF5E7',
+  danger: '#C0392B',
+  dangerBg: '#FBE2E0',
+  infoBg: '#E2ECFB',
+  infoText: '#2A5DAA',
+};
+
 export async function generateTaskPDF(
   task: PDFTaskData,
   pdfType: 'before' | 'after' | 'combined' = 'combined'
@@ -166,7 +189,7 @@ export async function generateTaskPDF(
         
         const response = await fetch(normalizedUrl, {
           headers: {
-            'User-Agent': 'MayaOps-PDF-Generator/1.0',
+            'User-Agent': 'TidyFlow-PDF-Generator/1.0',
           },
         });
         
@@ -177,7 +200,7 @@ export async function generateTaskPDF(
             console.log(`Retrying with original URL: ${url}`);
             const retryResponse = await fetch(url, {
               headers: {
-                'User-Agent': 'MayaOps-PDF-Generator/1.0',
+                'User-Agent': 'TidyFlow-PDF-Generator/1.0',
               },
             });
             if (retryResponse.ok) {
@@ -256,67 +279,184 @@ export async function generateTaskPDF(
 
     // Generate actual PDF using PDFKit
     const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
       const chunks: Buffer[] = [];
 
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      // Cover Page
-      doc.fontSize(24).font('Helvetica-Bold').text('MayaOps Cleaning Report', { align: 'center' });
-      doc.moveDown();
-      doc.fontSize(12).font('Helvetica').text(`Task ID: ${task.id}`, { align: 'center' });
-      doc.text(`Property: ${task.property?.address || 'N/A'}`, { align: 'center' });
-      doc.text(`Cleaner: ${task.assignedUser ? `${task.assignedUser.firstName || ''} ${task.assignedUser.lastName || ''}`.trim() : 'Unassigned'}`, { align: 'center' });
-      doc.text(`Date: ${task.scheduledDate ? new Date(task.scheduledDate).toLocaleString() : 'N/A'}`, { align: 'center' });
-      doc.text(`Status: ${task.status}`, { align: 'center' });
-      doc.moveDown(2);
+      const margin = 50;
+      const pageWidth = doc.page.width;
+      const contentWidth = pageWidth - margin * 2;
 
-      // Task Title
-      doc.fontSize(18).font('Helvetica-Bold').text(task.title);
-      doc.moveDown();
+      // -----------------------------------------------------------------
+      // Small design-system helpers
+      // -----------------------------------------------------------------
+
+      const getStatusColor = (status: string) => {
+        const s = (status || '').toLowerCase();
+        if (s.includes('complet')) return { bg: COLORS.successBg, text: COLORS.success };
+        if (s.includes('progress')) return { bg: COLORS.amberLight, text: COLORS.amberDark };
+        if (s.includes('cancel')) return { bg: COLORS.dangerBg, text: COLORS.danger };
+        return { bg: COLORS.bgLight, text: COLORS.textMuted };
+      };
+
+      const getSeverityColor = (severity: string | null) => {
+        const s = (severity || '').toLowerCase();
+        if (s === 'critical' || s === 'high') return { bg: COLORS.dangerBg, text: COLORS.danger };
+        if (s === 'medium') return { bg: COLORS.amberLight, text: COLORS.amberDark };
+        if (s === 'low') return { bg: COLORS.infoBg, text: COLORS.infoText };
+        return { bg: COLORS.bgLight, text: COLORS.textMuted };
+      };
+
+      // Draws a navy section header bar with an amber underline accent,
+      // then advances the cursor below it.
+      const drawSectionHeader = (title: string) => {
+        const y = doc.y;
+        doc.roundedRect(margin, y, contentWidth, 26, 4).fill(COLORS.navy);
+        doc.font('Helvetica-Bold').fontSize(11).fillColor(COLORS.white)
+          .text(title.toUpperCase(), margin + 14, y + 8, { characterSpacing: 0.5 });
+        doc.rect(margin, y + 26, 42, 3).fill(COLORS.amber);
+        doc.fillColor(COLORS.textDark);
+        doc.y = y + 26 + 3 + 12;
+      };
+
+      // -----------------------------------------------------------------
+      // Cover page
+      // -----------------------------------------------------------------
+
+      // Top brand band
+      doc.rect(0, 0, pageWidth, 130).fill(COLORS.navy);
+      doc.rect(0, 130, pageWidth, 6).fill(COLORS.amber);
+
+      doc.font('Helvetica-Bold').fontSize(30).fillColor(COLORS.white)
+        .text('TidyFlow', margin, 42);
+      doc.font('Helvetica').fontSize(12).fillColor(COLORS.amberLight)
+        .text('PROPERTY CLEANING REPORT', margin, 80, { characterSpacing: 1.5 });
+
+      doc.fillColor(COLORS.textDark);
+      let coverY = 168;
+
+      // Task title with amber accent bar
+      doc.rect(margin, coverY, 5, 26).fill(COLORS.amber);
+      doc.font('Helvetica-Bold').fontSize(19).fillColor(COLORS.navy)
+        .text(task.title, margin + 16, coverY + 1, { width: contentWidth - 16 });
+      coverY = doc.y + 22;
+
+      // Info card
+      const cardHeight = 148;
+      doc.roundedRect(margin, coverY, contentWidth, cardHeight, 8)
+        .fillAndStroke(COLORS.bgLight, COLORS.border);
+
+      const col1X = margin + 24;
+      const col2X = margin + contentWidth / 2 + 8;
+      const lineGap = 34;
+      let rowY = coverY + 22;
+
+      const infoRow = (label: string, value: string, x: number, y: number) => {
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.textMuted)
+          .text(label.toUpperCase(), x, y, { characterSpacing: 0.5 });
+        doc.font('Helvetica').fontSize(11).fillColor(COLORS.textDark)
+          .text(value, x, y + 12, { width: contentWidth / 2 - 40 });
+      };
+
+      infoRow('Task ID', String(task.id), col1X, rowY);
+      infoRow('Property', task.property?.address || 'N/A', col2X, rowY);
+      rowY += lineGap;
+
+      const cleanerName = task.assignedUser
+        ? (`${task.assignedUser.firstName || ''} ${task.assignedUser.lastName || ''}`.trim() || task.assignedUser.email)
+        : 'Unassigned';
+      infoRow('Cleaner', cleanerName, col1X, rowY);
+      infoRow('Scheduled Date', task.scheduledDate ? new Date(task.scheduledDate).toLocaleString() : 'N/A', col2X, rowY);
+      rowY += lineGap;
+
+      // Status badge
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.textMuted)
+        .text('STATUS', col1X, rowY, { characterSpacing: 0.5 });
+      const statusColors = getStatusColor(task.status);
+      const badgeText = String(task.status).toUpperCase();
+      doc.font('Helvetica-Bold').fontSize(10);
+      const badgeWidth = doc.widthOfString(badgeText) + 22;
+      doc.roundedRect(col1X, rowY + 12, badgeWidth, 20, 10).fill(statusColors.bg);
+      doc.fillColor(statusColors.text).text(badgeText, col1X + 11, rowY + 17);
+
+      doc.fillColor(COLORS.textDark);
+      doc.y = coverY + cardHeight + 30;
 
       // Description
       if (task.description) {
-        doc.fontSize(12).font('Helvetica-Bold').text('Description');
-        doc.fontSize(10).font('Helvetica').text(task.description);
-        doc.moveDown();
+        drawSectionHeader('Description');
+        doc.font('Helvetica').fontSize(10).fillColor(COLORS.textDark)
+          .text(task.description, margin, doc.y, { width: contentWidth, lineGap: 3 });
+        doc.moveDown(1.5);
       }
 
       // Checklist Section
       if (task.checklists && task.checklists.length > 0) {
-        doc.fontSize(14).font('Helvetica-Bold').text('Checklist Acknowledgment');
-        doc.fontSize(10).font('Helvetica');
+        drawSectionHeader('Checklist Acknowledgment');
+
         const completedCount = task.checklists.filter(c => c.isCompleted).length;
-        doc.text(`Completion: ${completedCount}/${task.checklists.length} (${Math.round((completedCount / task.checklists.length) * 100)}%)`);
-        doc.moveDown(0.5);
+        const pct = Math.round((completedCount / task.checklists.length) * 100);
+
+        const barY = doc.y;
+        doc.roundedRect(margin, barY, contentWidth, 10, 5).fill(COLORS.border);
+        doc.roundedRect(margin, barY, Math.max(10, (contentWidth * pct) / 100), 10, 5).fill(COLORS.amber);
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.textMuted)
+          .text(`${completedCount}/${task.checklists.length} completed (${pct}%)`, margin, barY + 16);
+        doc.y = barY + 36;
+
         task.checklists.forEach((item) => {
-          doc.text(`${item.isCompleted ? '✓' : '☐'} ${item.title}`);
+          const rowY2 = doc.y;
+          if (item.isCompleted) {
+            doc.roundedRect(margin, rowY2, 12, 12, 3).fill(COLORS.success);
+            doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.white)
+              .text('✓', margin + 3, rowY2 + 1);
+          } else {
+            doc.roundedRect(margin, rowY2, 12, 12, 3).fillAndStroke(COLORS.white, COLORS.border);
+          }
+          doc.font('Helvetica').fontSize(10).fillColor(COLORS.textDark)
+            .text(item.title, margin + 20, rowY2, { width: contentWidth - 20 });
+          doc.y = Math.max(doc.y, rowY2 + 16);
         });
-        doc.moveDown();
+        doc.moveDown(1);
       }
 
       // Issues Section
       const issues = task.notes.filter(n => n.noteType === 'issue');
       if (issues.length > 0) {
-        doc.fontSize(14).font('Helvetica-Bold').text('Reported Issues');
-        doc.fontSize(10).font('Helvetica');
+        drawSectionHeader('Reported Issues');
         issues.forEach((issue) => {
-          doc.text(`[${issue.severity || 'N/A'}] ${issue.content}`);
+          const rowY2 = doc.y;
+          const sevColors = getSeverityColor(issue.severity);
+          const sevText = (issue.severity || 'N/A').toUpperCase();
+          doc.font('Helvetica-Bold').fontSize(8);
+          const badgeW = doc.widthOfString(sevText) + 16;
+          doc.roundedRect(margin, rowY2, badgeW, 16, 8).fill(sevColors.bg);
+          doc.fillColor(sevColors.text).text(sevText, margin + 8, rowY2 + 4);
+          doc.font('Helvetica').fontSize(10).fillColor(COLORS.textDark)
+            .text(issue.content, margin + badgeW + 12, rowY2 + 2, { width: contentWidth - badgeW - 12 });
+          doc.y = Math.max(doc.y, rowY2 + 20) + 6;
         });
-        doc.moveDown();
+        doc.fillColor(COLORS.textDark);
+        doc.moveDown(0.5);
       }
 
       // Notes Section
       const notes = task.notes.filter(n => n.noteType !== 'issue');
       if (notes.length > 0) {
-        doc.fontSize(14).font('Helvetica-Bold').text('Notes');
-        doc.fontSize(10).font('Helvetica');
+        drawSectionHeader('Notes');
         notes.forEach((note) => {
-          doc.text(`• ${note.content}`);
+          const rowY2 = doc.y;
+          doc.font('Helvetica').fontSize(10);
+          const textHeight = doc.heightOfString(note.content, { width: contentWidth - 20 });
+          doc.rect(margin, rowY2, 3, Math.max(textHeight, 12) + 8).fill(COLORS.amber);
+          doc.fillColor(COLORS.textDark)
+            .text(note.content, margin + 14, rowY2 + 2, { width: contentWidth - 20 });
+          doc.y = rowY2 + Math.max(textHeight, 12) + 14;
         });
-        doc.moveDown();
+        doc.moveDown(0.5);
       }
 
       // Photo Evidence Section
@@ -328,23 +468,31 @@ export async function generateTaskPDF(
         if (!photos.length) return;
 
         doc.addPage();
-        doc.fontSize(16).font('Helvetica-Bold').text(title);
-        doc.moveDown();
+
+        // Title bar
+        const y0 = margin;
+        doc.roundedRect(margin, y0, contentWidth, 30, 4).fill(COLORS.navy);
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(COLORS.white)
+          .text(title.toUpperCase(), margin + 14, y0 + 9, { characterSpacing: 0.5 });
+        doc.rect(margin, y0 + 30, 50, 3).fill(COLORS.amber);
+        doc.font('Helvetica').fontSize(9).fillColor(COLORS.textMuted)
+          .text(`${photos.length} photo${photos.length === 1 ? '' : 's'}`, margin, y0 + 40);
+        doc.fillColor(COLORS.textDark);
 
         // Layout constants for 2 images per row
-        const maxWidth = 230;  // ~ half page width minus margins
-        const maxHeight = 260;
-        const leftX = 50;
-        const rightX = 300;
-        const rowSpacing = 24;
+        const maxWidth = 220;
+        const maxHeight = 248;
+        const leftX = margin;
+        const rightX = margin + 260;
+        const rowSpacing = 30;
 
-        let currentY = doc.y;
+        let currentY = y0 + 64;
 
         for (let i = 0; i < photos.length; i += 2) {
           // If we're too close to the bottom, start a new page
           if (currentY > 700 - maxHeight) {
             doc.addPage();
-            currentY = doc.y;
+            currentY = margin;
           }
 
           const leftPhoto = photos[i];
@@ -355,17 +503,22 @@ export async function generateTaskPDF(
           // Caption for the row
           const captionIndex =
             rightPhoto && rightPhoto !== undefined
-              ? `Photos ${i + 1} & ${i + 2}`
-              : `Photo ${i + 1}`;
+              ? `PHOTOS ${i + 1} – ${i + 2}`
+              : `PHOTO ${i + 1}`;
 
-          doc.fontSize(10).font('Helvetica-Bold').text(captionIndex, leftX, currentY);
-          currentY = doc.y + 4;
+          doc.fontSize(8).font('Helvetica-Bold').fillColor(COLORS.amberDark)
+            .text(captionIndex, leftX, currentY, { characterSpacing: 0.5 });
+          currentY = doc.y + 6;
 
           // Helper to draw a single image at a given x
           const drawImage = (photo: Photo | undefined, buffer: Buffer | null | undefined, x: number) => {
             if (!photo) return;
 
             let imageDrawn = false;
+
+            // Framed border around the photo slot
+            doc.roundedRect(x - 3, currentY - 3, maxWidth + 6, maxHeight + 6, 6)
+              .lineWidth(1).stroke(COLORS.border);
 
             if (buffer) {
               try {
@@ -380,10 +533,13 @@ export async function generateTaskPDF(
 
             if (!imageDrawn) {
               // If we couldn't draw the image, at least mark the spot
+              doc.roundedRect(x, currentY, maxWidth, maxHeight, 4).fill(COLORS.bgLight);
               doc
-                .fontSize(10)
+                .fontSize(9)
                 .font('Helvetica')
-                .text('[Error loading image]', x, currentY + maxHeight / 2);
+                .fillColor(COLORS.textMuted)
+                .text('[Error loading image]', x, currentY + maxHeight / 2 - 5, { width: maxWidth, align: 'center' });
+              doc.fillColor(COLORS.textDark);
             }
           };
 
@@ -391,19 +547,22 @@ export async function generateTaskPDF(
           drawImage(rightPhoto, rightBuffer, rightX);
 
           // Row metadata (takenAt) under the images
-          const metaY = currentY + maxHeight + 4;
+          const metaY = currentY + maxHeight + 8;
           if (leftPhoto?.takenAt) {
             doc
               .fontSize(8)
               .font('Helvetica')
+              .fillColor(COLORS.textMuted)
               .text(`Taken: ${new Date(leftPhoto.takenAt).toLocaleString()}`, leftX, metaY);
           }
           if (rightPhoto?.takenAt) {
             doc
               .fontSize(8)
               .font('Helvetica')
+              .fillColor(COLORS.textMuted)
               .text(`Taken: ${new Date(rightPhoto.takenAt).toLocaleString()}`, rightX, metaY);
           }
+          doc.fillColor(COLORS.textDark);
 
           // Advance Y for next row
           currentY = metaY + rowSpacing;
@@ -424,26 +583,65 @@ export async function generateTaskPDF(
 
       // Summary
       doc.addPage();
-      doc.fontSize(16).font('Helvetica-Bold').text('Summary');
-      doc.moveDown();
-      doc.fontSize(10).font('Helvetica');
-      if (pdfType === 'before') {
-        doc.text(`Before Photos: ${photosToInclude.length}`);
-      } else if (pdfType === 'after') {
-        doc.text(`After Photos: ${photosToInclude.length}`);
-      } else {
-        doc.text(`Total Photos: ${task.photos.length}`);
-        doc.text(`Before Photos: ${beforePhotos.length}`);
-        doc.text(`After Photos: ${afterPhotos.length}`);
-      }
-      doc.text(`Issues Reported: ${issues.length}`);
-      doc.text(`Checklist Items: ${task.checklists?.length || 0}`);
-      doc.moveDown();
+      drawSectionHeader('Summary Overview');
 
-      // Footer
-      doc.moveDown(2);
-      doc.fontSize(8).font('Helvetica').text('Generated by MayaOps', { align: 'center' });
-      doc.text(`Report Date: ${new Date().toLocaleString()}`, { align: 'center' });
+      const stats: { label: string; value: string }[] = [];
+      if (pdfType === 'before') {
+        stats.push({ label: 'Before Photos', value: String(photosToInclude.length) });
+      } else if (pdfType === 'after') {
+        stats.push({ label: 'After Photos', value: String(photosToInclude.length) });
+      } else {
+        stats.push({ label: 'Total Photos', value: String(task.photos.length) });
+        stats.push({ label: 'Before Photos', value: String(beforePhotos.length) });
+        stats.push({ label: 'After Photos', value: String(afterPhotos.length) });
+      }
+      stats.push({ label: 'Issues Reported', value: String(issues.length) });
+      stats.push({ label: 'Checklist Items', value: String(task.checklists?.length || 0) });
+
+      const cardsPerRow = 3;
+      const cardGap = 14;
+      const cardW = (contentWidth - cardGap * (cardsPerRow - 1)) / cardsPerRow;
+      const cardH = 74;
+      const gridStartY = doc.y;
+
+      stats.forEach((stat, idx) => {
+        const col = idx % cardsPerRow;
+        const row = Math.floor(idx / cardsPerRow);
+        const x = margin + col * (cardW + cardGap);
+        const y = gridStartY + row * (cardH + cardGap);
+        doc.roundedRect(x, y, cardW, cardH, 6).fillAndStroke(COLORS.bgLight, COLORS.border);
+        doc.font('Helvetica-Bold').fontSize(22).fillColor(COLORS.navy)
+          .text(stat.value, x + 14, y + 14);
+        doc.font('Helvetica').fontSize(9).fillColor(COLORS.textMuted)
+          .text(stat.label.toUpperCase(), x + 14, y + 46, { width: cardW - 28, characterSpacing: 0.3 });
+      });
+
+      const totalRows = Math.ceil(stats.length / cardsPerRow);
+      doc.fillColor(COLORS.textDark);
+      doc.y = gridStartY + totalRows * (cardH + cardGap) + 20;
+
+      doc.roundedRect(margin, doc.y, contentWidth, 1, 0).fill(COLORS.border);
+      doc.y += 16;
+      doc.font('Helvetica').fontSize(9).fillColor(COLORS.textMuted)
+        .text(`Report generated: ${new Date().toLocaleString()}`, margin, doc.y);
+      doc.fillColor(COLORS.textDark);
+
+      // -----------------------------------------------------------------
+      // Global footer — TidyFlow branding + page numbers on every page
+      // -----------------------------------------------------------------
+      const range = doc.bufferedPageRange();
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        const bottomY = doc.page.height - 40;
+        doc.rect(margin, bottomY, contentWidth, 0.75).fill(COLORS.border);
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.navy)
+          .text('TidyFlow', margin, bottomY + 8);
+        doc.font('Helvetica').fontSize(8).fillColor(COLORS.textMuted)
+          .text(`Page ${i - range.start + 1} of ${range.count}`, margin, bottomY + 8, {
+            width: contentWidth,
+            align: 'right',
+          });
+      }
 
       doc.end();
     });
@@ -555,6 +753,7 @@ export function validatePhotoRequirements(photos: Photo[], minCount: number = 20
 
 /**
  * Generate invoice PDF for billing record
+ * (Design intentionally left unchanged — only the MayaOps -> TidyFlow rebrand applied.)
  */
 export async function generateBillingInvoicePDF(
   billingRecord: {
@@ -582,7 +781,7 @@ export async function generateBillingInvoicePDF(
       // Header
       doc.fontSize(24).font('Helvetica-Bold').text('INVOICE', { align: 'center' });
       doc.moveDown();
-      doc.fontSize(12).font('Helvetica').text('MayaOps', { align: 'center' });
+      doc.fontSize(12).font('Helvetica').text('TidyFlow', { align: 'center' });
       doc.moveDown(2);
 
       // Invoice details
@@ -643,7 +842,7 @@ export async function generateBillingInvoicePDF(
       // Footer
       doc.moveDown(4);
       doc.fontSize(8).font('Helvetica').text('Thank you for your business!', { align: 'center' });
-      doc.text('Generated by MayaOps', { align: 'center' });
+      doc.text('Generated by TidyFlow', { align: 'center' });
       doc.text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
 
       doc.end();
