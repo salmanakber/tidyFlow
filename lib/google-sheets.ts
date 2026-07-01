@@ -179,6 +179,20 @@ async function taskHasAssignedCleaner(
   return !!(task?.assignedUserId || task?.taskAssignments?.length);
 }
 
+/** Only alert managers when a row newly enters (or re-enters) a blocked state — not on every sync pass. */
+function shouldNotifySheetStatusBlocked(
+  existingTask: { status: string } | null | undefined,
+  statusRaw: string,
+  hasCleaner: boolean,
+  hadCleanerBefore: boolean
+): boolean {
+  if (!SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) || hasCleaner) return false;
+  if (!existingTask) return true;
+  if (existingTask.status !== statusRaw) return true;
+  if (hadCleanerBefore && !hasCleaner) return true;
+  return false;
+}
+
 function parseAssigneeEmails(raw?: string | null): string[] {
   if (!raw?.trim()) return [];
   return raw
@@ -913,6 +927,9 @@ export async function syncCompanySheet(companyId: number) {
       const cleanerIds = await resolveCleanerIdsFromEmails(companyId, assigneeRaw);
       const assignedUserId = cleanerIds[0];
 
+      const hadCleanerBefore = existingTask
+        ? await taskHasAssignedCleaner(companyId, undefined, existingTask.id)
+        : false;
       const hasCleaner = await taskHasAssignedCleaner(
         companyId,
         assignedUserId,
@@ -921,13 +938,15 @@ export async function syncCompanySheet(companyId: number) {
       );
 
       if (SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) && !hasCleaner) {
-        await notifyManagersSheetStatusBlocked({
-          companyId,
-          taskTitle: title!.trim(),
-          requestedStatus: statusRaw,
-          propertyRef: propertyRef.trim(),
-          spreadsheetTitle: conn.spreadsheetTitle || undefined,
-        });
+        if (shouldNotifySheetStatusBlocked(existingTask, statusRaw, hasCleaner, hadCleanerBefore)) {
+          await notifyManagersSheetStatusBlocked({
+            companyId,
+            taskTitle: title!.trim(),
+            requestedStatus: statusRaw,
+            propertyRef: propertyRef.trim(),
+            spreadsheetTitle: conn.spreadsheetTitle || undefined,
+          });
+        }
         statusBlocked++;
         if (existingTask) {
           await prisma.task.update({
@@ -1179,6 +1198,9 @@ export async function syncTaskSheetFromMapping(companyId: number): Promise<TaskS
         continue;
       }
 
+      const hadCleanerBefore = existingTask
+        ? await taskHasAssignedCleaner(companyId, undefined, existingTask.id)
+        : false;
       const hasCleaner = await taskHasAssignedCleaner(
         companyId,
         assignedUserId,
@@ -1187,13 +1209,15 @@ export async function syncTaskSheetFromMapping(companyId: number): Promise<TaskS
       );
 
       if (SHEET_STATUSES_REQUIRING_CLEANER.has(statusRaw) && !hasCleaner) {
-        await notifyManagersSheetStatusBlocked({
-          companyId,
-          taskTitle: title!,
-          requestedStatus: statusRaw,
-          propertyRef,
-          spreadsheetTitle: conn.spreadsheetTitle || undefined,
-        });
+        if (shouldNotifySheetStatusBlocked(existingTask, statusRaw, hasCleaner, hadCleanerBefore)) {
+          await notifyManagersSheetStatusBlocked({
+            companyId,
+            taskTitle: title!,
+            requestedStatus: statusRaw,
+            propertyRef,
+            spreadsheetTitle: conn.spreadsheetTitle || undefined,
+          });
+        }
         if (existingTask) {
           await prisma.task.update({
             where: { id: existingTask.id },
