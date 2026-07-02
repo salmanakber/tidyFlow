@@ -1,7 +1,7 @@
 'use client';
 
-import type { ProofMapBounds, ProofMapCheckpoint } from '@/lib/task-proof';
-import { buildOsmEmbedUrl } from '@/lib/task-proof';
+import type { ProofMapBounds, ProofMapCheckpoint } from '@/lib/proof-map';
+import { buildOsmEmbedUrl } from '@/lib/proof-map';
 
 const KIND_COLORS: Record<string, string> = {
   property: '#0D1B2A',

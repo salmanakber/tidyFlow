@@ -1,26 +1,10 @@
 import prisma from '@/lib/prisma';
 import { getEffectiveDurationMinutes } from '@/lib/task-time-log';
-
-export type ProofMapCheckpointKind = 'property' | 'on_site' | 'off_site' | 'start' | 'complete';
-
-export interface ProofMapCheckpoint {
-  id: string;
-  latitude: number;
-  longitude: number;
-  kind: ProofMapCheckpointKind;
-  label: string;
-  recordedAt?: string;
-  distanceMeters?: number | null;
-}
-
-export interface ProofMapBounds {
-  centerLat: number;
-  centerLng: number;
-  minLat: number;
-  maxLat: number;
-  minLng: number;
-  maxLng: number;
-}
+import {
+  computeProofMapBounds,
+  type ProofMapBounds,
+  type ProofMapCheckpoint,
+} from '@/lib/proof-map';
 
 export interface TaskProofSummary {
   totalWorkMinutes: number;
@@ -69,36 +53,6 @@ function sampleEvenly<T>(items: T[], max: number): T[] {
     out.push(items[Math.floor(i * step)]);
   }
   return out;
-}
-
-function computeBounds(points: Array<{ latitude: number; longitude: number }>): ProofMapBounds | null {
-  if (points.length === 0) return null;
-  let minLat = points[0].latitude;
-  let maxLat = points[0].latitude;
-  let minLng = points[0].longitude;
-  let maxLng = points[0].longitude;
-  for (const p of points) {
-    minLat = Math.min(minLat, p.latitude);
-    maxLat = Math.max(maxLat, p.latitude);
-    minLng = Math.min(minLng, p.longitude);
-    maxLng = Math.max(maxLng, p.longitude);
-  }
-  const pad = 0.0015;
-  return {
-    minLat: minLat - pad,
-    maxLat: maxLat + pad,
-    minLng: minLng - pad,
-    maxLng: maxLng + pad,
-    centerLat: (minLat + maxLat) / 2,
-    centerLng: (minLng + maxLng) / 2,
-  };
-}
-
-/** Build OpenStreetMap embed URL (no API key required). */
-export function buildOsmEmbedUrl(bounds: ProofMapBounds, marker?: { latitude: number; longitude: number }) {
-  const bbox = `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}`;
-  const markerParam = marker ? `&marker=${marker.latitude}%2C${marker.longitude}` : '';
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik${markerParam}`;
 }
 
 /** Read-only GPS + hours summary for client proof links. */
@@ -220,7 +174,7 @@ export async function buildTaskProofSummary(taskId: number): Promise<TaskProofSu
     });
   }
 
-  const mapBounds = computeBounds(mapCheckpoints);
+  const mapBounds = computeProofMapBounds(mapCheckpoints);
 
   return {
     totalWorkMinutes: cleaners.reduce((sum, c) => sum + c.workMinutes, 0),
