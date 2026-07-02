@@ -26,7 +26,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function SharePortalPage({ params }: PageProps) {
   const result = await getSharePortalData(params.token);
   if (!result.ok) {
-    if (result.status === 404) notFound();
+    if (result.ok === false && result.status === 404) notFound();
     return (
       <main className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center px-6 text-center">
         <p className="text-lg font-semibold text-rose-600">Link expired</p>
