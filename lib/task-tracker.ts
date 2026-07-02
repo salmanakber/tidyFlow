@@ -3,6 +3,8 @@ import { performLocationCheck } from '@/lib/location-check';
 import { recordJobEnd, recordJobStart, getEffectiveDurationMinutes, ensureWorkSessionsFromAssignment } from '@/lib/task-time-log';
 import { emitTaskEvent } from '@/lib/realtime';
 import { getCleanerLocation } from '@/lib/cleaner-tracking';
+import { ensurePropertyCoordinates } from '@/lib/geocoding';
+import { notifyGeofenceExitIfNeeded } from '@/lib/geofence-alerts';
 
 const SLOT_MINUTES = 15;
 
@@ -334,13 +336,11 @@ export async function getTaskTrackingOverview(taskId: number, companyId: number)
     assignmentByUser.set(task.assignedUserId, ensured);
   }
 
-  const relevantAssignments = Array.from(assignmentByUser.values()).filter(
-    (a) =>
-      a.startedAt != null ||
-      a.trackerActive ||
-      a.durationMinutes != null ||
-      a.editedDurationMinutes != null
-  );
+  const relevantAssignments = Array.from(assignmentByUser.values()).filter((a) => {
+    if (a.startedAt != null || a.trackerActive) return true;
+    if (a.durationMinutes != null || a.editedDurationMinutes != null) return true;
+    return ensureWorkSessionsFromAssignment(a).length > 0;
+  });
 
   const timelineLogs = await prisma.locationLog.findMany({
     where: {
@@ -485,17 +485,38 @@ export async function recordTimelinePing(input: {
   companyId: number;
   latitude: number;
   longitude: number;
+  /** Preserve original capture time (offline replay). */
+  recordedAt?: Date;
+  /** Offline replay — accept pings within the assignment window even after submit. */
+  historical?: boolean;
 }) {
+  const at = input.recordedAt ?? new Date();
   const assignment = await prisma.taskAssignment.findUnique({
     where: { taskId_userId: { taskId: input.taskId, userId: input.userId } },
   });
-  if (!assignment?.startedAt || assignment.endedAt || assignment.onBreak) return null;
+
+  if (!assignment?.startedAt) return null;
+
+  if (input.historical) {
+    if (at < assignment.startedAt) return null;
+    if (assignment.endedAt && at > assignment.endedAt) return null;
+  } else if (assignment.endedAt || assignment.onBreak) {
+    return null;
+  }
 
   const task = await prisma.task.findUnique({
     where: { id: input.taskId },
-    include: { property: { select: { latitude: true, longitude: true } } },
+    include: { property: { select: { id: true, latitude: true, longitude: true, address: true } } },
   });
   if (!task) return null;
+
+  if (task.property?.id && (!task.property.latitude || !task.property.longitude) && task.property.address) {
+    const coords = await ensurePropertyCoordinates(task.property.id);
+    if (coords) {
+      task.property.latitude = coords.latitude as any;
+      task.property.longitude = coords.longitude as any;
+    }
+  }
 
   const hasPropertyCoords = !!(task.property?.latitude && task.property.longitude);
   let distance: number | null = null;
@@ -529,6 +550,30 @@ export async function recordTimelinePing(input: {
       distanceFromProperty: distance,
       ...(withinGeofence != null ? { withinGeofence } : {}),
       checkType: 'timeline',
+      createdAt: at,
     },
+  }).then(async (log) => {
+    const isRecent = Date.now() - at.getTime() <= 15 * 60 * 1000;
+    if (withinGeofence === false && distance != null && isRecent) {
+      const fullTask = await prisma.task.findUnique({
+        where: { id: input.taskId },
+        select: { title: true, property: { select: { address: true } } },
+      });
+      const cleaner = await prisma.user.findUnique({
+        where: { id: input.userId },
+        select: { firstName: true, lastName: true },
+      });
+      await notifyGeofenceExitIfNeeded({
+        userId: input.userId,
+        companyId: input.companyId,
+        taskId: input.taskId,
+        distance,
+        withinGeofence,
+        cleanerName: `${cleaner?.firstName || ''} ${cleaner?.lastName || ''}`.trim(),
+        propertyAddress: fullTask?.property?.address,
+        taskTitle: fullTask?.title,
+      });
+    }
+    return log;
   });
 }

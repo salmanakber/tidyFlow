@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
     const longitude = Number(body.longitude);
     const accuracy = body.accuracy != null ? Number(body.accuracy) : undefined;
     const taskId = body.taskId != null ? Number(body.taskId) : undefined;
+    const recordedAt = body.recordedAt ? new Date(body.recordedAt) : undefined;
 
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       return NextResponse.json({ success: false, message: 'Valid latitude and longitude required' }, { status: 400 });
@@ -61,9 +62,18 @@ export async function POST(request: NextRequest) {
         select: {
           id: true,
           title: true,
-          property: { select: { address: true, latitude: true, longitude: true } },
+          propertyId: true,
+          property: { select: { id: true, address: true, latitude: true, longitude: true } },
         },
       });
+      if (activeTask?.property?.id && (!activeTask.property.latitude || !activeTask.property.longitude)) {
+        const { ensurePropertyCoordinates } = await import('@/lib/geocoding');
+        const coords = await ensurePropertyCoordinates(activeTask.property.id);
+        if (coords && activeTask.property) {
+          activeTask.property.latitude = coords.latitude as any;
+          activeTask.property.longitude = coords.longitude as any;
+        }
+      }
     } else {
       activeTask = await prisma.task.findFirst({
         where: {
@@ -78,9 +88,17 @@ export async function POST(request: NextRequest) {
         select: {
           id: true,
           title: true,
-          property: { select: { address: true, latitude: true, longitude: true } },
+          property: { select: { id: true, address: true, latitude: true, longitude: true } },
         },
       });
+      if (activeTask?.property?.id && (!activeTask.property.latitude || !activeTask.property.longitude)) {
+        const { ensurePropertyCoordinates } = await import('@/lib/geocoding');
+        const coords = await ensurePropertyCoordinates(activeTask.property.id);
+        if (coords && activeTask.property) {
+          activeTask.property.latitude = coords.latitude as any;
+          activeTask.property.longitude = coords.longitude as any;
+        }
+      }
     }
 
     const record = buildLocationRecord({
@@ -106,6 +124,7 @@ export async function POST(request: NextRequest) {
         companyId: tokenUser.companyId,
         latitude,
         longitude,
+        recordedAt,
       }).catch(() => {});
     }
 

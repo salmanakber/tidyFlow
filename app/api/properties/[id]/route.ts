@@ -52,6 +52,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ success: false, message: 'Property not found' }, { status: 404 });
   }
 
+  if ((!property.latitude || !property.longitude) && property.address) {
+    const { ensurePropertyCoordinates } = await import('@/lib/geocoding');
+    const coords = await ensurePropertyCoordinates(property.id);
+    if (coords) {
+      property.latitude = coords.latitude as any;
+      property.longitude = coords.longitude as any;
+    }
+  }
+
   return NextResponse.json({ success: true, data: { property } });
 }
 
@@ -103,13 +112,29 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     isActive,
   } = body;
 
+  let resolvedLat = latitude !== undefined ? Number(latitude) : undefined;
+  let resolvedLng = longitude !== undefined ? Number(longitude) : undefined;
+
+  if ((resolvedLat == null || resolvedLng == null || Number.isNaN(resolvedLat) || Number.isNaN(resolvedLng)) &&
+      (address !== undefined ? address : existing.address)) {
+    const { geocodeAddress } = await import('@/lib/geocoding');
+    const coords = await geocodeAddress(
+      address !== undefined ? String(address) : existing.address,
+      postcode !== undefined ? String(postcode) : existing.postcode ?? undefined
+    );
+    if (coords) {
+      resolvedLat = coords.lat;
+      resolvedLng = coords.lng;
+    }
+  }
+
   const property = await prisma.property.update({
     where: { id },
     data: {
       ...(address !== undefined ? { address } : {}),
       ...(postcode !== undefined ? { postcode } : {}),
-      ...(latitude !== undefined ? { latitude: Number(latitude) } : {}),
-      ...(longitude !== undefined ? { longitude: Number(longitude) } : {}),
+      ...(resolvedLat != null && !Number.isNaN(resolvedLat) ? { latitude: resolvedLat } : {}),
+      ...(resolvedLng != null && !Number.isNaN(resolvedLng) ? { longitude: resolvedLng } : {}),
       ...(propertyType !== undefined ? { propertyType } : {}),
       ...(notes !== undefined ? { notes } : {}),
       ...(clientName !== undefined ? { clientName: clientName || null } : {}),

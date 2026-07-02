@@ -44,6 +44,133 @@ export async function geocodeAddress(address: string, postcode?: string): Promis
   }
 }
 
+/** Resolve lat/lng for a property — geocode from address when missing and persist. */
+export async function ensurePropertyCoordinates(
+  propertyId: number
+): Promise<{ latitude: number; longitude: number } | null> {
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { id: true, address: true, postcode: true, latitude: true, longitude: true },
+  });
+  if (!property) return null;
+
+  if (property.latitude != null && property.longitude != null) {
+    return { latitude: Number(property.latitude), longitude: Number(property.longitude) };
+  }
+
+  if (!property.address?.trim()) return null;
+
+  const coords = await geocodeAddress(property.address, property.postcode ?? undefined);
+  if (!coords) return null;
+
+  await prisma.property.update({
+    where: { id: propertyId },
+    data: { latitude: coords.lat, longitude: coords.lng },
+  });
+
+  return { latitude: coords.lat, longitude: coords.lng };
+}
+
+export type GeocodeAllResult = {
+  total: number;
+  alreadyHadCoords: number;
+  geocoded: number;
+  failed: number;
+  skippedNoAddress: number;
+  failures: Array<{ id: number; address: string; reason: string }>;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Bulk backfill lat/lng for properties that have an address but no coordinates. */
+export async function geocodeAllPropertiesForCompany(
+  companyId: number,
+  options?: { delayMs?: number; limit?: number }
+): Promise<GeocodeAllResult> {
+  const delayMs = options?.delayMs ?? 250;
+  const limit = options?.limit ?? 500;
+
+  const properties = await prisma.property.findMany({
+    where: { companyId },
+    select: { id: true, address: true, postcode: true, latitude: true, longitude: true },
+    orderBy: { id: 'asc' },
+    take: limit,
+  });
+
+  const result: GeocodeAllResult = {
+    total: properties.length,
+    alreadyHadCoords: 0,
+    geocoded: 0,
+    failed: 0,
+    skippedNoAddress: 0,
+    failures: [],
+  };
+
+  for (const property of properties) {
+    if (property.latitude != null && property.longitude != null) {
+      result.alreadyHadCoords++;
+      continue;
+    }
+
+    if (!property.address?.trim()) {
+      result.skippedNoAddress++;
+      continue;
+    }
+
+    const coords = await geocodeAddress(property.address, property.postcode ?? undefined);
+    if (coords) {
+      await prisma.property.update({
+        where: { id: property.id },
+        data: { latitude: coords.lat, longitude: coords.lng },
+      });
+      result.geocoded++;
+    } else {
+      result.failed++;
+      result.failures.push({
+        id: property.id,
+        address: property.address,
+        reason: 'Google Geocoding returned no match',
+      });
+    }
+
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+  }
+
+  return result;
+}
+
+export async function countPropertiesNeedingGeocode(companyId: number): Promise<{
+  total: number;
+  needsGeocode: number;
+  missingAddress: number;
+  hasCoords: number;
+}> {
+  const properties = await prisma.property.findMany({
+    where: { companyId },
+    select: { address: true, latitude: true, longitude: true },
+  });
+
+  let needsGeocode = 0;
+  let missingAddress = 0;
+  let hasCoords = 0;
+
+  for (const p of properties) {
+    if (p.latitude != null && p.longitude != null) {
+      hasCoords++;
+    } else if (!p.address?.trim()) {
+      missingAddress++;
+    } else {
+      needsGeocode++;
+    }
+  }
+
+  return { total: properties.length, needsGeocode, missingAddress, hasCoords };
+}
+
 /**
  * Decrypt encrypted value (simple implementation - should match encryption in settings)
  */

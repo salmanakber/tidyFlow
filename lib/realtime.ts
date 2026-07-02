@@ -14,7 +14,8 @@ export type RealtimeEventType =
   | 'sheet:sync'
   | 'notification:new'
   | 'cleaner:location'
-  | 'task:tracker';
+  | 'task:tracker'
+  | 'task:geofence';
 
 export interface RealtimeEvent {
   type: RealtimeEventType;

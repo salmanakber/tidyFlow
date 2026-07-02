@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma';
 import { validateGeofence, type Coordinates } from '@/lib/geolocation';
-import { createNotification } from '@/lib/notifications';
+import { ensurePropertyCoordinates } from '@/lib/geocoding';
+import { notifyGeofenceExitIfNeeded } from '@/lib/geofence-alerts';
 
 export interface LocationCheckInput {
   taskId: number;
@@ -23,8 +24,10 @@ export async function performLocationCheck(
 ): Promise<LocationCheckResult> {
   const task = await prisma.task.findUnique({
     where: { id: input.taskId },
-    include: {
-      property: { select: { latitude: true, longitude: true, address: true } },
+    select: {
+      id: true,
+      title: true,
+      property: { select: { id: true, latitude: true, longitude: true, address: true } },
     },
   });
 
@@ -37,13 +40,21 @@ export async function performLocationCheck(
     };
   }
 
+  if (task.property?.id && (!task.property.latitude || !task.property.longitude) && task.property.address) {
+    const coords = await ensurePropertyCoordinates(task.property.id);
+    if (coords) {
+      task.property.latitude = coords.latitude as any;
+      task.property.longitude = coords.longitude as any;
+    }
+  }
+
   const config = await prisma.adminConfiguration.findUnique({
     where: { companyId: input.companyId },
     select: { geofenceRadius: true },
   });
 
   const geofenceRadius = config?.geofenceRadius ?? 150;
-  const hasPropertyCoords = !!(task?.property?.latitude && task.property.longitude);
+  const hasPropertyCoords = !!(task.property?.latitude && task.property.longitude);
 
   let validation = {
     isWithinGeofence: true,
@@ -52,15 +63,14 @@ export async function performLocationCheck(
   };
 
   if (hasPropertyCoords) {
-    const userLocation: Coordinates = {
-      latitude: input.latitude,
-      longitude: input.longitude,
-    };
-    const propertyLocation: Coordinates = {
-      latitude: Number(task!.property!.latitude),
-      longitude: Number(task!.property!.longitude),
-    };
-    validation = validateGeofence(userLocation, propertyLocation, geofenceRadius);
+    validation = validateGeofence(
+      { latitude: input.latitude, longitude: input.longitude },
+      {
+        latitude: Number(task.property!.latitude),
+        longitude: Number(task.property!.longitude),
+      },
+      geofenceRadius
+    );
   }
 
   await prisma.locationLog.create({
@@ -77,32 +87,23 @@ export async function performLocationCheck(
 
   const flagged = hasPropertyCoords && !validation.isWithinGeofence;
 
-  if (flagged && task?.property) {
-    const managers = await prisma.user.findMany({
-      where: {
-        companyId: input.companyId,
-        role: { in: ['MANAGER', 'COMPANY_ADMIN', 'OWNER'] },
-        isActive: true,
-      },
-      select: { id: true },
-    });
-
+  if (flagged && task.property) {
     const cleaner = await prisma.user.findUnique({
       where: { id: input.userId },
       select: { firstName: true, lastName: true },
     });
-
     const cleanerName = `${cleaner?.firstName || ''} ${cleaner?.lastName || ''}`.trim() || 'Cleaner';
 
-    for (const manager of managers) {
-      await createNotification({
-        userId: manager.id,
-        title: 'GPS Verification Flag',
-        message: `${cleanerName} was ${validation.distance}m from ${task.property.address} during ${input.checkType}. Task was not blocked.`,
-        type: 'high_severity_issue',
-        metadata: { taskId: input.taskId, distance: validation.distance, checkType: input.checkType },
-      });
-    }
+    await notifyGeofenceExitIfNeeded({
+      userId: input.userId,
+      companyId: input.companyId,
+      taskId: input.taskId,
+      distance: validation.distance,
+      withinGeofence: validation.isWithinGeofence,
+      cleanerName,
+      propertyAddress: task.property.address,
+      taskTitle: task.title,
+    });
   }
 
   return {

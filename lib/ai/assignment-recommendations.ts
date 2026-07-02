@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 import { getAIConfig, isAIEnabled } from './config';
 import { aiChat, parseJSONResponse } from './client';
 import { calculateDistance, type Coordinates } from '@/lib/geolocation';
+import { getCleanerLocation } from '@/lib/cleaner-tracking';
 
 export interface CleanerRecommendation {
   userId: number;
@@ -113,8 +114,50 @@ async function scoreCleanersForContext(ctx: {
 
   const propertyCoords: Coordinates | null =
     ctx.property.latitude && ctx.property.longitude
-      ? { latitude: ctx.property.latitude, longitude: ctx.property.longitude }
+      ? { latitude: Number(ctx.property.latitude), longitude: Number(ctx.property.longitude) }
       : null;
+
+  const dayStart = new Date(ctx.scheduledDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(ctx.scheduledDate);
+  dayEnd.setHours(23, 59, 59, 999);
+
+  const cleanerIds = cleaners.map((c) => c.id);
+  const recentLocationLogs =
+    cleanerIds.length > 0
+      ? await prisma.locationLog.findMany({
+          where: { userId: { in: cleanerIds } },
+          orderBy: { createdAt: 'desc' },
+          distinct: ['userId'],
+          select: { userId: true, latitude: true, longitude: true, createdAt: true },
+        })
+      : [];
+  const lastLogByUser = new Map(recentLocationLogs.map((l) => [l.userId, l]));
+
+  function resolveCleanerCoords(userId: number): Coordinates | null {
+    const live = getCleanerLocation(userId);
+    if (live) {
+      return { latitude: live.latitude, longitude: live.longitude };
+    }
+    const log = lastLogByUser.get(userId);
+    if (log) {
+      return { latitude: Number(log.latitude), longitude: Number(log.longitude) };
+    }
+    return null;
+  }
+
+  function proximityBonus(meters: number): number {
+    if (meters <= 3000) return 12;
+    if (meters <= 8000) return 8;
+    if (meters <= 15000) return 4;
+    if (meters <= 30000) return 1;
+    return 0;
+  }
+
+  function formatDistanceLabel(meters: number): string {
+    if (meters < 1000) return `${Math.round(meters)}m away`;
+    return `${(meters / 1000).toFixed(1)}km away`;
+  }
 
   const scored: CleanerRecommendation[] = [];
 
@@ -134,10 +177,7 @@ async function scoreCleanersForContext(ctx: {
       where: {
         userId: cleaner.id,
         task: {
-          scheduledDate: {
-            gte: new Date(scheduledDate.setHours(0, 0, 0, 0)),
-            lte: new Date(scheduledDate.setHours(23, 59, 59, 999)),
-          },
+          scheduledDate: { gte: dayStart, lte: dayEnd },
           status: { notIn: ['ARCHIVED', 'REJECTED'] },
         },
       },
@@ -146,33 +186,39 @@ async function scoreCleanersForContext(ctx: {
     if (existingAssignments >= 3) continue;
 
     let distance: number | undefined;
-    if (propertyCoords && ctx.managerLat && ctx.managerLng) {
-      distance = Math.round(
-        calculateDistance(propertyCoords, {
-          latitude: ctx.managerLat,
-          longitude: ctx.managerLng,
-        })
-      );
+    let locationKnown = false;
+    if (propertyCoords) {
+      const cleanerCoords = resolveCleanerCoords(cleaner.id);
+      if (cleanerCoords) {
+        distance = Math.round(calculateDistance(propertyCoords, cleanerCoords));
+        locationKnown = true;
+      }
     }
 
     const qualityScore = profile?.qualityScore ?? 70;
     const punctuality = profile?.punctualityScore ?? 75;
     const clientSat = profile?.clientSatisfaction ?? 75;
     const workloadPenalty = existingAssignments * 5;
+    const proximity = distance != null ? proximityBonus(distance) : 0;
 
     const score =
       qualityScore * 0.35 +
       punctuality * 0.25 +
       clientSat * 0.25 +
       (profile?.reliabilityScore ?? 70) * 0.15 -
-      workloadPenalty;
+      workloadPenalty +
+      proximity;
 
     const name = `${cleaner.firstName || ''} ${cleaner.lastName || ''}`.trim() || cleaner.email;
     const tasksCompleted = profile?.tasksCompleted ?? 0;
 
     let reason = `Quality ${qualityScore.toFixed(0)}%, punctuality ${punctuality.toFixed(0)}%`;
     if (tasksCompleted > 0) reason += `, ${tasksCompleted} similar tasks completed`;
-    if (distance !== undefined) reason += `, ${(distance / 1000).toFixed(1)}km from property`;
+    if (distance != null) {
+      reason += `, ${formatDistanceLabel(distance)}`;
+    } else if (propertyCoords && !locationKnown) {
+      reason += ', location unavailable';
+    }
 
     scored.push({
       userId: cleaner.id,

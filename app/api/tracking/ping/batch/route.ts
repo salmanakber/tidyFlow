@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
 import { buildLocationRecord, upsertCleanerLocation } from '@/lib/cleaner-tracking';
 import { broadcastCleanerLocation } from '@/lib/socket-io';
+import { recordTimelinePing } from '@/lib/task-tracker';
 
 interface PingInput {
   latitude: number;
@@ -62,61 +63,22 @@ export async function POST(request: NextRequest) {
     });
     const radius = config?.geofenceRadius ?? 150;
 
-    // Cache property coords per task to avoid repeated lookups.
-    const propertyCache = new Map<number, { latitude: number; longitude: number } | null>();
-    const getPropertyCoords = async (taskId: number) => {
-      if (propertyCache.has(taskId)) return propertyCache.get(taskId)!;
-      const task = await prisma.task.findUnique({
-        where: { id: taskId },
-        select: { property: { select: { latitude: true, longitude: true } } },
-      });
-      const coords =
-        task?.property?.latitude != null && task?.property?.longitude != null
-          ? { latitude: Number(task.property.latitude), longitude: Number(task.property.longitude) }
-          : null;
-      propertyCache.set(taskId, coords);
-      return coords;
-    };
-
-    const { validateGeofence } = await import('@/lib/geolocation');
-
     let saved = 0;
     for (const p of valid) {
-      // The location timeline is keyed by task. Pings captured without an active task
-      // (background heartbeats) were never persisted online either — only live location
-      // was updated — so we skip timeline persistence for them.
       if (!p.taskId) continue;
 
-      let distance: number | null = null;
-      let withinGeofence: boolean | null = null;
-
-      const coords = await getPropertyCoords(p.taskId);
-      if (coords) {
-        const result = validateGeofence(
-          { latitude: p.latitude, longitude: p.longitude },
-          coords,
-          radius
-        );
-        distance = result.distance;
-        withinGeofence = result.isWithinGeofence;
-      }
-
-      await prisma.locationLog.create({
-        data: {
-          taskId: p.taskId,
-          userId: tokenUser.userId,
-          latitude: p.latitude,
-          longitude: p.longitude,
-          distanceFromProperty: distance,
-          ...(withinGeofence != null ? { withinGeofence } : {}),
-          checkType: 'timeline',
-          createdAt: p.recordedAt,
-        },
+      const log = await recordTimelinePing({
+        taskId: p.taskId,
+        userId: tokenUser.userId,
+        companyId: tokenUser.companyId,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        recordedAt: p.recordedAt,
+        historical: true,
       });
-      saved++;
+      if (log) saved++;
     }
 
-    // Refresh live tracking with the most recent point.
     const last = valid[valid.length - 1];
     const user = await prisma.user.findUnique({
       where: { id: tokenUser.userId },

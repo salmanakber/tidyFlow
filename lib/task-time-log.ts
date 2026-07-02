@@ -212,6 +212,12 @@ export async function recordJobEnd(input: {
 }) {
   const now = input.at ?? new Date();
   const assignment = await ensureAssignment(input.taskId, input.userId);
+
+  // Idempotent — status + tracker submit must not double-log the same shift.
+  if (assignment.endedAt && assignment.durationMinutes != null && assignment.durationMinutes > 0) {
+    return assignment;
+  }
+
   const startedAt = assignment.startedAt ?? now;
   const breakMins = input.totalBreakMinutes ?? assignment.totalBreakMinutes ?? 0;
 
@@ -291,6 +297,8 @@ export async function syncTaskHoursToWorkingHours(params: {
 
   await assertHoursEditable(params.userId, date);
 
+  const hoursValue = Math.max(Number(params.hours) || 0, 1 / 60);
+
   const existing = await prisma.workingHoursSubmission.findUnique({
     where: { userId_date: { userId: params.userId, date } },
     include: { tasks: true },
@@ -304,14 +312,14 @@ export async function syncTaskHoursToWorkingHours(params: {
     if (taskLink) {
       await prisma.workingHoursSubmissionTask.update({
         where: { id: taskLink.id },
-        data: { hours: params.hours },
+        data: { hours: hoursValue },
       });
     } else {
       await prisma.workingHoursSubmissionTask.create({
         data: {
           workingHoursSubmissionId: existing.id,
           taskId: params.taskId,
-          hours: params.hours,
+          hours: hoursValue,
         },
       });
     }
@@ -345,11 +353,11 @@ export async function syncTaskHoursToWorkingHours(params: {
       userId: params.userId,
       companyId: params.companyId,
       date,
-      hours: params.hours,
+      hours: hoursValue,
       description: 'Auto-logged from GPS task completion',
       status: 'pending',
       tasks: {
-        create: [{ taskId: params.taskId, hours: params.hours }],
+        create: [{ taskId: params.taskId, hours: hoursValue }],
       },
     },
   });
@@ -430,6 +438,10 @@ export async function getTaskTimeLogs(taskId: number) {
       endWithinGeofence: a.endWithinGeofence,
       startDistanceMeters: a.startDistanceMeters != null ? Number(a.startDistanceMeters) : null,
       endDistanceMeters: a.endDistanceMeters != null ? Number(a.endDistanceMeters) : null,
+      startLatitude: a.startLatitude != null ? Number(a.startLatitude) : null,
+      startLongitude: a.startLongitude != null ? Number(a.startLongitude) : null,
+      endLatitude: a.endLatitude != null ? Number(a.endLatitude) : null,
+      endLongitude: a.endLongitude != null ? Number(a.endLongitude) : null,
       durationMinutes: a.durationMinutes,
       editedDurationMinutes: a.editedDurationMinutes,
       effectiveDurationMinutes: getEffectiveDurationMinutes(a),
