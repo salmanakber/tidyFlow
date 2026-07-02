@@ -337,6 +337,17 @@ export async function cancelSubscription(subscriptionId: string, stripeInstance?
   return subscription;
 }
 
+/** Cancel at period end — customer keeps access until the current billing cycle ends. */
+export async function cancelSubscriptionAtPeriodEnd(
+  subscriptionId: string,
+  stripeInstance?: Stripe
+) {
+  const s = stripeInstance || stripe;
+  return s.subscriptions.update(subscriptionId, {
+    cancel_at_period_end: true,
+  });
+}
+
 /**
  * Handle Stripe webhook with signature verification
  * Note: webhookSecret should be fetched from SystemSetting in the route handler
