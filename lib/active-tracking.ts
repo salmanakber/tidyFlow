@@ -3,14 +3,14 @@ import { TaskStatus } from '@prisma/client';
 import { getCleanerLocation, getCompanyCleanerLocations } from '@/lib/cleaner-tracking';
 import { getEffectiveDurationMinutes } from '@/lib/task-time-log';
 
-function workMinutesFromAssignment(a: {
+function workMinutesFromAssignment( a: {
   startedAt: Date | null;
   endedAt: Date | null;
   totalBreakMinutes: number;
   onBreak: boolean;
   breakStartedAt: Date | null;
-  durationMinutes?: number | null;
-  editedDurationMinutes?: number | null;
+  durationMinutes: number | null;
+  editedDurationMinutes: number | null;
 }): number {
   const effective = getEffectiveDurationMinutes(a);
   if (effective != null) return effective;
