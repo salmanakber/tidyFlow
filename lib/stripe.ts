@@ -354,25 +354,21 @@ export async function cancelSubscriptionAtPeriodEnd(
  * This function accepts it as a parameter to allow fetching from SystemSetting at the route level
  */
 export async function handleWebhook(
-  payload: string | Buffer, 
-  signature: string, 
-  webhookSecret?: string
+  payload: string | Buffer,
+  signature: string,
+  webhookSecret?: string | string[]
 ) {
-  // If webhookSecret is not provided, fallback to env var (for backward compatibility)
-  // Route handlers should fetch from SystemSetting and pass it here
-  const secret = webhookSecret || process.env.STRIPE_WEBHOOK_SECRET || '';
+  const { verifyStripeWebhookEvent, getStripeWebhookSecrets } = await import(
+    '@/lib/stripe-webhook-verify'
+  );
 
-  if (!secret) {
-    throw new Error('Stripe webhook secret not configured. Please configure it in Admin Settings.');
-  }
+  const secrets = Array.isArray(webhookSecret)
+    ? webhookSecret
+    : webhookSecret
+      ? [webhookSecret]
+      : await getStripeWebhookSecrets();
 
-  try {
-    const event = stripe.webhooks.constructEvent(payload, signature, secret);
-    return event;
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err);
-    throw err;
-  }
+  return verifyStripeWebhookEvent(payload, signature, secrets);
 }
 
 export async function retrieveInvoice(invoiceId: string) {

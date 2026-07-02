@@ -251,6 +251,8 @@ export async function requireActiveSubscription(tokenUser: {
 
   const active =
     company.subscriptionStatus === 'active' ||
+    company.subscriptionStatus === 'trialing' ||
+    company.subscriptionStatus === 'canceling' ||
     (company.isTrialActive && company.trialEndsAt && company.trialEndsAt > new Date());
 
   if (!active) {
@@ -493,6 +495,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
   const { limits, company, pendingLimits } = plan;
   const subscriptionActive =
     company.subscriptionStatus === 'active' ||
+    company.subscriptionStatus === 'trialing' ||
+    company.subscriptionStatus === 'canceling' ||
     !!(company.isTrialActive && company.trialEndsAt && company.trialEndsAt > new Date());
 
   const pendingActive =

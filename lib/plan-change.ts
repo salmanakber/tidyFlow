@@ -241,6 +241,14 @@ export async function changeCompanyPlanTier(
           pendingPlanEffectiveAt: effectiveAt,
         },
       });
+
+      const { schedulePendingPlanSwitchReminders } = await import('@/lib/automation-queue');
+      await schedulePendingPlanSwitchReminders(
+        companyId,
+        newTier,
+        newLimits.label,
+        effectiveAt
+      );
     }
   } else {
     if (isTrial) {

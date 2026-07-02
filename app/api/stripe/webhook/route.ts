@@ -1,79 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { handleWebhook, decrypt } from '@/lib/stripe';
+import type Stripe from 'stripe';
+import { createStripeInstance } from '@/lib/stripe';
+import { getStripeWebhookSecrets, verifyStripeWebhookEvent } from '@/lib/stripe-webhook-verify';
+import { getStripeSecretKey } from '@/lib/stripe-settings';
 import prisma from '@/lib/prisma';
-import stripe from '@/lib/stripe';
+import {
+  afterSubscriptionSynced,
+  findBillingRecordForStripeEvent,
+  notifyBillingOwners,
+  resolveStripeCustomerId,
+  syncStripeSubscriptionToDatabase,
+} from '@/lib/stripe-webhook-sync';
+import { formatBillingDate } from '@/lib/billing-notification-jobs';
 
-// Helper function to get Stripe webhook secret from SystemSetting with env fallback
-async function getStripeWebhookSecret(): Promise<string> {
-  try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: 'stripe_webhook_secret' },
-    });
+/** Stripe requires the exact raw request bytes — never parse as JSON first. */
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-    if (setting) {
-      return setting.isEncrypted 
-        ? decrypt(setting.value) 
-        : setting.value;
-    }
-  } catch (error) {
-    console.warn('Failed to fetch Stripe webhook secret from settings:', error);
-  }
-
-  // Fallback to environment variable
-  return process.env.STRIPE_WEBHOOK_SECRET || '';
+async function readRawWebhookBody(request: NextRequest): Promise<Buffer> {
+  const arrayBuffer = await request.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
+async function getStripeClient() {
+  const secretKey = await getStripeSecretKey();
+  if (!secretKey) return null;
+  return createStripeInstance(secretKey);
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.text();
+    const rawBody = await readRawWebhookBody(request);
     const signature = request.headers.get('stripe-signature');
 
     if (!signature) {
       return NextResponse.json({ error: 'No signature' }, { status: 400 });
     }
 
-    // Get webhook secret from SystemSetting
-    const webhookSecret = await getStripeWebhookSecret();
-    if (!webhookSecret) {
-      return NextResponse.json({ 
-        error: 'Stripe webhook secret not configured. Please configure it in Admin Settings.' 
-      }, { status: 500 });
+    if (!rawBody.length) {
+      return NextResponse.json({ error: 'Empty request body' }, { status: 400 });
     }
 
-    const event = await handleWebhook(body, signature, webhookSecret);
+    const webhookSecrets = await getStripeWebhookSecrets();
+    if (!webhookSecrets.length) {
+      return NextResponse.json(
+        {
+          error:
+            'Stripe webhook secret not configured. Add whsec_… in Admin Settings or STRIPE_WEBHOOK_SECRET in .env',
+        },
+        { status: 500 }
+      );
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = verifyStripeWebhookEvent(rawBody, signature, webhookSecrets);
+    } catch (verifyError) {
+      console.error('Stripe webhook signature verification failed:', verifyError);
+      console.error(
+        `[Stripe Webhook] secrets tried: ${webhookSecrets.length}, body bytes: ${rawBody.length}, signature present: ${!!signature}`
+      );
+      return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 400 });
+    }
+
     switch (event.type) {
       case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-        const subscription = event.data.object;
-        await handleSubscriptionUpdate(subscription);
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionUpdate(subscription, event.type);
         break;
+      }
 
-      case 'customer.subscription.trial_will_end':
-        const trialEndingSub = event.data.object;
-        await handleTrialEnding(trialEndingSub);
+      case 'customer.subscription.trial_will_end': {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleTrialEnding(subscription);
         break;
+      }
 
-      case 'customer.subscription.deleted':
-        const deletedSub = event.data.object;
-        await handleSubscriptionCancellation(deletedSub);
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionCancellation(subscription);
         break;
+      }
 
-      case 'invoice.payment_succeeded':
-        const invoice = event.data.object;
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice;
         await handlePaymentSuccess(invoice);
         break;
+      }
 
-      case 'invoice.payment_failed':
-        const failedInvoice = event.data.object;
-        await handlePaymentFailure(failedInvoice);
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        await handlePaymentFailure(invoice);
         break;
+      }
 
       case 'invoice.payment_action_required':
-        // Payment requires action (e.g., 3D Secure)
         break;
 
       default:
+        break;
     }
 
     return NextResponse.json({ received: true });
@@ -83,162 +109,174 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleSubscriptionUpdate(subscription: any) {
-  const customerId = subscription.customer;
-  const status = subscription.status;
-  const subscriptionId = subscription.id;
-  const trialEnd = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
-  const currentPeriodEnd = subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null;
-  const isTrialing = status === 'trialing';
-  const now = new Date();
+async function handleSubscriptionUpdate(subscription: Stripe.Subscription, eventType: string) {
+  const synced = await syncStripeSubscriptionToDatabase(subscription);
+  if (!synced) return;
 
-  // Find billing record by customer ID
-  const billingRecord = await prisma.billingRecord.findFirst({
-    where: { stripeCustomerId: customerId },
-    orderBy: { createdAt: 'desc' },
+  await afterSubscriptionSynced({
+    companyId: synced.companyId,
+    subscriptionId: synced.subscriptionId,
+    status: synced.status,
+    trialEnd: synced.trialEnd,
   });
 
-  if (!billingRecord) {
-    console.error(`No billing record found for customer ${customerId}`);
-    return;
-  }
-
-  const companyId = billingRecord.companyId;
-
-  // Determine if subscription/trial is active
-  const isActive = (status === 'active' || status === 'trialing') && 
-                   (!trialEnd || trialEnd > now) &&
-                   (!currentPeriodEnd || currentPeriodEnd > now);
-
-  // Update billing record
-  await prisma.billingRecord.update({
-    where: { id: billingRecord.id },
-    data: {
-      subscriptionId,
-      status: status === 'trialing' ? 'trialing' : status === 'active' ? 'active' : 'inactive',
-      trialEndsAt: trialEnd,
-      isTrialPeriod: isTrialing,
-      nextBillingDate: currentPeriodEnd,
-    },
-  });
-
-  // Update company subscription status and access
-  await prisma.company.update({
-    where: { id: companyId },
-    data: {
-      subscriptionStatus: status === 'trialing' ? 'trialing' : status === 'active' ? 'active' : 'inactive',
-      trialEndsAt: trialEnd,
-      isTrialActive: isTrialing && trialEnd && trialEnd > now,
-    },
-  });
-
-  // If subscription is inactive/expired, ensure users are aware (but don't deactivate them)
-  // The subscription check middleware will handle access restriction
-  if (!isActive && (status === 'past_due' || status === 'unpaid' || status === 'canceled' || status === 'incomplete_expired')) {
-    // Access will be restricted by requireActiveSubscription middleware
-  }
-}
-
-async function handleTrialEnding(subscription: any) {
-  const customerId = subscription.customer;
-  const trialEnd = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
-
-  // Send notification about trial ending (3 days before)
-  if (trialEnd) {
-    const daysUntilEnd = Math.ceil((trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (daysUntilEnd <= 3) {
-      // Notification will be sent via notification service
+  if (eventType === 'customer.subscription.created') {
+    if (subscription.status === 'trialing' && synced.trialEnd) {
+      await notifyBillingOwners(
+        synced.companyId,
+        'Free trial started',
+        `Your TidyFlow free trial is active until ${formatBillingDate(synced.trialEnd)}. Your plan will upgrade to paid billing when the trial ends.`,
+        { subscriptionId: subscription.id, trialEndsAt: synced.trialEnd.toISOString() },
+        { dedupeKey: `sub-created-trial-${synced.companyId}-${subscription.id}` }
+      );
+    } else {
+      await notifyBillingOwners(
+        synced.companyId,
+        'Subscription activated',
+        'Your TidyFlow subscription is now active. Manage billing anytime in the app.',
+        { subscriptionId: subscription.id },
+        { dedupeKey: `sub-created-${synced.companyId}-${subscription.id}` }
+      );
     }
-  }
-}
-
-async function handleSubscriptionCancellation(subscription: any) {
-  const customerId = subscription.customer;
-
-  // Find billing record
-  const billingRecord = await prisma.billingRecord.findFirst({
-    where: { stripeCustomerId: customerId },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (!billingRecord) {
     return;
   }
 
-  const companyId = billingRecord.companyId;
+  if (subscription.cancel_at_period_end) {
+    const accessUntil = synced.currentPeriodEnd || synced.trialEnd;
+    await notifyBillingOwners(
+      synced.companyId,
+      'Cancellation scheduled',
+      accessUntil
+        ? `Your subscription is scheduled to cancel. Access continues until ${formatBillingDate(accessUntil)}.`
+        : 'Your subscription is scheduled to cancel at the end of the current billing period.',
+      { subscriptionId: subscription.id },
+      { dedupeKey: `sub-cancel-scheduled-${synced.companyId}-${subscription.id}` }
+    );
+  }
+}
 
-  // Update billing record
-  await prisma.billingRecord.update({
-    where: { id: billingRecord.id },
-    data: {
-      status: 'canceled',
-    },
+async function handleTrialEnding(subscription: Stripe.Subscription) {
+  const synced = await syncStripeSubscriptionToDatabase(subscription);
+  if (!synced?.trialEnd) return;
+
+  await afterSubscriptionSynced({
+    companyId: synced.companyId,
+    subscriptionId: synced.subscriptionId,
+    status: synced.status,
+    trialEnd: synced.trialEnd,
   });
 
-  // Update company subscription status
+  const daysUntilEnd = Math.max(
+    0,
+    Math.ceil((synced.trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+  );
+
+  await notifyBillingOwners(
+    synced.companyId,
+    'Trial ending soon — plan will upgrade',
+    `Your free trial ends ${daysUntilEnd <= 1 ? 'tomorrow' : `in ${daysUntilEnd} days`} (${formatBillingDate(synced.trialEnd)}). Your plan will upgrade to paid billing automatically unless you cancel in Billing.`,
+    {
+      trialEndsAt: synced.trialEnd.toISOString(),
+      daysUntilEnd,
+      subscriptionId: subscription.id,
+      source: 'stripe_trial_will_end',
+    },
+    { notificationType: 'trial_ending', dedupeKey: `trial-will-end-${synced.companyId}-${synced.trialEnd.toISOString().slice(0, 10)}` }
+  );
+}
+
+async function handleSubscriptionCancellation(subscription: Stripe.Subscription) {
+  const customerId = resolveStripeCustomerId(subscription.customer);
+  const billingRecord = await findBillingRecordForStripeEvent({
+    customerId,
+    subscriptionId: subscription.id,
+  });
+
+  if (!billingRecord) return;
+
+  const companyId = billingRecord.companyId;
+  const trialEnd = billingRecord.trialEndsAt;
+
+  await prisma.billingRecord.update({
+    where: { id: billingRecord.id },
+    data: { status: 'canceled' },
+  });
+
   await prisma.company.update({
     where: { id: companyId },
     data: {
       subscriptionStatus: 'canceled',
       isTrialActive: false,
+      trialEndsAt: null,
+      pendingPlanTier: null,
+      pendingPlanEffectiveAt: null,
     },
   });
 
-  // Access will be restricted by requireActiveSubscription middleware
-  
+  if (trialEnd) {
+    const { cancelTrialReminderJobs } = await import('@/lib/automation-queue');
+    await cancelTrialReminderJobs(companyId, trialEnd);
+  }
+
+  await notifyBillingOwners(
+    companyId,
+    'Subscription ended',
+    'Your TidyFlow subscription has ended. Renew in Billing to restore full access.',
+    { subscriptionId: subscription.id },
+    { dedupeKey: `sub-deleted-${companyId}-${subscription.id}` }
+  );
 }
 
-async function handlePaymentSuccess(invoice: any) {
-  const customerId = invoice.customer;
-  const amountPaid = invoice.amount_paid / 100;
-  const subscriptionId = invoice.subscription;
-  const invoiceId = invoice.id;
-  const periodEnd = invoice.period_end ? new Date(invoice.period_end * 1000) : null;
+async function handlePaymentSuccess(invoice: Stripe.Invoice) {
+  const customerId = resolveStripeCustomerId(invoice.customer);
+  const subscriptionId =
+    typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id ?? null;
 
-  // Find billing record
-  const billingRecord = await prisma.billingRecord.findFirst({
-    where: { stripeCustomerId: customerId },
-    orderBy: { createdAt: 'desc' },
-  });
-
+  const billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
   if (!billingRecord) {
     console.error(`No billing record found for customer ${customerId}`);
     return;
   }
 
   const companyId = billingRecord.companyId;
+  const amountPaid = invoice.amount_paid / 100;
+  const periodEnd = invoice.period_end ? new Date(invoice.period_end * 1000) : null;
 
-  // Get subscription to check status
-  let subscription = null;
-  let isTrialEnding = false;
-  if (subscriptionId) {
+  const stripe = await getStripeClient();
+  let trialJustEnded = false;
+
+  if (stripe && subscriptionId) {
     try {
-      subscription = await stripe.subscriptions.retrieve(subscriptionId);
-      // If this is the first payment after trial, mark trial as ended
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       if (subscription.status === 'active' && subscription.trial_end) {
         const trialEndDate = new Date(subscription.trial_end * 1000);
-        if (trialEndDate <= new Date()) {
-          isTrialEnding = true;
-        }
+        trialJustEnded = trialEndDate <= new Date();
+      }
+      const synced = await syncStripeSubscriptionToDatabase(subscription);
+      if (synced) {
+        await afterSubscriptionSynced({
+          companyId: synced.companyId,
+          subscriptionId: synced.subscriptionId,
+          status: synced.status,
+          trialEnd: synced.trialEnd,
+        });
       }
     } catch (error) {
-      console.error('Error retrieving subscription:', error);
+      console.error('Error retrieving subscription after payment:', error);
     }
   }
 
-  // Update billing record
   await prisma.billingRecord.update({
     where: { id: billingRecord.id },
     data: {
-      amountPaid: amountPaid,
+      amountPaid,
       status: 'active',
       billingDate: new Date(),
-      isTrialPeriod: !isTrialEnding,
-      nextBillingDate: periodEnd,
+      isTrialPeriod: !trialJustEnded && billingRecord.isTrialPeriod,
+      nextBillingDate: periodEnd ?? billingRecord.nextBillingDate,
     },
   });
 
-  // Update company - ACTIVATE ACCESS
   await prisma.company.update({
     where: { id: companyId },
     data: {
@@ -247,66 +285,72 @@ async function handlePaymentSuccess(invoice: any) {
     },
   });
 
-  // ACTIVATE ALL USERS IN THE COMPANY - Allow access
   await prisma.user.updateMany({
-    where: { 
-      companyId: companyId,
-      isActive: false, // Only update inactive users
-    },
-    data: {
-      isActive: true, // Activate users when payment succeeds
-    },
+    where: { companyId, isActive: false },
+    data: { isActive: true },
   });
 
-  
-
+  if (trialJustEnded && amountPaid > 0) {
+    await notifyBillingOwners(
+      companyId,
+      'Plan upgraded — trial converted',
+      `Your free trial has ended and your plan upgraded to paid billing. Payment of ${amountPaid.toFixed(2)} was successful.`,
+      { invoiceId: invoice.id, amountPaid },
+      { dedupeKey: `trial-converted-${companyId}-${invoice.id}` }
+    );
+  } else if (amountPaid > 0) {
+    await notifyBillingOwners(
+      companyId,
+      'Payment received',
+      `Your subscription payment of ${amountPaid.toFixed(2)} was successful.`,
+      { invoiceId: invoice.id, amountPaid },
+      { dedupeKey: `payment-success-${companyId}-${invoice.id}` }
+    );
+  }
 }
 
-async function handlePaymentFailure(invoice: any) {
-  const customerId = invoice.customer;
-  const subscriptionId = invoice.subscription;
+async function handlePaymentFailure(invoice: Stripe.Invoice) {
+  const customerId = resolveStripeCustomerId(invoice.customer);
+  const subscriptionId =
+    typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id ?? null;
 
-  // Find billing record
-  const billingRecord = await prisma.billingRecord.findFirst({
-    where: { stripeCustomerId: customerId },
-    orderBy: { createdAt: 'desc' },
-  });
-
+  const billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
   if (!billingRecord) {
     console.error(`No billing record found for customer ${customerId}`);
     return;
   }
 
   const companyId = billingRecord.companyId;
+  const stripe = await getStripeClient();
+  let subscriptionStatus = 'past_due';
 
-  // Get subscription to check if it's past due or will be canceled
-  let subscription = null;
-  if (subscriptionId) {
+  if (stripe && subscriptionId) {
     try {
-      subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      subscriptionStatus = subscription.status;
+      await syncStripeSubscriptionToDatabase(subscription);
     } catch (error) {
-      console.error('Error retrieving subscription:', error);
+      console.error('Error retrieving subscription after failed payment:', error);
     }
   }
 
-  // Update billing record
   await prisma.billingRecord.update({
     where: { id: billingRecord.id },
-    data: {
-      status: 'failed',
-    },
+    data: { status: 'failed' },
   });
 
-  // If subscription is past_due or will be canceled, restrict access
-  if (subscription && (subscription.status === 'past_due' || subscription.status === 'unpaid')) {
+  if (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid') {
     await prisma.company.update({
       where: { id: companyId },
-      data: {
-        subscriptionStatus: subscription.status,
-      },
+      data: { subscriptionStatus },
     });
 
-    // Access will be restricted by requireActiveSubscription middleware
-    
+    await notifyBillingOwners(
+      companyId,
+      'Payment failed',
+      'We could not process your latest subscription payment. Update your billing details in the Billing screen to keep access.',
+      { invoiceId: invoice.id, subscriptionStatus },
+      { dedupeKey: `payment-failed-${companyId}-${invoice.id}` }
+    );
   }
 }

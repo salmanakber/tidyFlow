@@ -1,13 +1,20 @@
 import prisma from '@/lib/prisma';
 import Stripe from 'stripe';
-import { createStripeInstance, cancelSubscriptionAtPeriodEnd } from '@/lib/stripe';
+import {
+  cancelSubscription,
+  cancelSubscriptionAtPeriodEnd,
+  createStripeInstance,
+} from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
+import { cancelTrialReminderJobs } from '@/lib/automation-queue';
+import { notifyBillingOwners } from '@/lib/stripe-webhook-sync';
 
 export interface CancelSubscriptionResult {
   alreadyCanceled: boolean;
   subscriptionId: string;
   accessUntil: string | null;
   cancelEffectiveAt: string | null;
+  immediateCancel?: boolean;
 }
 
 async function releaseSubscriptionSchedule(stripe: Stripe, subscription: Stripe.Subscription) {
@@ -28,7 +35,7 @@ export async function cancelCompanyStripeSubscription(
     where: {
       companyId,
       subscriptionId: { not: null },
-      status: { in: ['active', 'trialing'] },
+      status: { in: ['active', 'trialing', 'canceling'] },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -72,6 +79,49 @@ export async function cancelCompanyStripeSubscription(
     },
   });
 
+  if (subscription.status === 'trialing') {
+    await cancelSubscription(billing.subscriptionId, stripe);
+
+    if (billing.trialEndsAt) {
+      await cancelTrialReminderJobs(companyId, billing.trialEndsAt);
+    }
+
+    await prisma.billingRecord.update({
+      where: { id: billing.id },
+      data: {
+        status: 'canceled',
+        isTrialPeriod: false,
+        trialEndsAt: null,
+        nextBillingDate: null,
+      },
+    });
+
+    await prisma.company.update({
+      where: { id: companyId },
+      data: {
+        subscriptionStatus: 'canceled',
+        isTrialActive: false,
+        trialEndsAt: null,
+      },
+    });
+
+    await notifyBillingOwners(
+      companyId,
+      'Trial canceled',
+      'Your free trial was canceled. You will not be charged. Subscribe again anytime from Billing.',
+      { subscriptionId: billing.subscriptionId },
+      { dedupeKey: `trial-canceled-${companyId}-${billing.subscriptionId}` }
+    );
+
+    return {
+      alreadyCanceled: false,
+      subscriptionId: billing.subscriptionId,
+      accessUntil: new Date().toISOString(),
+      cancelEffectiveAt: new Date().toISOString(),
+      immediateCancel: true,
+    };
+  }
+
   const updated = await cancelSubscriptionAtPeriodEnd(billing.subscriptionId, stripe);
 
   const periodEnd = updated.current_period_end
@@ -81,14 +131,34 @@ export async function cancelCompanyStripeSubscription(
   await prisma.billingRecord.update({
     where: { id: billing.id },
     data: {
+      status: 'canceling',
       nextBillingDate: periodEnd ?? billing.nextBillingDate,
     },
   });
+
+  await prisma.company.update({
+    where: { id: companyId },
+    data: {
+      subscriptionStatus: 'canceling',
+      isTrialActive: false,
+    },
+  });
+
+  await notifyBillingOwners(
+    companyId,
+    'Cancellation scheduled',
+    periodEnd
+      ? `Your subscription will cancel on ${periodEnd.toLocaleDateString('en-GB')}. Stripe billing stops after that date.`
+      : 'Your subscription is scheduled to cancel at the end of the current billing period.',
+    { subscriptionId: billing.subscriptionId },
+    { dedupeKey: `cancel-scheduled-${companyId}-${billing.subscriptionId}` }
+  );
 
   return {
     alreadyCanceled: false,
     subscriptionId: billing.subscriptionId,
     accessUntil: periodEnd?.toISOString() ?? null,
     cancelEffectiveAt: periodEnd?.toISOString() ?? null,
+    immediateCancel: false,
   };
 }

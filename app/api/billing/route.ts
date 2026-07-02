@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       where: {
         companyId,
         subscriptionId: { not: null },
-        status: { in: ['active', 'trialing'] },
+        status: { in: ['active', 'trialing', 'canceling'] },
       },
       orderBy: { createdAt: 'desc' },
     }),
