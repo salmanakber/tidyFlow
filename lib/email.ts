@@ -1,9 +1,9 @@
+
 // Email service using SMTP, AWS SES, Brevo, or SendGrid
 // SMTP support via nodemailer
 // Brevo support via REST API (fetch)
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
-
 
 interface EmailOptions {
   to: string;
@@ -40,10 +40,8 @@ async function getEmailSettings() {
 
     const settingsMap: Record<string, string> = {};
     settings.forEach(setting => {
-      // Decrypt if needed
       let value = setting.value;
       if (setting.isEncrypted) {
-        // Decrypt logic (same as in settings route)
         const crypto = require('crypto');
         const ENCRYPTION_KEY = process.env.SETTINGS_ENCRYPTION_KEY || 'default-key-change-in-production';
         const ALGORITHM = 'aes-256-cbc';
@@ -64,27 +62,21 @@ async function getEmailSettings() {
 
     return {
       provider: settingsMap['email_provider'] || process.env.EMAIL_PROVIDER || 'smtp',
-      // SMTP settings
       smtpHost: settingsMap['smtp_host'] || process.env.SMTP_HOST,
       smtpPort: settingsMap['smtp_port'] ? parseInt(settingsMap['smtp_port']) : parseInt(process.env.SMTP_PORT || '587'),
       smtpSecure: settingsMap['smtp_secure'] === 'true' || process.env.SMTP_SECURE === 'true',
       smtpUsername: settingsMap['smtp_username'] || process.env.SMTP_USERNAME,
       smtpPassword: settingsMap['smtp_password'] || process.env.SMTP_PASSWORD,
-      // AWS SES settings
       sesAccessKey: settingsMap['ses_access_key'] || process.env.AWS_SES_ACCESS_KEY,
       sesSecretKey: settingsMap['ses_secret_key'] || process.env.AWS_SES_SECRET_KEY,
       sesRegion: settingsMap['ses_region'] || process.env.AWS_SES_REGION,
-      // SendGrid settings (for backward compatibility)
       sendgridApiKey: settingsMap['sendgrid_api_key'] || process.env.SENDGRID_API_KEY,
-      // Brevo settings
       brevoApiKey: settingsMap['brevo_api_key'] || process.env.BREVO_API_KEY,
-      brevoSenderName: settingsMap['brevo_sender_name'] || process.env.BREVO_SENDER_NAME || 'MayaOps',
-      // From email
-      fromEmail: settingsMap['from_email'] || process.env.EMAIL_FROM || 'noreply@mayaops.com',
+      brevoSenderName: settingsMap['brevo_sender_name'] || process.env.BREVO_SENDER_NAME || 'TidyFlow',
+      fromEmail: settingsMap['from_email'] || process.env.EMAIL_FROM || 'noreply@tidyflowapp.com',
     };
   } catch (error) {
     console.error('Error fetching email settings:', error);
-    // Fallback to environment variables
     return {
       provider: process.env.EMAIL_PROVIDER || 'smtp',
       smtpHost: process.env.SMTP_HOST,
@@ -97,8 +89,8 @@ async function getEmailSettings() {
       sesRegion: process.env.AWS_SES_REGION,
       sendgridApiKey: process.env.SENDGRID_API_KEY,
       brevoApiKey: process.env.BREVO_API_KEY,
-      brevoSenderName: process.env.BREVO_SENDER_NAME || 'MayaOps',
-      fromEmail: process.env.EMAIL_FROM || 'noreply@mayaops.com',
+      brevoSenderName: process.env.BREVO_SENDER_NAME || 'TidyFlow',
+      fromEmail: process.env.EMAIL_FROM || 'noreply@tidyflowapp.com',
     };
   }
 }
@@ -108,15 +100,12 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     const emailSettings = await getEmailSettings();
     const fromEmail = options.from || emailSettings.fromEmail;
 
-    // Option 1: SMTP (Custom SMTP Server)
     if (emailSettings.provider === 'smtp' && emailSettings.smtpHost && emailSettings.smtpUsername && emailSettings.smtpPassword) {
-      
       console.log('🔑 SMTP Settings:', {
         host: emailSettings.smtpHost,
         port: emailSettings.smtpPort,
         secure: emailSettings.smtpSecure,
         username: emailSettings.smtpUsername,
-        password: emailSettings.smtpPassword,
         fromEmail: fromEmail,
         provider: emailSettings.provider,
       });
@@ -124,14 +113,13 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       const transporter = nodemailer.createTransport({
         host: emailSettings.smtpHost,
         port: emailSettings.smtpPort || 587,
-        secure: emailSettings.smtpSecure, // true for 465, false for other ports
+        secure: emailSettings.smtpSecure,
         auth: {
           user: emailSettings.smtpUsername,
           pass: emailSettings.smtpPassword,
         },
-        // Additional options for better compatibility
         tls: {
-          rejectUnauthorized: false, // Allow self-signed certificates
+          rejectUnauthorized: false,
         },
       });
 
@@ -146,7 +134,6 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       return true;
     }
 
-    // Option 2: AWS SES
     if (emailSettings.provider === 'ses' && emailSettings.sesRegion && emailSettings.sesAccessKey && emailSettings.sesSecretKey) {
       const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
       
@@ -172,9 +159,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       return true;
     }
 
-    // Option 3: Brevo (Transactional Emails API via REST)
     if (emailSettings.provider === 'brevo' && emailSettings.brevoApiKey) {
-      // Use Brevo REST API directly via fetch
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -200,14 +185,11 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
         
-        // Provide helpful error messages for common issues
         if (response.status === 401) {
           const errorMessage = errorData.message || 'Unauthorized';
           if (errorMessage.includes('unrecognised IP address') || errorMessage.includes('authorised_ips')) {
             console.error('❌ Brevo API Error: IP address not authorized');
-            console.error('📝 Action required: Please whitelist your server IP address in Brevo:');
-            console.error('   https://app.brevo.com/security/authorised_ips');
-            console.error(`   Detected IP: ${errorMessage.match(/\d+\.\d+\.\d+\.\d+/)?.[0] || 'unknown'}`);
+            console.error('📝 Action required: Please whitelist your server IP address in Brevo settings.');
             throw new Error(`Brevo API: IP address not authorized. Please add your server IP to authorized IPs in Brevo settings: https://app.brevo.com/security/authorised_ips`);
           } else {
             throw new Error(`Brevo API: Unauthorized - ${errorMessage}. Please check your API key.`);
@@ -222,7 +204,6 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       return true;
     }
 
-    // Option 4: SendGrid (for backward compatibility)
     if (emailSettings.provider === 'sendgrid' && emailSettings.sendgridApiKey) {
       const sgMail = require('@sendgrid/mail');
       sgMail.setApiKey(emailSettings.sendgridApiKey);
@@ -238,7 +219,6 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       return true;
     }
 
-    // Fallback: Log to console (development)
     console.warn('[EMAIL] No email provider configured. Would send:', {
       to: options.to,
       subject: options.subject,
@@ -248,10 +228,11 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     return true;
   } catch (error: any) {
     console.error('Email send error:', error);
-    console.error('Error details:', error.message, error.stack);
     return false;
   }
 }
+
+// ─── EMAIL TEMPLATES WITH ADVANCED TIDYFLOW BRANDING ────────────────────────
 
 export async function sendTaskAssignmentEmail(
   recipientEmail: string,
@@ -264,37 +245,62 @@ export async function sendTaskAssignmentEmail(
     <!DOCTYPE html>
     <html>
       <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background-color: #3B82F6; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background-color: #f9f9f9; }
-          .button { display: inline-block; padding: 12px 24px; background-color: #3B82F6; color: white; text-decoration: none; border-radius: 5px; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-        </style>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Task Assignment</title>
       </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>New Task Assignment</h1>
-          </div>
-          <div class="content">
-            <p>Hi ${recipientName},</p>
-            <p>You have been assigned a new cleaning task:</p>
-            <ul>
-              <li><strong>Task:</strong> ${taskTitle}</li>
-              <li><strong>Property:</strong> ${propertyAddress}</li>
-              <li><strong>Scheduled:</strong> ${scheduledDate.toLocaleString()}</li>
-            </ul>
-            <p>Please log in to the MayaOps app to view full details.</p>
-            <p style="text-align: center; margin-top: 30px;">
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.mayaops.com'}" class="button">View Task</a>
-            </p>
-          </div>
-          <div class="footer">
-            <p>© 2025 MayaOps. All rights reserved.</p>
-          </div>
-        </div>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F7F8FA; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; width: 100% !important;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #E4E9F0;">
+          <tr>
+            <td style="background-color: #0D1B2A; padding: 32px 24px; text-align: center;">
+              <span style="color: #F59E0B; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; display: block; margin-bottom: 6px;">TIDYFLOW SCHEDULE</span>
+              <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.5px;">New Task Assignment</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 24px;">
+              <p style="font-size: 15px; color: #0D1117; line-height: 24px; margin-top: 0;">Hi ${recipientName},</p>
+              <p style="font-size: 14px; color: #4A5568; line-height: 22px;">You have been scheduled for a new cleaning assignment in TidyFlow:</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F7F8FA; border-radius: 8px; border: 1px solid #E4E9F0; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 16px;">
+                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; padding-bottom: 8px;">Task</td>
+                        <td style="font-size: 14px; font-weight: 700; color: #0D1117; padding-bottom: 8px;">${taskTitle}</td>
+                      </tr>
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; padding-bottom: 8px;">Property</td>
+                        <td style="font-size: 13px; font-weight: 600; color: #4A5568; padding-bottom: 8px;">${propertyAddress}</td>
+                      </tr>
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase;">Date & Time</td>
+                        <td style="font-size: 13px; font-weight: 600; color: #0D1B2A;">${scheduledDate.toLocaleString()}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 13px; color: #9AA5B4; line-height: 20px; margin-bottom: 24px;">Please open your TidyFlow mobile app to check instructions, checklists, and start tracking your work session.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.tidyflowapp.com'}" style="display: inline-block; padding: 12px 28px; background-color: #0D1B2A; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">View Details</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #F7F8FA; padding: 24px; text-align: center; border-top: 1px solid #E4E9F0;">
+              <p style="margin: 0; font-size: 11px; color: #9AA5B4;">© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #9AA5B4;">This is an automated notification. Please do not reply directly to this email.</p>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
   `;
@@ -314,27 +320,76 @@ export async function sendQAResultEmail(
   comments?: string
 ): Promise<boolean> {
   const passed = overallScore >= 7;
+  const statusColor = passed ? '#059669' : '#E11D48';
+  const statusBg = passed ? '#D1FAE5' : '#FFE4E6';
+  const statusText = passed ? 'PASSED QA REVIEW' : 'REVISION REQUIRED';
+
   const html = `
     <!DOCTYPE html>
     <html>
-      <body style="font-family: Arial, sans-serif;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: ${passed ? '#10B981' : '#EF4444'};">
-            QA Review ${passed ? 'Passed' : 'Needs Improvement'}
-          </h2>
-          <p>Hi ${recipientName},</p>
-          <p>Your task "${taskTitle}" has been reviewed.</p>
-          <p><strong>Overall Score:</strong> ${overallScore}/10</p>
-          ${comments ? `<p><strong>Feedback:</strong> ${comments}</p>` : ''}
-          <p>Keep up the good work!</p>
-        </div>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>QA Review Result</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F7F8FA; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; width: 100% !important;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #E4E9F0;">
+          <tr>
+            <td style="background-color: #0D1B2A; padding: 32px 24px; text-align: center;">
+              <span style="color: #F59E0B; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; display: block; margin-bottom: 6px;">QUALITY ASSURANCE</span>
+              <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.5px;">Performance Review</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 24px;">
+              <p style="font-size: 15px; color: #0D1117; line-height: 24px; margin-top: 0;">Hi ${recipientName},</p>
+              <p style="font-size: 14px; color: #4A5568; line-height: 22px;">A Quality Assurance review has been completed for your cleaning task: <strong style="color: #0D1117;">"${taskTitle}"</strong></p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 24px 0;">
+                <tr>
+                  <td align="center" style="background-color: ${statusBg}; border-radius: 8px; padding: 20px; border: 1px solid rgba(0, 0, 0, 0.05);">
+                    <span style="color: ${statusColor}; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; display: block; margin-bottom: 4px;">${statusText}</span>
+                    <span style="font-size: 32px; font-weight: 800; color: #0D1B2A;">${overallScore}<span style="font-size: 18px; font-weight: 500; color: #9AA5B4;">/10</span></span>
+                  </td>
+                </tr>
+              </table>
+
+              ${comments ? `
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-left: 4px solid ${statusColor}; background-color: #F7F8FA; margin-bottom: 24px; border-radius: 0 6px 6px 0;">
+                  <tr>
+                    <td style="padding: 16px;">
+                      <span style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; display: block; margin-bottom: 4px;">Reviewer Feedback</span>
+                      <p style="font-size: 13px; color: #4A5568; margin: 0; line-height: 20px; font-style: italic;">"${comments}"</p>
+                    </td>
+                  </tr>
+                </table>
+              ` : ''}
+
+              <p style="font-size: 13px; color: #9AA5B4; line-height: 20px; margin-bottom: 24px;">You can review completed photos, ratings, and step checklist reports in your user profile inside the TidyFlow application.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.tidyflowapp.com'}" style="display: inline-block; padding: 12px 28px; background-color: #0D1B2A; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Open TidyFlow</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #F7F8FA; padding: 24px; text-align: center; border-top: 1px solid #E4E9F0;">
+              <p style="margin: 0; font-size: 11px; color: #9AA5B4;">© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #9AA5B4;">This is an automated notification. Please do not reply directly to this email.</p>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
   `;
 
   return sendEmail({
     to: recipientEmail,
-    subject: `QA Review: ${taskTitle}`,
+    subject: `QA Review: ${taskTitle} [${overallScore}/10]`,
     html,
   });
 }
@@ -350,65 +405,85 @@ export async function sendUserAccountCreatedEmail(
     <!DOCTYPE html>
     <html>
       <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background-color: #00838F; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { padding: 20px; background-color: #f9f9f9; border-radius: 0 0 8px 8px; }
-          .credentials-box { background-color: #E0F7FA; padding: 16px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #00838F; }
-          .credentials-item { margin: 8px 0; }
-          .credentials-label { font-weight: 600; color: #006064; }
-          .credentials-value { font-family: monospace; font-size: 14px; color: #333; }
-          .button { display: inline-block; padding: 12px 24px; background-color: #00838F; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-          .warning { background-color: #FFF3CD; padding: 12px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #F59E0B; }
-        </style>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to TidyFlow</title>
       </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Welcome to MayaOps!</h1>
-          </div>
-          <div class="content">
-            <p>Hi ${recipientName},</p>
-            <p>Your MayaOps account has been created successfully.</p>
-            ${companyName ? `<p><strong>Company:</strong> ${companyName}</p>` : ''}
-            <p><strong>Role:</strong> ${role}</p>
-            
-            <div class="credentials-box">
-              <h3 style="margin-top: 0; color: #006064;">Your Login Credentials</h3>
-              <div class="credentials-item">
-                <span class="credentials-label">Email:</span>
-                <div class="credentials-value">${recipientEmail}</div>
-              </div>
-              <div class="credentials-item">
-                <span class="credentials-label">Password:</span>
-                <div class="credentials-value">${password}</div>
-              </div>
-            </div>
-            
-            <div class="warning">
-              <strong>⚠️ Important:</strong> Please change your password after your first login for security purposes.
-            </div>
-            
-            <p>You can now log in to the MayaOps mobile app using these credentials.</p>
-            <p style="text-align: center;">
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.mayaops.com'}" class="button">Access MayaOps</a>
-            </p>
-            <p>If you have any questions or need assistance, please contact your administrator.</p>
-          </div>
-          <div class="footer">
-            <p>© ${new Date().getFullYear()} MayaOps. All rights reserved.</p>
-            <p>This is an automated email, please do not reply.</p>
-          </div>
-        </div>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F7F8FA; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; width: 100% !important;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #E4E9F0;">
+          <tr>
+            <td style="background-color: #0D1B2A; padding: 32px 24px; text-align: center;">
+              <span style="color: #F59E0B; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; display: block; margin-bottom: 6px;">GETTING STARTED</span>
+              <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.5px;">Welcome to TidyFlow</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 24px;">
+              <p style="font-size: 15px; color: #0D1117; line-height: 24px; margin-top: 0;">Hi ${recipientName},</p>
+              <p style="font-size: 14px; color: #4A5568; line-height: 22px;">Your secure credentials have been provisioned to log in to the TidyFlow platform.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #E8EDF2; border-radius: 8px; border-left: 4px solid #0D1B2A; margin: 24px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <h3 style="margin-top: 0; color: #0D1B2A; font-size: 14px; font-weight: 700; margin-bottom: 12px;">Your Login Credentials</h3>
+                    
+                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                      ${companyName ? `
+                        <tr>
+                          <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; padding-bottom: 6px;">Company</td>
+                          <td style="font-size: 13px; font-weight: 700; color: #0D1117; padding-bottom: 6px;">${companyName}</td>
+                        </tr>
+                      ` : ''}
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; padding-bottom: 6px;">Role</td>
+                        <td style="font-size: 13px; font-weight: 700; color: #0D1117; padding-bottom: 6px;">${role}</td>
+                      </tr>
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase; padding-bottom: 6px;">Username</td>
+                        <td style="font-size: 13px; font-weight: 700; color: #0D1117; padding-bottom: 6px; font-family: monospace;">${recipientEmail}</td>
+                      </tr>
+                      <tr>
+                        <td width="30%" style="font-size: 11px; font-weight: 700; color: #9AA5B4; text-transform: uppercase;">Password</td>
+                        <td style="font-size: 13px; font-weight: 700; color: #0D1B2A; font-family: monospace;">${password}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FEF3C7; border-radius: 8px; border-left: 4px solid #F59E0B; margin-bottom: 24px;">
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 12px; color: #92400E; font-weight: 600; line-height: 18px;">
+                    ⚠️ For security reasons, please change your password immediately after your initial authentication session.
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 13px; color: #9AA5B4; line-height: 20px; margin-bottom: 24px;">Download the TidyFlow companion app from your app distribution store to access schedules and task tracking.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.tidyflowapp.com'}" style="display: inline-block; padding: 12px 28px; background-color: #0D1B2A; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Access TidyFlow</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #F7F8FA; padding: 24px; text-align: center; border-top: 1px solid #E4E9F0;">
+              <p style="margin: 0; font-size: 11px; color: #9AA5B4;">© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #9AA5B4;">This is an automated system email, please do not reply.</p>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
   `;
 
   return sendEmail({
     to: recipientEmail,
-    subject: 'Welcome to MayaOps - Your Account Has Been Created',
+    subject: 'Welcome to TidyFlow - Your Account Has Been Created',
     html,
   });
 }
@@ -430,15 +505,20 @@ export async function sendUserAccountUpdatedEmail(
       const label = key === 'isActive' 
         ? 'Account Status' 
         : key === 'role' 
-        ? 'Role' 
+        ? 'System Role' 
         : key === 'companyName'
-        ? 'Company'
+        ? 'Assigned Company'
         : key === 'firstName'
         ? 'First Name'
         : key === 'lastName'
         ? 'Last Name'
         : key;
-      return `<li><strong>${label}:</strong> ${value}</li>`;
+      return `
+        <tr style="border-bottom: 1px solid #F0F4F8;">
+          <td style="padding: 10px 0; font-size: 12px; font-weight: 700; color: #9AA5B4; text-transform: uppercase;">${label}</td>
+          <td style="padding: 10px 0; font-size: 13px; font-weight: 600; color: #0D1117; text-align: right;">${value}</td>
+        </tr>
+      `;
     })
     .join('');
 
@@ -446,49 +526,52 @@ export async function sendUserAccountUpdatedEmail(
     <!DOCTYPE html>
     <html>
       <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background-color: #00838F; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { padding: 20px; background-color: #f9f9f9; border-radius: 0 0 8px 8px; }
-          .changes-box { background-color: #E0F7FA; padding: 16px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #00838F; }
-          .changes-box ul { margin: 8px 0; padding-left: 20px; }
-          .button { display: inline-block; padding: 12px 24px; background-color: #00838F; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-        </style>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Account Information Update</title>
       </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Account Updated</h1>
-          </div>
-          <div class="content">
-            <p>Hi ${recipientName},</p>
-            <p>Your MayaOps account has been updated. The following changes have been made:</p>
-            
-            <div class="changes-box">
-              <ul>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F7F8FA; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; width: 100% !important;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #E4E9F0;">
+          <tr>
+            <td style="background-color: #0D1B2A; padding: 32px 24px; text-align: center;">
+              <span style="color: #F59E0B; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; display: block; margin-bottom: 6px;">SECURITY & PROFILES</span>
+              <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.5px;">Account Information Updated</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 24px;">
+              <p style="font-size: 15px; color: #0D1117; line-height: 24px; margin-top: 0;">Hi ${recipientName},</p>
+              <p style="font-size: 14px; color: #4A5568; line-height: 22px;">Certain configuration values associated with your TidyFlow account credentials have been updated:</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F7F8FA; border-radius: 8px; border: 1px solid #E4E9F0; padding: 16px 20px; margin: 24px 0;">
                 ${changesList}
-              </ul>
-            </div>
-            
-            <p>If you did not request these changes or have any concerns, please contact your administrator immediately.</p>
-            <p style="text-align: center;">
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.mayaops.com'}" class="button">Access MayaOps</a>
-            </p>
-          </div>
-          <div class="footer">
-            <p>© ${new Date().getFullYear()} MayaOps. All rights reserved.</p>
-            <p>This is an automated email, please do not reply.</p>
-          </div>
-        </div>
+              </table>
+              
+              <p style="font-size: 13px; color: #9AA5B4; line-height: 20px; margin-bottom: 24px;">If you did not request this update, or if you believe this transaction occurred in error, please coordinate with your direct administrative lead.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://app.tidyflowapp.com'}" style="display: inline-block; padding: 12px 28px; background-color: #0D1B2A; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Log In to TidyFlow</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #F7F8FA; padding: 24px; text-align: center; border-top: 1px solid #E4E9F0;">
+              <p style="margin: 0; font-size: 11px; color: #9AA5B4;">© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #9AA5B4;">This is an automated system security notification, please do not reply.</p>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
   `;
 
   return sendEmail({
     to: recipientEmail,
-    subject: 'MayaOps - Your Account Has Been Updated',
+    subject: 'TidyFlow - Your Account Has Been Updated',
     html,
   });
 }
