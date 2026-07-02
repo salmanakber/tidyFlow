@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: { token: string } }
 ) {
   const result = await getSharePortalData(params.token);
-  if (!result.ok) {
+  if (result.ok === false) {
     return NextResponse.json({ success: false, message: result.message }, { status: result.status });
   }
   return NextResponse.json({ success: true, data: result.data });
