@@ -115,12 +115,15 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   let resolvedLat = latitude !== undefined ? Number(latitude) : undefined;
   let resolvedLng = longitude !== undefined ? Number(longitude) : undefined;
 
-  if ((resolvedLat == null || resolvedLng == null || Number.isNaN(resolvedLat) || Number.isNaN(resolvedLng)) &&
+    if ((resolvedLat == null || resolvedLng == null || Number.isNaN(resolvedLat) || Number.isNaN(resolvedLng)) &&
       (address !== undefined ? address : existing.address)) {
     const { geocodeAddress } = await import('@/lib/geocoding');
+    const { getCompanyAddressCountry } = await import('@/lib/address-country');
+    const countryCode = await getCompanyAddressCountry(existing.companyId);
     const coords = await geocodeAddress(
       address !== undefined ? String(address) : existing.address,
-      postcode !== undefined ? String(postcode) : existing.postcode ?? undefined
+      postcode !== undefined ? String(postcode) : existing.postcode ?? undefined,
+      countryCode
     );
     if (coords) {
       resolvedLat = coords.lat;

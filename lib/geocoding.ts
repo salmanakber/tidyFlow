@@ -1,9 +1,14 @@
 import prisma from "@/lib/prisma"
+import { getCompanyAddressCountry } from "@/lib/address-country"
 
 /**
  * Geocode an address using Google Maps Geocoding API
  */
-export async function geocodeAddress(address: string, postcode?: string): Promise<{ lat: number; lng: number } | null> {
+export async function geocodeAddress(
+  address: string,
+  postcode?: string,
+  countryCode?: string
+): Promise<{ lat: number; lng: number } | null> {
   try {
     // Get Google Maps API key from settings
     const apiKeySetting = await prisma.systemSetting.findUnique({
@@ -21,9 +26,18 @@ export async function geocodeAddress(address: string, postcode?: string): Promis
 
     // Build address string
     const fullAddress = postcode ? `${address}, ${postcode}` : address
+    const params = new URLSearchParams({
+      address: fullAddress,
+      key: apiKey,
+    })
+    const region = countryCode?.trim().toLowerCase()
+    if (region) {
+      params.set('region', region)
+      params.set('components', `country:${region}`)
+    }
 
     const response = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddress)}&key=${apiKey}`
+      `https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`
     )
 
     const data = await response.json()
@@ -50,7 +64,7 @@ export async function ensurePropertyCoordinates(
 ): Promise<{ latitude: number; longitude: number } | null> {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
-    select: { id: true, address: true, postcode: true, latitude: true, longitude: true },
+    select: { id: true, companyId: true, address: true, postcode: true, latitude: true, longitude: true },
   });
   if (!property) return null;
 
@@ -60,7 +74,8 @@ export async function ensurePropertyCoordinates(
 
   if (!property.address?.trim()) return null;
 
-  const coords = await geocodeAddress(property.address, property.postcode ?? undefined);
+  const countryCode = await getCompanyAddressCountry(property.companyId);
+  const coords = await geocodeAddress(property.address, property.postcode ?? undefined, countryCode);
   if (!coords) return null;
 
   await prisma.property.update({
@@ -108,6 +123,8 @@ export async function geocodeAllPropertiesForCompany(
     failures: [],
   };
 
+  const countryCode = await getCompanyAddressCountry(companyId);
+
   for (const property of properties) {
     if (property.latitude != null && property.longitude != null) {
       result.alreadyHadCoords++;
@@ -119,7 +136,7 @@ export async function geocodeAllPropertiesForCompany(
       continue;
     }
 
-    const coords = await geocodeAddress(property.address, property.postcode ?? undefined);
+    const coords = await geocodeAddress(property.address, property.postcode ?? undefined, countryCode);
     if (coords) {
       await prisma.property.update({
         where: { id: property.id },
@@ -141,6 +158,53 @@ export async function geocodeAllPropertiesForCompany(
   }
 
   return result;
+}
+
+/** Geocode specific properties (e.g. after sheet sync) that are missing coordinates. */
+export async function geocodePropertiesByIds(
+  companyId: number,
+  propertyIds: number[],
+  options?: { delayMs?: number }
+): Promise<{ geocoded: number; failed: number; skipped: number }> {
+  const delayMs = options?.delayMs ?? 250;
+  const uniqueIds = [...new Set(propertyIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniqueIds.length) return { geocoded: 0, failed: 0, skipped: 0 };
+
+  const countryCode = await getCompanyAddressCountry(companyId);
+  const properties = await prisma.property.findMany({
+    where: { companyId, id: { in: uniqueIds } },
+    select: { id: true, address: true, postcode: true, latitude: true, longitude: true },
+  });
+
+  let geocoded = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const property of properties) {
+    if (property.latitude != null && property.longitude != null) {
+      skipped++;
+      continue;
+    }
+    if (!property.address?.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const coords = await geocodeAddress(property.address, property.postcode ?? undefined, countryCode);
+    if (coords) {
+      await prisma.property.update({
+        where: { id: property.id },
+        data: { latitude: coords.lat, longitude: coords.lng },
+      });
+      geocoded++;
+    } else {
+      failed++;
+    }
+
+    if (delayMs > 0) await sleep(delayMs);
+  }
+
+  return { geocoded, failed, skipped };
 }
 
 export async function countPropertiesNeedingGeocode(companyId: number): Promise<{

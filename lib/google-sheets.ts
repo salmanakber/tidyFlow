@@ -1023,6 +1023,17 @@ export async function syncCompanySheet(companyId: number) {
     data: { lastSyncedAt: new Date(), lastSyncError: null },
   });
 
+  let geocodeResult = { geocoded: 0, failed: 0, skipped: 0 };
+  const idsToGeocode = [...propertiesCreated, ...propertiesUpdated];
+  if (idsToGeocode.length) {
+    try {
+      const { geocodePropertiesByIds } = await import('@/lib/geocoding');
+      geocodeResult = await geocodePropertiesByIds(companyId, idsToGeocode);
+    } catch (err) {
+      console.warn('[syncCompanySheet] property geocoding failed:', err);
+    }
+  }
+
   return {
     propertiesSynced,
     tasksSynced,
@@ -1036,6 +1047,7 @@ export async function syncCompanySheet(companyId: number) {
     tasksUpdatedDetails,
     propertiesCreated,
     propertiesUpdated,
+    geocodeResult,
   };
 }
 
@@ -1385,6 +1397,19 @@ export async function syncCompanyGoogleSheet(companyId: number) {
       statusBlocked: result.statusBlocked,
     },
   });
+
+  const propertyIds = [
+    ...((result.propertiesCreated as number[]) || []),
+    ...((result.propertiesUpdated as number[]) || []),
+  ];
+  if (propertyIds.length && !result.geocodeResult) {
+    try {
+      const { geocodePropertiesByIds } = await import('@/lib/geocoding');
+      result.geocodeResult = await geocodePropertiesByIds(companyId, propertyIds);
+    } catch (err) {
+      console.warn('[syncCompanyGoogleSheet] property geocoding failed:', err);
+    }
+  }
 
   return result;
 }

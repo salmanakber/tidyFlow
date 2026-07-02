@@ -208,6 +208,30 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    let savedProperty = property;
+    const hasCoords =
+      savedProperty.latitude != null &&
+      savedProperty.longitude != null &&
+      !Number.isNaN(Number(savedProperty.latitude)) &&
+      !Number.isNaN(Number(savedProperty.longitude));
+
+    if (!hasCoords && address) {
+      try {
+        const { geocodeAddress } = await import('@/lib/geocoding');
+        const { getCompanyAddressCountry } = await import('@/lib/address-country');
+        const countryCode = await getCompanyAddressCountry(companyId);
+        const coords = await geocodeAddress(String(address), postcode ? String(postcode) : undefined, countryCode);
+        if (coords) {
+          savedProperty = await prisma.property.update({
+            where: { id: property.id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        }
+      } catch (geocodeErr) {
+        console.warn('[properties POST] geocoding failed:', geocodeErr);
+      }
+    }
+
     // Update company property count and sync with Stripe billing
     // Count should be sum of unitCount (each unit counts as a property)
     const allProperties = await prisma.property.findMany({
@@ -241,7 +265,7 @@ export async function POST(request: NextRequest) {
       console.warn('Failed to update billing property count:', error);
     }
 
-    return NextResponse.json({ success: true, data: { property } }, { status: 201 });
+    return NextResponse.json({ success: true, data: { property: savedProperty } }, { status: 201 });
   } catch (error) {
     console.error('Properties POST error:', error);
     return NextResponse.json({ success: false, message: 'Internal server error' }, { status: 500 });

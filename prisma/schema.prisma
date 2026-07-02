@@ -471,6 +471,7 @@ model AdminConfiguration {
   dataRetentionDays     Int      @default(365) @map("data_retention_days")
   // Pricing Configuration
   currency              String   @default("USD") // Currency code (GBP, USD, EUR, etc.)
+  addressCountry        String?  @map("address_country") // ISO 3166-1 alpha-2 for localized address search/geocoding
   subscriptionBasePrice Decimal  @default(55.00) @map("subscription_base_price") @db.Decimal(10, 2) // Base subscription price
   propertyPricePerUnit  Decimal  @default(1.00) @map("property_price_per_unit") @db.Decimal(10, 2) // Default price per property unit
   createdAt             DateTime @default(now()) @map("created_at")
