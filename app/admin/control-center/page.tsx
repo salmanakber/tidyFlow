@@ -121,7 +121,7 @@ export default function AdminControlCenter() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard 
               label="Monthly Revenue" 
-              value={`£${billingSummary.total_revenue}`} 
+              value={`$${billingSummary.total_revenue}`} 
               subValue="+12% from last month"
               icon={TrendingUp} 
               color="text-emerald-600" 
@@ -223,7 +223,7 @@ export default function AdminControlCenter() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="font-medium text-gray-900">£{Number(company.monthly_cost || 0)?.toFixed(2)}</div>
+                          <div className="font-medium text-gray-900">${Number(company.monthly_cost || 0)?.toFixed(2)}</div>
                           <div className="text-xs text-gray-400">/month</div>
                         </td>
                         <td className="px-6 py-4 text-right">

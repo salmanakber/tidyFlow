@@ -1,22 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getAllSubscriptionPlansForAdmin } from '@/lib/subscription';
+import { getAllSubscriptionPlansForAdmin, serializePublicPricingPlan } from '@/lib/subscription';
+import { getTrialDays } from '@/lib/trial-settings';
 
+/** Authenticated/mobile plan list — prefer GET /api/public/plans for marketing website. */
 export async function GET() {
-  const plans = await getAllSubscriptionPlansForAdmin();
+  const [plans, trialDays] = await Promise.all([
+    getAllSubscriptionPlansForAdmin(),
+    getTrialDays(),
+  ]);
 
   return NextResponse.json({
     success: true,
-    data: plans.map((plan) => ({
-      tier: plan.tier,
-      label: plan.label,
-      monthlyPrice: plan.monthlyPrice,
-      maxProperties: plan.maxProperties,
-      maxCleaners: plan.maxCleaners,
-      maxManagers: plan.maxManagers,
-      aiRequestsPerMonth: plan.aiRequestsPerMonth,
-      invoicesEnabled: plan.invoicesEnabled,
-      aiPhotoAnalysis: plan.aiPhotoAnalysis,
-      aiInsights: plan.aiInsights,
-    })),
+    currency: 'USD',
+    trialDays,
+    data: plans.map((plan) => serializePublicPricingPlan(plan, trialDays)),
   });
 }

@@ -421,6 +421,7 @@ model BillingRecord {
   amountPaid             Decimal   @default(0) @map("amount_paid") @db.Decimal(10, 2)
   amountDue              Decimal   @default(0) @map("amount_due") @db.Decimal(10, 2)
   billingDate            DateTime? @map("billing_date")
+  currentPeriodStart     DateTime? @map("current_period_start")
   nextBillingDate        DateTime? @map("next_billing_date")
   propertyCount          Int       @default(0) @map("property_count")
   trialEndsAt            DateTime? @map("trial_ends_at")

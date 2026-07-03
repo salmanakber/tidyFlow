@@ -63,8 +63,8 @@ const DEFAULT_SETTINGS = {
     { key: 'stripe_property_price_id', description: 'Per-Property Price ID', isEncrypted: false },
   ],
   billing: [
-    { key: 'base_monthly_price', description: 'Base Monthly Price (GBP)', isEncrypted: false },
-    { key: 'price_per_property', description: 'Price Per Property (GBP)', isEncrypted: false },
+    { key: 'base_monthly_price', description: 'Base Monthly Price (USD)', isEncrypted: false },
+    { key: 'price_per_property', description: 'Price Per Property (USD)', isEncrypted: false },
     { key: 'trial_days', description: 'Trial Period (Days)', isEncrypted: false },
   ],
   email: [

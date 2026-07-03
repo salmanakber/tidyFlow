@@ -483,10 +483,10 @@ export default function SuperAdminPage() {
                             </span>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-900">
-                            £{Number(billing.amountPaid).toFixed(2)}
+                            ${Number(billing.amountPaid).toFixed(2)}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-900">
-                            £{Number(billing.amountDue).toFixed(2)}
+                            ${Number(billing.amountDue).toFixed(2)}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-600">
                             {billing.nextBillingDate ? new Date(billing.nextBillingDate).toLocaleDateString() : "N/A"}

@@ -5,6 +5,7 @@ import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
 import { getPlanLimits } from '@/lib/subscription';
 import { createStripeInstance } from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
+import { stripeSubscriptionPeriodDates } from '@/lib/stripe-webhook-sync';
 
 const BILLING_ROLES: UserRole[] = [
   UserRole.OWNER,
@@ -129,9 +130,18 @@ export async function GET(request: NextRequest) {
       try {
         const stripe = createStripeInstance(secretKey);
         const sub = await stripe.subscriptions.retrieve(activeBilling.subscriptionId);
-        const periodEnd = sub.current_period_end
-          ? new Date(sub.current_period_end * 1000)
-          : activeBilling.nextBillingDate;
+        const { currentPeriodStart, currentPeriodEnd } = stripeSubscriptionPeriodDates(sub);
+        const periodEnd = currentPeriodEnd ?? activeBilling.nextBillingDate;
+
+        if (currentPeriodStart || currentPeriodEnd) {
+          await prisma.billingRecord.update({
+            where: { id: activeBilling.id },
+            data: {
+              ...(currentPeriodStart ? { currentPeriodStart } : {}),
+              ...(currentPeriodEnd ? { nextBillingDate: currentPeriodEnd } : {}),
+            },
+          });
+        }
 
         currentSubscription = {
           id: String(activeBilling.id),

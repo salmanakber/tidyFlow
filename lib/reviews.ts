@@ -3,8 +3,10 @@ import { createNotification, notifyManagersClientReview } from '@/lib/notificati
 import { recalculateCleanerProfile } from '@/lib/ai/cleaner-profile';
 import { invalidateAIActivityCache } from '@/lib/ai/activity-queue';
 
+import { getPublicWebOrigin } from '@/lib/domains';
+
 export function buildReviewLink(token: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://apimayaops.co.uk';
+  const baseUrl = getPublicWebOrigin();
   return `${baseUrl}/review/${token}`;
 }
 

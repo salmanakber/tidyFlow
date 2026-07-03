@@ -118,7 +118,7 @@ export default function SubscriptionAdminPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                 {(
                   [
-                    ["monthlyPrice", "Monthly price (£)"],
+                    ["monthlyPrice", "Monthly price ($)"],
                     ["maxCleaners", "Max cleaners"],
                     ["maxProperties", "Max properties"],
                     ["maxManagers", "Max managers"],

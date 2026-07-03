@@ -55,7 +55,9 @@ async function sendBillingNotificationToOwners(payload: BillingNotificationJob &
 }
 
 async function notifyOwnersPlanLimitLow(companyId: number, remaining: number, max: number) {
-  const monthKey = new Date().toISOString().slice(0, 7);
+  const { getMonthlyUsagePeriod } = await import('./subscription');
+  const usagePeriod = await getMonthlyUsagePeriod(companyId);
+  const periodKey = usagePeriod.start.toISOString().slice(0, 10);
 
   const owners = await getBillingContacts(companyId);
   if (owners.length === 0) return;
@@ -64,7 +66,7 @@ async function notifyOwnersPlanLimitLow(companyId: number, remaining: number, ma
     where: {
       type: 'plan_limit',
       userId: { in: owners.map((o) => o.id) },
-      message: { contains: monthKey },
+      message: { contains: periodKey },
     },
   });
   if (alreadySent) return;
@@ -78,9 +80,9 @@ async function notifyOwnersPlanLimitLow(companyId: number, remaining: number, ma
     await createNotification({
       userId: owner.id,
       title: remaining <= 0 ? 'AI limit reached' : 'AI quota running low',
-      message: `${message} [${monthKey}]`,
+      message: `${message} [${periodKey}]`,
       type: 'plan_limit',
-      metadata: { companyId, remaining, max, monthKey },
+      metadata: { companyId, remaining, max, periodKey, usagePeriodSource: usagePeriod.source },
       screenRoute: 'Billing',
     }).catch(() => {});
   }

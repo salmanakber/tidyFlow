@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import axios from "axios"
+import { configureAdminApiClient } from "@/lib/admin-api-client"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false)
 
   useEffect(() => {
+    configureAdminApiClient()
     // Check if already logged in
     const token = localStorage.getItem("authToken")
     if (token) {
@@ -82,8 +84,8 @@ export default function LoginPage() {
                 />
               </svg>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900">MayaOps</h1>
-            <p className="text-gray-600 mt-2">Admin Portal</p>
+            <h1 className="text-3xl font-bold text-gray-900">TidyFlow</h1>
+            <p className="text-gray-600 mt-2">Cleaning Management Platform</p>
           </div>
 
           {/* Error Message */}
@@ -181,7 +183,7 @@ export default function LoginPage() {
           {/* Footer */}
           <div className="mt-8 text-center">
             <p className="text-sm text-gray-600">
-              © 2024 MayaOps Ltd. All rights reserved.
+              © {new Date().getFullYear()} TidyFlow Ltd. All rights reserved.
             </p>
           </div>
         </div>

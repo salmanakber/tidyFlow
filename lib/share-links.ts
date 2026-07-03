@@ -1,4 +1,6 @@
+import { getPublicWebOrigin } from '@/lib/domains';
+
 export function buildClientShareLink(token: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://apimayaops.co.uk';
+  const baseUrl = getPublicWebOrigin();
   return `${baseUrl}/share/${token}`;
 }

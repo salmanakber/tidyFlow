@@ -114,7 +114,7 @@ export async function POST(
       process.env.SUPPORT_EMAIL ||
       process.env.EMAIL_SUPPORT ||
       process.env.EMAIL_FROM ||
-      'support@mayaops.com';
+      'support@tidyflowapp.com';
 
     try {
       await sendEmail({

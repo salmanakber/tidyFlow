@@ -78,13 +78,22 @@ function mapCompanySubscriptionStatus(
   return { subscriptionStatus: 'inactive', isTrialActive: false };
 }
 
+export function stripeSubscriptionPeriodDates(subscription: Stripe.Subscription) {
+  return {
+    currentPeriodStart: subscription.current_period_start
+      ? new Date(subscription.current_period_start * 1000)
+      : null,
+    currentPeriodEnd: subscription.current_period_end
+      ? new Date(subscription.current_period_end * 1000)
+      : null,
+  };
+}
+
 export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subscription) {
   const customerId = resolveStripeCustomerId(subscription.customer);
   const subscriptionId = subscription.id;
   const trialEnd = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
-  const currentPeriodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000)
-    : null;
+  const { currentPeriodStart, currentPeriodEnd } = stripeSubscriptionPeriodDates(subscription);
   const billingStatus = mapBillingStatus(subscription.status, subscription.cancel_at_period_end);
 
   const billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
@@ -107,6 +116,7 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
       status: billingStatus,
       trialEndsAt: trialEnd,
       isTrialPeriod: subscription.status === 'trialing',
+      currentPeriodStart,
       nextBillingDate: currentPeriodEnd,
     },
   });
@@ -123,6 +133,7 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
     billingRecord,
     companyId: billingRecord.companyId,
     trialEnd,
+    currentPeriodStart,
     currentPeriodEnd,
     subscriptionId,
     status: subscription.status,

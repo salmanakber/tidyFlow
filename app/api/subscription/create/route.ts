@@ -121,6 +121,9 @@ export async function POST(request: NextRequest) {
   });
 
   const trialEnd = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
+  const periodStart = subscription.current_period_start
+    ? new Date(subscription.current_period_start * 1000)
+    : null;
   const periodEnd = subscription.current_period_end
     ? new Date(subscription.current_period_end * 1000)
     : null;
@@ -135,6 +138,7 @@ export async function POST(request: NextRequest) {
         status: isTrialing ? 'trialing' : 'active',
         amountDue: limits.monthlyPrice,
         billingDate: new Date(),
+        currentPeriodStart: periodStart,
         nextBillingDate: periodEnd,
         trialEndsAt: trialEnd,
         isTrialPeriod: isTrialing,
@@ -155,6 +159,7 @@ export async function POST(request: NextRequest) {
         status: isTrialing ? 'trialing' : 'active',
         amountDue: limits.monthlyPrice,
         billingDate: new Date(),
+        currentPeriodStart: periodStart,
         nextBillingDate: periodEnd,
         trialEndsAt: trialEnd,
         isTrialPeriod: isTrialing,

@@ -6,6 +6,7 @@
 import { google } from 'googleapis';
 import prisma from './prisma';
 import crypto from 'crypto';
+import { getApiOrigin } from '@/lib/domains';
 
 const drive = google.drive('v3');
 
@@ -53,12 +54,12 @@ function initializeDriveClient() {
  * Get webhook URL for receiving notifications
  */
 function getWebhookUrl(): string {
-  // Priority: NEXT_PUBLIC_API_URL > CRON_BASE_URL > hardcoded ngrok > fallback
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL 
-    || process.env.CRON_BASE_URL 
-    || 'https://b38e-119-157-64-230.ngrok-free.app'  // Fallback to your ngrok URL
-    || 'http://127.0.0.1:3000';
-  
+  const baseUrl =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.CRON_BASE_URL ||
+    getApiOrigin() ||
+    'http://127.0.0.1:3000';
+
   // Warn if using localhost (won't work for Google webhooks)
   if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
     console.error(`[Watch] ❌ ERROR: Using localhost URL (${baseUrl}) - Google cannot reach this!`);

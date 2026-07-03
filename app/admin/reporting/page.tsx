@@ -188,7 +188,7 @@ export default function ReportingPage() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement("a")
       link.href = url
-      link.setAttribute("download", `mayaops-report-${dateRange.start}-${dateRange.end}.${exportFormat}`)
+      link.setAttribute("download", `tidyflow-report-${dateRange.start}-${dateRange.end}.${exportFormat}`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -288,7 +288,7 @@ export default function ReportingPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard
               label="Total Revenue"
-              value={`£${reportData.billingSummary.totalRevenue.toLocaleString()}`}
+              value={`$${reportData.billingSummary.totalRevenue.toLocaleString()}`}
               icon={Wallet}
               className="border-l-4 border-l-cyan-500"
             />
@@ -456,7 +456,7 @@ export default function ReportingPage() {
                    <Wallet className="w-24 h-24" />
                 </div>
                 <h3 className="text-cyan-200 font-medium mb-1">Monthly Recurring Revenue</h3>
-                <div className="text-3xl font-bold mb-6">£{reportData.billingSummary.totalRevenue.toLocaleString()}</div>
+                <div className="text-3xl font-bold mb-6">${reportData.billingSummary.totalRevenue.toLocaleString()}</div>
                 
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-sm bg-white/10 p-2 rounded">

@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma"
 import { requireAuth } from "@/lib/rbac"
 import { generateTaskPDF } from "@/lib/pdf-generator"
 import { enqueueJob } from "@/lib/queue"
+import { requirePdfGeneration } from "@/lib/subscription"
 
 // POST /api/pdf/generate
 export async function POST(request: NextRequest) {
@@ -40,6 +41,11 @@ export async function POST(request: NextRequest) {
 
     if (!task) {
       return NextResponse.json({ success: false, message: "Task not found" }, { status: 404 })
+    }
+
+    const limitCheck = await requirePdfGeneration(task.companyId)
+    if (!limitCheck.allowed) {
+      return NextResponse.json({ success: false, message: limitCheck.message }, { status: 403 })
     }
 
     // Check photos based on pdfType

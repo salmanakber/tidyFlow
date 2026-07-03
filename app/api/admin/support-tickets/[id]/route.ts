@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { UserRole } from '@prisma/client';
 import { sendEmail } from '@/lib/email';
 import crypto from 'crypto';
+import { getPublicWebOrigin } from '@/lib/domains';
 
 // PATCH /api/admin/support-tickets/[id]
 // Update status and optionally send a reply email to the user.
@@ -97,11 +98,7 @@ export async function PATCH(
           });
         }
 
-        const webBaseUrl =
-          process.env.NEXT_PUBLIC_WEB_URL ||
-          process.env.NEXT_PUBLIC_API_URL ||
-          'https://app.mayaops.com';
-        const publicTicketUrl = `${webBaseUrl.replace(/\/+$/, '')}/support/ticket/${publicToken}`;
+        const publicTicketUrl = `${getPublicWebOrigin()}/support/ticket/${publicToken}`;
 
         const originalMessage =
           ticket.messages && ticket.messages.length > 0
@@ -113,7 +110,7 @@ export async function PATCH(
             to: ticket.email,
             subject: `Re: ${ticket.subject}`,
             html: `
-              <h2>Reply to your MayaOps support request</h2>
+              <h2>Reply to your TidyFlow support request</h2>
               <p>Hi${ticket.name ? ` ${ticket.name}` : ''},</p>
               <p>We have responded to your support request:</p>
               <p><strong>Original subject:</strong> ${ticket.subject}</p>

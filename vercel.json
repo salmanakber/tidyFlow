@@ -28,7 +28,8 @@
     "SENDGRID_API_KEY": "@sendgrid-api-key",
     "EMAIL_FROM": "@email-from",
     "CRON_SECRET": "@cron-secret",
-    "NEXT_PUBLIC_APP_URL": "https://app.mayaops.com"
+    "NEXT_PUBLIC_APP_URL": "https://app.tidyflowapp.com",
+    "NEXT_PUBLIC_API_URL": "https://api.tidyflowapp.com"
   },
   "build": {
     "env": {

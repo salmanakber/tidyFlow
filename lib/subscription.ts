@@ -71,6 +71,12 @@ export interface PlanUsageSnapshot {
   pendingPlanTier?: string | null;
   pendingPlanLabel?: string | null;
   pendingPlanEffectiveAt?: string | null;
+  /** Start of the current monthly quota window (Stripe billing period or calendar month). */
+  usagePeriodStart?: string | null;
+  /** End of the current monthly quota window (next Stripe renewal or end of calendar month). */
+  usagePeriodEnd?: string | null;
+  /** Whether quotas reset on Stripe billing cycle or calendar month fallback. */
+  usagePeriodSource?: 'stripe' | 'calendar';
 }
 
 const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
@@ -130,11 +136,53 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
   },
 };
 
-function startOfMonth() {
+function calendarMonthStart() {
   const d = new Date();
   d.setDate(1);
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function calendarMonthEnd(start: Date) {
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 1);
+  return end;
+}
+
+export type MonthlyUsagePeriod = {
+  start: Date;
+  end: Date | null;
+  source: 'stripe' | 'calendar';
+};
+
+/** Monthly quota window — Stripe billing period when available, else calendar month. */
+export async function getMonthlyUsagePeriod(companyId: number): Promise<MonthlyUsagePeriod> {
+  const billing = await prisma.billingRecord.findFirst({
+    where: {
+      companyId,
+      subscriptionId: { not: null },
+      status: { in: ['active', 'trialing', 'canceling', 'past_due', 'unpaid'] },
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: { currentPeriodStart: true, nextBillingDate: true },
+  });
+
+  const now = new Date();
+  if (billing?.currentPeriodStart && billing.currentPeriodStart <= now) {
+    return {
+      start: billing.currentPeriodStart,
+      end: billing.nextBillingDate,
+      source: 'stripe',
+    };
+  }
+
+  const start = calendarMonthStart();
+  return { start, end: calendarMonthEnd(start), source: 'calendar' };
+}
+
+export async function getMonthlyUsagePeriodStart(companyId: number): Promise<Date> {
+  const period = await getMonthlyUsagePeriod(companyId);
+  return period.start;
 }
 
 /** All three tiers for admin UI — merges DB overrides with built-in defaults. */
@@ -168,6 +216,108 @@ export async function getAllSubscriptionPlansForAdmin(): Promise<PlanLimits[]> {
         (row as { maxPdfGenerationsPerMonth?: number }).maxPdfGenerationsPerMonth ??
         fallback.maxPdfGenerationsPerMonth,
     };
+  });
+}
+
+export function serializePublicPricingPlan(plan: PlanLimits, trialDays?: number) {
+  return {
+    tier: plan.tier,
+    label: plan.label,
+    monthlyPrice: plan.monthlyPrice,
+    currency: 'USD',
+    limits: {
+      cleaners: plan.maxCleaners,
+      properties: plan.maxProperties,
+      managers: plan.maxManagers,
+      aiRequestsPerMonth: plan.aiRequestsPerMonth,
+      invoicesPerMonth: plan.maxInvoicesPerMonth,
+      photoVerificationsPerMonth: plan.maxPhotoVerificationsPerMonth,
+      pdfGenerationsPerMonth: plan.maxPdfGenerationsPerMonth,
+    },
+    scope: {
+      maxCleaners: plan.maxCleaners,
+      maxProperties: plan.maxProperties,
+      maxManagers: plan.maxManagers,
+      aiRequestsPerMonth: plan.aiRequestsPerMonth,
+      maxInvoicesPerMonth: plan.maxInvoicesPerMonth,
+      maxPhotoVerificationsPerMonth: plan.maxPhotoVerificationsPerMonth,
+      maxPdfGenerationsPerMonth: plan.maxPdfGenerationsPerMonth,
+    },
+    features: {
+      aiPhotoAnalysis: plan.aiPhotoAnalysis,
+      aiInsights: plan.aiInsights,
+      aiAssignment: plan.aiAssignment,
+      aiTaskSuggestions: plan.aiTaskSuggestions,
+      invoicesEnabled: plan.invoicesEnabled,
+      aiInvoiceAssist: plan.aiInvoiceAssist,
+    },
+    ...(trialDays !== undefined ? { trialDays } : {}),
+  };
+}
+
+export async function upsertSubscriptionPlanTier(
+  tier: string,
+  fields: Record<string, unknown>
+) {
+  const tierUpper = String(tier).toUpperCase();
+  if (!['STARTUP', 'STANDARD', 'PREMIUM'].includes(tierUpper)) {
+    throw new Error('Invalid plan tier');
+  }
+
+  return prisma.subscriptionPlanLimit.upsert({
+    where: { tier: tierUpper },
+    create: {
+      tier: tierUpper,
+      label: (fields.label as string) || tierUpper,
+      maxCleaners: Number(fields.maxCleaners ?? 25),
+      maxProperties: Number(fields.maxProperties ?? 50),
+      maxManagers: Number(fields.maxManagers ?? 10),
+      aiRequestsPerMonth: Number(fields.aiRequestsPerMonth ?? 500),
+      aiPhotoAnalysis: fields.aiPhotoAnalysis !== undefined ? !!fields.aiPhotoAnalysis : true,
+      aiInsights: fields.aiInsights !== undefined ? !!fields.aiInsights : true,
+      aiAssignment: fields.aiAssignment !== undefined ? !!fields.aiAssignment : true,
+      aiTaskSuggestions:
+        fields.aiTaskSuggestions !== undefined ? !!fields.aiTaskSuggestions : true,
+      invoicesEnabled: fields.invoicesEnabled !== undefined ? !!fields.invoicesEnabled : false,
+      maxInvoicesPerMonth: Number(fields.maxInvoicesPerMonth ?? 5),
+      aiInvoiceAssist: fields.aiInvoiceAssist !== undefined ? !!fields.aiInvoiceAssist : false,
+      maxPhotoVerificationsPerMonth: Number(fields.maxPhotoVerificationsPerMonth ?? 100),
+      maxPdfGenerationsPerMonth: Number(fields.maxPdfGenerationsPerMonth ?? 50),
+      monthlyPrice: fields.monthlyPrice != null ? Number(fields.monthlyPrice) : 55,
+    },
+    update: {
+      ...(fields.label !== undefined ? { label: String(fields.label) } : {}),
+      ...(fields.maxCleaners !== undefined ? { maxCleaners: Number(fields.maxCleaners) } : {}),
+      ...(fields.maxProperties !== undefined ? { maxProperties: Number(fields.maxProperties) } : {}),
+      ...(fields.maxManagers !== undefined ? { maxManagers: Number(fields.maxManagers) } : {}),
+      ...(fields.aiRequestsPerMonth !== undefined
+        ? { aiRequestsPerMonth: Number(fields.aiRequestsPerMonth) }
+        : {}),
+      ...(fields.aiPhotoAnalysis !== undefined
+        ? { aiPhotoAnalysis: !!fields.aiPhotoAnalysis }
+        : {}),
+      ...(fields.aiInsights !== undefined ? { aiInsights: !!fields.aiInsights } : {}),
+      ...(fields.aiAssignment !== undefined ? { aiAssignment: !!fields.aiAssignment } : {}),
+      ...(fields.aiTaskSuggestions !== undefined
+        ? { aiTaskSuggestions: !!fields.aiTaskSuggestions }
+        : {}),
+      ...(fields.invoicesEnabled !== undefined
+        ? { invoicesEnabled: !!fields.invoicesEnabled }
+        : {}),
+      ...(fields.maxInvoicesPerMonth !== undefined
+        ? { maxInvoicesPerMonth: Number(fields.maxInvoicesPerMonth) }
+        : {}),
+      ...(fields.aiInvoiceAssist !== undefined
+        ? { aiInvoiceAssist: !!fields.aiInvoiceAssist }
+        : {}),
+      ...(fields.maxPhotoVerificationsPerMonth !== undefined
+        ? { maxPhotoVerificationsPerMonth: Number(fields.maxPhotoVerificationsPerMonth) }
+        : {}),
+      ...(fields.maxPdfGenerationsPerMonth !== undefined
+        ? { maxPdfGenerationsPerMonth: Number(fields.maxPdfGenerationsPerMonth) }
+        : {}),
+      ...(fields.monthlyPrice !== undefined ? { monthlyPrice: Number(fields.monthlyPrice) } : {}),
+    },
   });
 }
 
@@ -277,7 +427,15 @@ export async function checkPlanLimit(
   if (!plan) return { allowed: false, message: 'Company not found' };
 
   const { limits } = plan;
-  const monthStart = startOfMonth();
+  const monthlyResources = new Set([
+    'ai_request',
+    'invoice',
+    'photo_verification',
+    'pdf_generation',
+  ]);
+  const periodStart = monthlyResources.has(resource)
+    ? await getMonthlyUsagePeriodStart(companyId)
+    : null;
 
   if (resource === 'cleaners') {
     const count = await prisma.user.count({
@@ -318,7 +476,7 @@ export async function checkPlanLimit(
 
   if (resource === 'ai_request') {
     const used = await prisma.aIUsageLog.count({
-      where: { companyId, createdAt: { gte: monthStart } },
+      where: { companyId, createdAt: { gte: periodStart! } },
     });
     if (used >= limits.aiRequestsPerMonth) {
       return {
@@ -338,7 +496,7 @@ export async function checkPlanLimit(
       };
     }
     const used = await prisma.clientInvoice.count({
-      where: { companyId, createdAt: { gte: monthStart }, status: { not: 'void' } },
+      where: { companyId, createdAt: { gte: periodStart! }, status: { not: 'void' } },
     });
     if (used >= limits.maxInvoicesPerMonth) {
       return {
@@ -358,7 +516,7 @@ export async function checkPlanLimit(
       };
     }
     const used = await prisma.aIUsageLog.count({
-      where: { companyId, feature: 'photo_verification', createdAt: { gte: monthStart } },
+      where: { companyId, feature: 'photo_verification', createdAt: { gte: periodStart! } },
     });
     if (used >= limits.maxPhotoVerificationsPerMonth) {
       return {
@@ -372,7 +530,7 @@ export async function checkPlanLimit(
   if (resource === 'pdf_generation') {
     const used = await prisma.pDFRecord.count({
       where: {
-        createdAt: { gte: monthStart },
+        createdAt: { gte: periodStart! },
         task: { companyId },
       },
     });
@@ -441,9 +599,9 @@ export async function logAIUsage(companyId: number, feature: string) {
   try {
     const plan = await getCompanyPlan(companyId);
     if (!plan) return;
-    const monthStart = startOfMonth();
+    const periodStart = await getMonthlyUsagePeriodStart(companyId);
     const used = await prisma.aIUsageLog.count({
-      where: { companyId, createdAt: { gte: monthStart } },
+      where: { companyId, createdAt: { gte: periodStart } },
     });
     const remaining = Math.max(0, plan.limits.aiRequestsPerMonth - used);
     if (remaining > 5) return;
@@ -472,7 +630,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
   const plan = await getCompanyPlan(companyId);
   if (!plan) return null;
 
-  const monthStart = startOfMonth();
+  const usagePeriod = await getMonthlyUsagePeriod(companyId);
+  const periodStart = usagePeriod.start;
   const [cleaners, properties, managers, aiUsed, invoicesUsed, photoVerificationsUsed, pdfGenerationsUsed] =
     await Promise.all([
     prisma.user.count({ where: { companyId, role: 'CLEANER', isActive: true } }),
@@ -480,15 +639,15 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
     prisma.user.count({
       where: { companyId, role: { in: ['MANAGER', 'COMPANY_ADMIN'] }, isActive: true },
     }),
-    prisma.aIUsageLog.count({ where: { companyId, createdAt: { gte: monthStart } } }),
+    prisma.aIUsageLog.count({ where: { companyId, createdAt: { gte: periodStart } } }),
     prisma.clientInvoice.count({
-      where: { companyId, createdAt: { gte: monthStart }, status: { not: 'void' } },
+      where: { companyId, createdAt: { gte: periodStart }, status: { not: 'void' } },
     }),
     prisma.aIUsageLog.count({
-      where: { companyId, feature: 'photo_verification', createdAt: { gte: monthStart } },
+      where: { companyId, feature: 'photo_verification', createdAt: { gte: periodStart } },
     }),
     prisma.pDFRecord.count({
-      where: { createdAt: { gte: monthStart }, task: { companyId } },
+      where: { createdAt: { gte: periodStart }, task: { companyId } },
     }),
   ]);
 
@@ -594,5 +753,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
     pendingPlanEffectiveAt: pendingActive
       ? company.pendingPlanEffectiveAt!.toISOString()
       : null,
+    usagePeriodStart: periodStart.toISOString(),
+    usagePeriodEnd: usagePeriod.end?.toISOString() ?? null,
+    usagePeriodSource: usagePeriod.source,
   };
 }

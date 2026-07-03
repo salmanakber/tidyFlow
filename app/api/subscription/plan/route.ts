@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
-import { getCompanyPlan } from '@/lib/subscription';
+import { getCompanyPlan, getMonthlyUsagePeriodStart } from '@/lib/subscription';
 import prisma from '@/lib/prisma';
 
 /** Current company subscription plan + limits (mobile sidebar, billing) */
@@ -16,12 +16,10 @@ export async function GET(request: NextRequest) {
   const plan = await getCompanyPlan(companyId);
   if (!plan) return NextResponse.json({ success: false, message: 'Company not found' }, { status: 404 });
 
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
+  const periodStart = await getMonthlyUsagePeriodStart(companyId);
 
   const aiUsedThisMonth = await prisma.aIUsageLog.count({
-    where: { companyId, createdAt: { gte: startOfMonth } },
+    where: { companyId, createdAt: { gte: periodStart } },
   });
 
   return NextResponse.json({

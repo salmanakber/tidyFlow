@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { sendEmail } from '@/lib/email';
 import crypto from 'crypto';
+import { getPublicWebOrigin } from '@/lib/domains';
 
-// POST /api/support-tickets
-// Public endpoint: create a support ticket from the public support form.
+// POST /api/support-tickets — public support form
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -56,12 +56,9 @@ export async function POST(request: NextRequest) {
       process.env.SUPPORT_EMAIL ||
       process.env.EMAIL_SUPPORT ||
       process.env.EMAIL_FROM ||
-      'support@mayaops.com';
+      'support@tidyflowapp.com';
 
-    const webBaseUrl =
-      process.env.NEXT_PUBLIC_WEB_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      'https://app.mayaops.com';
+    const webBaseUrl = getPublicWebOrigin();
     const publicTicketUrl = `${webBaseUrl.replace(/\/+$/, '')}/support/ticket/${ticket.publicToken}`;
 
     try {

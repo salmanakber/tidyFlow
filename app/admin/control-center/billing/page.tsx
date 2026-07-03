@@ -95,9 +95,9 @@ export default function BillingDashboard() {
 
   // --- Helpers ---
   const formatCurrency = (amount: number | string) => {
-    return new Intl.NumberFormat('en-GB', {
+    return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'GBP',
+      currency: 'USD',
     }).format(Number(amount))
   }
 

@@ -449,15 +449,15 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         <div className="flex items-center justify-between h-16 px-6 border-b border-gray-100">
           {!sidebarCollapsed && (
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-200 shadow-md">
-                <span className="text-white font-bold text-lg">M</span>
+              <div className="w-8 h-8 rounded-lg overflow-hidden shadow-indigo-200 shadow-md flex-shrink-0">
+                <img src="/assets/new-icon.png" alt="TidyFlow" className="w-full h-full object-cover" />
               </div>
-              <span className="font-bold text-xl text-gray-900 tracking-tight">MayaOps</span>
+              <span className="font-bold text-xl text-gray-900 tracking-tight">TidyFlow</span>
             </div>
           )}
           {sidebarCollapsed && (
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-200 shadow-md mx-auto">
-              <span className="text-white font-bold text-lg">M</span>
+            <div className="w-8 h-8 rounded-lg overflow-hidden shadow-indigo-200 shadow-md mx-auto">
+              <img src="/assets/new-icon.png" alt="TidyFlow" className="w-full h-full object-cover" />
             </div>
           )}
           <div className="flex items-center gap-2">
