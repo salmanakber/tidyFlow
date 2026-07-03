@@ -1,38 +1,39 @@
 import axios from 'axios';
-import { apiUrl, getApiOrigin } from '@/lib/domains';
+import { getApiHostname, getAppHostname } from '@/lib/domains';
 
 let configured = false;
-let fetchPatched = false;
-let originalFetch: typeof fetch | null = null;
 
-/** Point admin UI HTTP clients at api.tidyflowapp.com (or localhost relative paths in dev). */
+/**
+ * Admin UI on app.tidyflowapp.com uses same-origin /api (same Next.js server).
+ * Only force cross-origin API base URL when hostname does not match app or api host.
+ */
 export function configureAdminApiClient() {
   if (typeof window === 'undefined' || configured) return;
 
-  const origin = getApiOrigin();
-  const host = window.location.hostname;
-  const useAbsoluteApi =
-    origin &&
-    !host.includes('localhost') &&
-    !host.includes('127.0.0.1') &&
-    host !== new URL(origin).hostname;
+  const host = window.location.hostname.toLowerCase();
+  const appHost = getAppHostname().toLowerCase();
+  const apiHost = getApiHostname().toLowerCase();
 
-  if (useAbsoluteApi) {
-    axios.defaults.baseURL = origin;
+  const isLocal =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.startsWith('192.168.') ||
+    host.startsWith('10.');
+
+  const onAppHost = host === appHost || host === `www.${appHost}`;
+  const onApiHost = host === apiHost || host === `www.${apiHost}`;
+
+  // Same server: relative /api paths work on app.* and localhost
+  if (isLocal || onAppHost) {
+    axios.defaults.baseURL = '';
+    configured = true;
+    return;
   }
 
-  if (!fetchPatched && useAbsoluteApi) {
-    originalFetch = window.fetch.bind(window);
-    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-      if (typeof input === 'string' && input.startsWith('/api/')) {
-        return originalFetch!(apiUrl(input), init);
-      }
-      if (input instanceof Request && input.url.startsWith('/api/')) {
-        return originalFetch!(apiUrl(input.url), init);
-      }
-      return originalFetch!(input, init);
-    };
-    fetchPatched = true;
+  // Fallback: if admin is opened on another host, point at API subdomain
+  if (!onApiHost && apiHost) {
+    const protocol = window.location.protocol;
+    axios.defaults.baseURL = `${protocol}//${apiHost}`;
   }
 
   configured = true;

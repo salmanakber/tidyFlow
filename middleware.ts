@@ -5,6 +5,7 @@ import {
   hostMatchesApi,
   hostMatchesApp,
   isLocalhostHost,
+  resolveRequestHost,
 } from '@/lib/domains';
 
 const API_PUBLIC_PAGE_PREFIXES = ['/share', '/review', '/support', '/account-deletion'];
@@ -15,12 +16,9 @@ function isStaticAsset(pathname: string): boolean {
     pathname.startsWith('/assets') ||
     pathname === '/favicon.ico' ||
     pathname === '/icon.png' ||
-    pathname.endsWith('.png') ||
-    pathname.endsWith('.jpg') ||
-    pathname.endsWith('.jpeg') ||
-    pathname.endsWith('.webp') ||
-    pathname.endsWith('.svg') ||
-    pathname.endsWith('.ico')
+    pathname === '/robots.txt' ||
+    pathname === '/manifest.json' ||
+    /\.(png|jpe?g|webp|svg|ico|css|js|woff2?|ttf|map)$/i.test(pathname)
   );
 }
 
@@ -29,11 +27,7 @@ function isApiPath(pathname: string): boolean {
 }
 
 function isAdminUiPath(pathname: string): boolean {
-  return (
-    pathname === '/login' ||
-    pathname.startsWith('/admin') ||
-    pathname === '/'
-  );
+  return pathname === '/login' || pathname.startsWith('/admin') || pathname === '/';
 }
 
 function isApiPublicPage(pathname: string): boolean {
@@ -43,9 +37,10 @@ function isApiPublicPage(pathname: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
-  const host = request.headers.get('host');
+  const host = resolveRequestHost(request);
   const { pathname } = request.nextUrl;
 
+  // Dev / LAN — no domain split
   if (isLocalhostHost(host)) {
     return NextResponse.next();
   }
@@ -54,7 +49,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // --- api.tidyflowapp.com: API + token-based public pages only ---
+  // --- api.tidyflowapp.com: API + public token pages only ---
   if (hostMatchesApi(host)) {
     if (isApiPath(pathname) || isApiPublicPage(pathname)) {
       return NextResponse.next();
@@ -65,49 +60,37 @@ export function middleware(request: NextRequest) {
         {
           success: true,
           service: 'TidyFlow API',
-          docs: `${getApiOrigin()}/api/health`,
+          health: `${getApiOrigin()}/api/health`,
           publicPricing: `${getApiOrigin()}/api/public/plans`,
         },
         { status: 200 }
       );
     }
 
+    // Admin UI lives on app.* — send users there
     if (isAdminUiPath(pathname)) {
-      const appLogin = new URL('/login', getAppOrigin());
-      return NextResponse.redirect(appLogin);
+      return NextResponse.redirect(new URL('/login', getAppOrigin()));
     }
 
     return NextResponse.json(
-      { success: false, message: 'Not found. Use the app subdomain for admin access.' },
+      { success: false, message: 'Not found. Use app.tidyflowapp.com for admin access.' },
       { status: 404 }
     );
   }
 
-  // --- app.tidyflowapp.com: admin UI only ---
+  // --- app.tidyflowapp.com: admin UI (allow /api on same server — no redirect) ---
   if (hostMatchesApp(host)) {
-    if (isAdminUiPath(pathname)) {
-      if (pathname === '/') {
-        return NextResponse.redirect(new URL('/login', request.url));
-      }
-      return NextResponse.next();
+    if (pathname === '/') {
+      return NextResponse.redirect(new URL('/login', request.url));
     }
 
-    if (isApiPath(pathname)) {
-      const target = new URL(`${pathname}${request.nextUrl.search}`, getApiOrigin());
-      return NextResponse.redirect(target, 307);
-    }
-
-    if (isApiPublicPage(pathname)) {
-      const target = new URL(`${pathname}${request.nextUrl.search}`, getApiOrigin());
-      return NextResponse.redirect(target, 307);
-    }
-
-    return NextResponse.redirect(new URL('/login', request.url));
+    // Allow login, admin, API, and public pages on the app host
+    return NextResponse.next();
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.png|assets/).*)'],
 };

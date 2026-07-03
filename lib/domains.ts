@@ -58,17 +58,33 @@ export function apiUrl(path: string): string {
 export function isLocalhostHost(host: string | null | undefined): boolean {
   if (!host) return false;
   const h = host.split(':')[0].toLowerCase();
-  return h === 'localhost' || h === '127.0.0.1';
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    h.startsWith('192.168.') ||
+    h.startsWith('10.') ||
+    h.endsWith('.local')
+  );
+}
+
+/** Prefer x-forwarded-host when behind nginx / load balancer. */
+export function resolveRequestHost(request: { headers: { get(name: string): string | null } }): string | null {
+  return (
+    request.headers.get('x-forwarded-host') ||
+    request.headers.get('host')
+  );
 }
 
 export function hostMatchesApp(host: string | null | undefined): boolean {
   if (!host) return false;
-  const h = host.split(':')[0].toLowerCase();
-  return h === getAppHostname().toLowerCase();
+  const h = host.split(',')[0].trim().split(':')[0].toLowerCase();
+  const expected = getAppHostname().toLowerCase();
+  return h === expected || h === `www.${expected}`;
 }
 
 export function hostMatchesApi(host: string | null | undefined): boolean {
   if (!host) return false;
-  const h = host.split(':')[0].toLowerCase();
-  return h === getApiHostname().toLowerCase();
+  const h = host.split(',')[0].trim().split(':')[0].toLowerCase();
+  const expected = getApiHostname().toLowerCase();
+  return h === expected || h === `www.${expected}`;
 }
