@@ -15,18 +15,18 @@ module.exports = {
   apps: [
     {
       name: 'mayaops-web',
-      script: 'node_modules/next/dist/bin/next',
-      args: 'start',
+      script: 'npm',
+      args: 'run start',
       cwd: './web',
       instances: 1, // Run single instance (or use 'max' for cluster mode)
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000,
+        PORT: 3060,
       },
       env_production: {
         NODE_ENV: 'production',
-        PORT: 3000,
+        PORT: 3060,
       },
       // Logging
       error_file: '../logs/web-error.log',
@@ -41,7 +41,7 @@ module.exports = {
       
       // Graceful shutdown
       kill_timeout: 5000,
-      wait_ready: true,
+      wait_ready: false,
       listen_timeout: 10000,
       
       // Health monitoring
