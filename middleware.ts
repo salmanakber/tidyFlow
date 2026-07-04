@@ -8,7 +8,14 @@ import {
   resolveRequestHost,
 } from '@/lib/domains';
 
-const API_PUBLIC_PAGE_PREFIXES = ['/share', '/review', '/support', '/account-deletion'];
+const API_PUBLIC_PAGE_PREFIXES = [
+  '/share',
+  '/review',
+  '/support',
+  '/account-deletion',
+  '/privacy',
+  '/terms',
+];
 
 function isStaticAsset(pathname: string): boolean {
   return (
