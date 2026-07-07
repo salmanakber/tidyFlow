@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
+import TurnstileWidget from "@/components/TurnstileWidget"
 
 interface Configuration {
   id: number
@@ -18,6 +19,7 @@ export default function ConfigurationsPage() {
   const [config, setConfig] = useState<Configuration | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
   useEffect(() => {
@@ -46,15 +48,32 @@ export default function ConfigurationsPage() {
     }
   }
 
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token)
+  }, [])
+
+  const handleTurnstileExpire = useCallback(() => {
+    setTurnstileToken(null)
+  }, [])
+
   const handleSave = async () => {
     if (!config) return
+
+    if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken) {
+      setMessage({ type: "error", text: "Please complete the security check before saving." })
+      return
+    }
+
     try {
       setSaving(true)
       setMessage(null)
       const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
       const response = await axios.patch(
         "/api/admin/configurations",
-        config,
+        {
+          ...config,
+          turnstileToken,
+        },
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -62,6 +81,7 @@ export default function ConfigurationsPage() {
       if (response.data.success) {
         setMessage({ type: "success", text: "Configuration saved successfully!" })
         setConfig(response.data.data)
+        setTurnstileToken(null)
       }
     } catch (error: any) {
       setMessage({
@@ -209,6 +229,20 @@ export default function ConfigurationsPage() {
             />
             <p className="text-xs text-gray-500 mt-1">
               Custom template for notifications (optional)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-900 mb-2">
+              Security verification
+            </label>
+            <TurnstileWidget
+              onVerify={handleTurnstileVerify}
+              onExpire={handleTurnstileExpire}
+              onError={handleTurnstileExpire}
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              Complete the Cloudflare Turnstile check to prevent automated spam submissions.
             </p>
           </div>
 

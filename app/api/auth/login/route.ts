@@ -125,7 +125,7 @@ const shouldSkipOTP =
         const userName = user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
         await sendEmail({
           to: user.email,
-          subject: 'MayaOps - Login Verification Code',
+          subject: 'TidyFlow - Login Verification Code',
           html: `
             <!DOCTYPE html>
             <html>
@@ -155,7 +155,7 @@ const shouldSkipOTP =
                     <p>If you didn't attempt to login, please ignore this email and contact support.</p>
                   </div>
                   <div class="footer">
-                    <p>© 2025 MayaOps. All rights reserved.</p>
+                    <p>© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
                     <p>This is an automated email, please do not reply.</p>
                   </div>
                 </div>

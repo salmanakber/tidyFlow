@@ -41,8 +41,8 @@ export default function LegalPageLayout({ title, lastUpdated, children }: LegalP
         <footer className="mt-8 text-center text-sm text-slate-500">
           <p>
             Questions? Contact us at{' '}
-            <a href="mailto:support@tidyflowapp.com" className="font-medium text-teal-700 hover:underline">
-              support@tidyflowapp.com
+            <a href="mailto:tidyflaw@gmail.com" className="font-medium text-teal-700 hover:underline">
+              tidyflaw@gmail.com
             </a>
           </p>
           <p className="mt-2">© {new Date().getFullYear()} TidyFlow. All rights reserved.</p>

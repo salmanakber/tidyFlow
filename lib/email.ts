@@ -72,7 +72,7 @@ async function getEmailSettings() {
       sesRegion: settingsMap['ses_region'] || process.env.AWS_SES_REGION,
       sendgridApiKey: settingsMap['sendgrid_api_key'] || process.env.SENDGRID_API_KEY,
       brevoApiKey: settingsMap['brevo_api_key'] || process.env.BREVO_API_KEY,
-      brevoSenderName: settingsMap['brevo_sender_name'] || process.env.BREVO_SENDER_NAME || 'TidyFlow',
+      brevoSenderName: (settingsMap['brevo_sender_name'] || process.env.BREVO_SENDER_NAME || 'TidyFlow').replace(/MayaOps/gi, 'TidyFlow'),
       fromEmail: settingsMap['from_email'] || process.env.EMAIL_FROM || 'noreply@tidyflowapp.com',
     };
   } catch (error) {
@@ -89,7 +89,7 @@ async function getEmailSettings() {
       sesRegion: process.env.AWS_SES_REGION,
       sendgridApiKey: process.env.SENDGRID_API_KEY,
       brevoApiKey: process.env.BREVO_API_KEY,
-      brevoSenderName: process.env.BREVO_SENDER_NAME || 'TidyFlow',
+      brevoSenderName: (process.env.BREVO_SENDER_NAME || 'TidyFlow').replace(/MayaOps/gi, 'TidyFlow'),
       fromEmail: process.env.EMAIL_FROM || 'noreply@tidyflowapp.com',
     };
   }

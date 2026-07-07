@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { UserRole } from '@prisma/client';
+import { verifyTurnstileToken } from '@/lib/turnstile';
 
 // GET /api/admin/configurations - Get admin configuration
 export async function GET(request: NextRequest) {
@@ -107,7 +108,16 @@ export async function PATCH(request: NextRequest) {
       currency,
       subscriptionBasePrice,
       propertyPricePerUnit,
+      turnstileToken,
     } = body;
+
+    const turnstileOk = await verifyTurnstileToken(turnstileToken);
+    if (!turnstileOk) {
+      return NextResponse.json(
+        { success: false, message: 'Security verification failed. Please try again.' },
+        { status: 403 }
+      );
+    }
 
     let companyId: number | null = null;
 

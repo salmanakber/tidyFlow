@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
         : normalizedEmail;
       const subject =
         purpose === 'password_reset'
-          ? 'MayaOps - Password Reset OTP'
-          : 'MayaOps - Login Verification Code';
+          ? 'TidyFlow - Password Reset OTP'
+          : 'TidyFlow - Login Verification Code';
 
       await sendEmail({
         to: normalizedEmail,
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
         html: `
           <h2>Your Verification Code</h2>
           <p>Hi ${userName},</p>
-          <p>Your MayaOps verification code is:</p>
+          <p>Your TidyFlow verification code is:</p>
           <h1 style="color: #3B82F6; font-size: 32px; letter-spacing: 4px;">${otp}</h1>
           <p>This code will expire in 10 minutes.</p>
         `,

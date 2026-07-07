@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     const userName = user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
     await sendEmail({
       to: user.email,
-      subject: 'MayaOps - Password Reset OTP',
+      subject: 'TidyFlow - Password Reset OTP',
       html: `
         <!DOCTYPE html>
         <html>
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
               </div>
               <div class="content">
                 <p>Hi ${userName},</p>
-                <p>We received a request to reset your password for your MayaOps account.</p>
+                <p>We received a request to reset your password for your TidyFlow account.</p>
                 <p>Use the OTP code below to reset your password:</p>
                 <div class="otp-box">
                   <div class="otp-code">${otp}</div>
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
                 <p>If you didn't request a password reset, please ignore this email. Your password will remain unchanged.</p>
               </div>
               <div class="footer">
-                <p>© ${new Date().getFullYear()} MayaOps. All rights reserved.</p>
+                <p>© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
                 <p>This is an automated email, please do not reply.</p>
               </div>
             </div>
