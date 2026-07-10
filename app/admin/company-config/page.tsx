@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
+import SearchableCompanySelect from "@/components/SearchableCompanySelect"
 import { Settings, Save, CheckCircle, AlertTriangle, Building, ShieldAlert, Image, MapPin } from "lucide-react"
 
 interface AdminConfig {
@@ -29,12 +30,15 @@ export default function CompanyConfigAdminPage() {
   const [config, setConfig] = useState<AdminConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadingConfig, setLoadingConfig] = useState(false)
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   const token = () => localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
 
   const loadConfig = async (id: number) => {
+    setLoadingConfig(true)
+    setConfig(null)
     const r = await axios
       .get(`/api/company/admin-config?companyId=${id}`, {
         headers: { Authorization: `Bearer ${token()}` },
@@ -43,6 +47,7 @@ export default function CompanyConfigAdminPage() {
     if (r?.data?.success) {
       setConfig({ ...r.data.data, companyId: id })
     }
+    setLoadingConfig(false)
   }
 
   useEffect(() => {
@@ -123,7 +128,7 @@ export default function CompanyConfigAdminPage() {
         },
         { headers: { Authorization: `Bearer ${token()}` } }
       )
-      setMessage("Company settings saved.")
+      setMessage(`Settings saved for ${selectedCompanyName || "this company"}.`)
     } catch {
       setMessage("Failed to save settings.")
     } finally {
@@ -192,27 +197,21 @@ export default function CompanyConfigAdminPage() {
                 </span>
               </div>
               <div className="relative">
-                <select
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 text-sm text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all appearance-none cursor-pointer"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml;utf8,<svg fill='none' stroke='%2364748b' stroke-width='2' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><path stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'></path></svg>")`,
-                    backgroundPosition: 'right 16px center',
-                    backgroundSize: '16px',
-                    backgroundRepeat: 'no-repeat'
-                  }}
+                <SearchableCompanySelect
+                  companies={companies}
                   value={companyId}
-                  onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : "")}
-                >
-                  <option value="">Select company…</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(id) => setCompanyId(id)}
+                  placeholder="Select company…"
+                  emptyMessage="No companies match your search."
+                />
               </div>
               {companies.length === 0 && (
                 <p className="text-xs text-slate-400 mt-1">No companies found in the system database.</p>
+              )}
+              {companyId && (
+                <p className="text-xs text-slate-500 mt-2">
+                  Changes below apply only to <strong>{selectedCompanyName}</strong>.
+                </p>
               )}
             </div>
           ) : (
@@ -227,7 +226,11 @@ export default function CompanyConfigAdminPage() {
         </div>
 
         {/* Configuration Parameters Panel */}
-        {config && (
+        {loadingConfig ? (
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-8 text-center text-sm text-slate-500">
+            Loading company settings…
+          </div>
+        ) : config && (
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-100">
               <h3 className="text-base font-semibold text-slate-900">System Parameters</h3>

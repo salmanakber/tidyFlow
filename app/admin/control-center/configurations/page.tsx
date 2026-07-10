@@ -6,13 +6,15 @@ import AdminLayout from "@/components/AdminLayout"
 import TurnstileWidget from "@/components/TurnstileWidget"
 
 interface Configuration {
-  id: number
-  photo_count_requirement: number
-  watermark_enabled: boolean
-  geofence_radius: number
+  id: number | null
+  companyId: number | null
+  photoCountRequirement: number
+  watermarkEnabled: boolean
+  geofenceRadius: number
   timezone: string
-  data_retention_days: number
-  notification_template?: string
+  dataRetentionDays: number
+  notificationTemplate?: string | null
+  applyToAllCompanies?: boolean
 }
 
 export default function ConfigurationsPage() {
@@ -33,12 +35,17 @@ export default function ConfigurationsPage() {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (response.data.success) {
-        setConfig(response.data.data || {
-          photo_count_requirement: 20,
-          watermark_enabled: false,
-          geofence_radius: 150,
-          timezone: "UTC",
-          data_retention_days: 365,
+        const data = response.data.data
+        setConfig({
+          id: data.id ?? null,
+          companyId: data.companyId ?? null,
+          photoCountRequirement: data.photoCountRequirement ?? 20,
+          watermarkEnabled: data.watermarkEnabled ?? false,
+          geofenceRadius: data.geofenceRadius ?? 150,
+          timezone: data.timezone ?? "UTC",
+          dataRetentionDays: data.dataRetentionDays ?? 365,
+          notificationTemplate: data.notificationTemplate ?? "",
+          applyToAllCompanies: data.applyToAllCompanies ?? true,
         })
       }
     } catch (error) {
@@ -71,7 +78,13 @@ export default function ConfigurationsPage() {
       const response = await axios.patch(
         "/api/admin/configurations",
         {
-          ...config,
+          photoCountRequirement: config.photoCountRequirement,
+          watermarkEnabled: config.watermarkEnabled,
+          geofenceRadius: config.geofenceRadius,
+          timezone: config.timezone,
+          dataRetentionDays: config.dataRetentionDays,
+          notificationTemplate: config.notificationTemplate || null,
+          applyToAllCompanies: true,
           turnstileToken,
         },
         {
@@ -79,8 +92,28 @@ export default function ConfigurationsPage() {
         }
       )
       if (response.data.success) {
-        setMessage({ type: "success", text: "Configuration saved successfully!" })
-        setConfig(response.data.data)
+        const applied = response.data.data?.companiesUpdated
+        setMessage({
+          type: "success",
+          text: applied
+            ? `Configuration saved and applied to ${applied} companies.`
+            : response.data.message || "Configuration saved successfully!",
+        })
+        if (response.data.data) {
+          setConfig((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  photoCountRequirement: response.data.data.photoCountRequirement ?? prev.photoCountRequirement,
+                  watermarkEnabled: response.data.data.watermarkEnabled ?? prev.watermarkEnabled,
+                  geofenceRadius: response.data.data.geofenceRadius ?? prev.geofenceRadius,
+                  timezone: response.data.data.timezone ?? prev.timezone,
+                  dataRetentionDays: response.data.data.dataRetentionDays ?? prev.dataRetentionDays,
+                  notificationTemplate: response.data.data.notificationTemplate ?? prev.notificationTemplate,
+                }
+              : prev
+          )
+        }
         setTurnstileToken(null)
       }
     } catch (error: any) {
@@ -111,8 +144,12 @@ export default function ConfigurationsPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl tracking-tight">Admin Configurations</h1>
           <p className="mt-2 text-sm text-slate-500">
-            Manage system-wide defaults, operational parameters, validation rules, and template settings.
+            Manage system-wide defaults applied to all companies. Use Company Configuration to override settings for a single company.
           </p>
+        </div>
+
+        <div className="mb-6 p-4 rounded-xl border border-cyan-100 bg-cyan-50/50 text-sm text-cyan-900">
+          Changes on this page apply to <strong>every company</strong> when you save. Per-company overrides are managed under Settings → Company Configuration.
         </div>
 
         {/* Messaging Feedback Banner */}
@@ -160,11 +197,11 @@ export default function ConfigurationsPage() {
                 <input
                   type="number"
                   min="1"
-                  value={config?.photo_count_requirement ?? 20}
+                  value={config?.photoCountRequirement ?? 20}
                   onChange={(e) =>
                     setConfig({
                       ...config!,
-                      photo_count_requirement: Number.parseInt(e.target.value) || 0,
+                      photoCountRequirement: Number.parseInt(e.target.value) || 0,
                     })
                   }
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all"
@@ -187,9 +224,9 @@ export default function ConfigurationsPage() {
                   type="number"
                   min="50"
                   max="500"
-                  value={config?.geofence_radius ?? 150}
+                  value={config?.geofenceRadius ?? 150}
                   onChange={(e) =>
-                    setConfig({ ...config!, geofence_radius: Number.parseInt(e.target.value) || 0 })
+                    setConfig({ ...config!, geofenceRadius: Number.parseInt(e.target.value) || 0 })
                   }
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all"
                 />
@@ -208,9 +245,9 @@ export default function ConfigurationsPage() {
                   <label className="relative inline-flex items-center cursor-pointer select-none">
                     <input
                       type="checkbox"
-                      checked={config?.watermark_enabled || false}
+                      checked={config?.watermarkEnabled || false}
                       onChange={(e) =>
-                        setConfig({ ...config!, watermark_enabled: e.target.checked })
+                        setConfig({ ...config!, watermarkEnabled: e.target.checked })
                       }
                       className="sr-only peer"
                     />
@@ -308,9 +345,9 @@ export default function ConfigurationsPage() {
                   type="number"
                   min="30"
                   max="3650"
-                  value={config?.data_retention_days ?? 365}
+                  value={config?.dataRetentionDays ?? 365}
                   onChange={(e) =>
-                    setConfig({ ...config!, data_retention_days: Number.parseInt(e.target.value) || 0 })
+                    setConfig({ ...config!, dataRetentionDays: Number.parseInt(e.target.value) || 0 })
                   }
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all"
                 />
@@ -337,9 +374,9 @@ export default function ConfigurationsPage() {
                 <label className="text-sm font-medium text-slate-700">Notification Template</label>
               </div>
               <textarea
-                value={config?.notification_template || ""}
+                value={config?.notificationTemplate || ""}
                 onChange={(e) =>
-                  setConfig({ ...config!, notification_template: e.target.value })
+                  setConfig({ ...config!, notificationTemplate: e.target.value })
                 }
                 rows={4}
                 placeholder="Custom notification template format..."
