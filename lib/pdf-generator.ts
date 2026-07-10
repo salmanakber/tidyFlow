@@ -672,7 +672,6 @@ export async function generateTaskPDF(
     const fileSize = pdfBuffer.length;
 
     // Store PDF record with checksum in database
-    const prisma = (await import("@/lib/prisma")).default;
     await prisma.pDFRecord.create({
       data: {
         taskId: task.id,
