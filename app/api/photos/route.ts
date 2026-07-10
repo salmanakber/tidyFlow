@@ -61,11 +61,33 @@ export async function POST(request: NextRequest) {
     // Verify task exists
     const task = await prisma.task.findUnique({
       where: { id: Number(taskId) },
-      select: { id: true, companyId: true, assignedUserId: true },
+      select: { id: true, companyId: true, assignedUserId: true, company: { select: { name: true } } },
     })
 
     if (!task) {
       return NextResponse.json({ success: false, message: "Task not found" }, { status: 404 })
+    }
+
+    const adminConfig = await prisma.adminConfiguration.findUnique({
+      where: { companyId: task.companyId },
+      select: { photoCountRequirement: true, watermarkEnabled: true },
+    })
+    const maxPerType = adminConfig?.photoCountRequirement ?? 20
+
+    const existingCount = await prisma.photo.count({
+      where: { taskId: Number(taskId), photoType },
+    })
+
+    if (existingCount >= maxPerType) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Maximum ${maxPerType} ${photoType} photos allowed for this task`,
+          maxPerType,
+          currentCount: existingCount,
+        },
+        { status: 400 }
+      )
     }
 
     const buffer = Buffer.from(await file.arrayBuffer())
@@ -80,9 +102,18 @@ export async function POST(request: NextRequest) {
       console.warn("Could not extract EXIF timestamp:", error)
     }
 
-    // Upload to Cloudinary
+    // Upload to Cloudinary (with optional company watermark)
     const { uploadPhotoToCloudinary } = await import("@/lib/cloudinary")
-    const uploadResult = await uploadPhotoToCloudinary(buffer, Number(taskId), tokenUser.userId, photoType as "before" | "after", timestamp)
+    const watermarkText =
+      adminConfig?.watermarkEnabled && task.company?.name ? task.company.name : null
+    const uploadResult = await uploadPhotoToCloudinary(
+      buffer,
+      Number(taskId),
+      tokenUser.userId,
+      photoType as "before" | "after",
+      timestamp,
+      { watermarkText }
+    )
 
     if (!uploadResult.success || !uploadResult.url) {
       return NextResponse.json(

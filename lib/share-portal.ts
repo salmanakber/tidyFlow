@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { buildTaskProofSummary } from '@/lib/task-proof';
+import { resolvePhotoDisplayUrl } from '@/lib/photo-watermark';
 
 export type SharePortalPhoto = {
   id: number;
@@ -59,7 +60,7 @@ export async function getSharePortalData(
               longitude: true,
             },
           },
-          company: { select: { name: true } },
+          company: { select: { name: true, id: true } },
           photos: {
             orderBy: { takenAt: 'asc' },
             select: {
@@ -104,6 +105,16 @@ export async function getSharePortalData(
   }
 
   const task = shareLink.task;
+
+  const adminConfig = await prisma.adminConfiguration.findUnique({
+    where: { companyId: task.company.id },
+    select: { watermarkEnabled: true },
+  });
+  const watermarkSettings = {
+    watermarkEnabled: adminConfig?.watermarkEnabled ?? false,
+    companyName: task.company.name,
+  };
+
   const photos: SharePortalPhoto[] = task.photos.map((p) => {
     let flags: string[] = [];
     try {
@@ -113,7 +124,7 @@ export async function getSharePortalData(
     }
     return {
       id: p.id,
-      url: p.url,
+      url: resolvePhotoDisplayUrl(p.url, watermarkSettings),
       photoType: p.photoType,
       caption: p.caption,
       aiScore: p.aiPhotoScore?.score ?? null,

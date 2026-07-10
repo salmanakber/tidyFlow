@@ -2,6 +2,8 @@ import { Task, Photo, Note, ChecklistItem, Property, User } from '@prisma/client
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
+import { resolvePhotoDisplayUrl } from '@/lib/photo-watermark';
+import prisma from '@/lib/prisma';
 
 export interface PDFTaskData extends Task {
   property: Property | null;
@@ -50,6 +52,21 @@ export async function generateTaskPDF(
   const startTime = Date.now();
 
   try {
+    const [adminConfig, company] = await Promise.all([
+      prisma.adminConfiguration.findUnique({
+        where: { companyId: task.companyId },
+        select: { watermarkEnabled: true },
+      }),
+      prisma.company.findUnique({
+        where: { id: task.companyId },
+        select: { name: true },
+      }),
+    ]);
+    const watermarkSettings = {
+      watermarkEnabled: adminConfig?.watermarkEnabled ?? false,
+      companyName: company?.name ?? null,
+    };
+
     // Get photos (allow any number - no minimum requirement)
     const beforePhotos = task.photos.filter(p => p.photoType === 'before');
     const afterPhotos = task.photos.filter(p => p.photoType === 'after');
@@ -135,19 +152,18 @@ export async function generateTaskPDF(
       console.warn('Could not configure PDFKit font path:', error);
     }
 
-    // Helper function to normalize Cloudinary URL for PDF embedding
+    // Helper function to normalize Cloudinary URL for PDF embedding (with optional watermark)
     const normalizeCloudinaryUrl = (url: string): string => {
       if (!url) return url;
+
+      const watermarked = resolvePhotoDisplayUrl(url, watermarkSettings, { jpeg: true });
       
       // Ensure HTTPS
-      let normalizedUrl = url.replace(/^http:\/\//, 'https://');
+      let normalizedUrl = watermarked.replace(/^http:\/\//, 'https://');
       
       // If it's a Cloudinary URL, ensure it uses the proper format for image fetching
-      // Cloudinary URLs should work as-is, but we can add transformations if needed
       if (normalizedUrl.includes('res.cloudinary.com')) {
-        // Ensure we're using the image/upload endpoint (not video or raw)
         if (!normalizedUrl.includes('/image/upload/')) {
-          // Try to fix the URL structure
           const cloudNameMatch = normalizedUrl.match(/res\.cloudinary\.com\/([^\/]+)\//);
           if (cloudNameMatch) {
             const cloudName = cloudNameMatch[1];
@@ -157,20 +173,15 @@ export async function generateTaskPDF(
             }
           }
         }
-        
-        // Add format transformation to ensure JPEG format for better PDF compatibility
-        // Only if no format is already specified
-        if (!normalizedUrl.includes('/f_') && !normalizedUrl.includes('/fl_')) {
-          // Insert format transformation before the public ID
+
+        // Add JPEG format if not already specified (skip when watermark transform includes f_jpg)
+        if (!normalizedUrl.includes('/f_') && !normalizedUrl.includes('/fl_') && !normalizedUrl.includes('f_jpg')) {
           const parts = normalizedUrl.split('/image/upload/');
           if (parts.length === 2) {
             const publicIdPart = parts[1];
-            // Check if there are already transformations
             if (publicIdPart.includes(',')) {
-              // Has transformations, add format
               normalizedUrl = `${parts[0]}/image/upload/f_jpg,${publicIdPart}`;
             } else {
-              // No transformations, add format
               normalizedUrl = `${parts[0]}/image/upload/f_jpg/${publicIdPart}`;
             }
           }

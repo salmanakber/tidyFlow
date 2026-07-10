@@ -61,6 +61,7 @@ export async function uploadPhotoToCloudinary(
         x: 24,
         y: 24,
       });
+      transformations.push({ flags: 'layer_apply' });
     }
 
     const result = await new Promise<any>((resolve, reject) => {
