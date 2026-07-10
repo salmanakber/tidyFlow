@@ -20,16 +20,24 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await prisma.adminConfiguration.findUnique({ where: { companyId } });
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { name: true },
+  });
+
   return NextResponse.json({
     success: true,
-    data: config || {
-      companyId,
-      photoCountRequirement: 20,
-      watermarkEnabled: false,
-      geofenceRadius: 150,
-      timezone: 'UTC',
-      currency: 'GBP',
-    },
+    data: config
+      ? { ...config, companyName: company?.name ?? null }
+      : {
+          companyId,
+          companyName: company?.name ?? null,
+          photoCountRequirement: 20,
+          watermarkEnabled: false,
+          geofenceRadius: 150,
+          timezone: 'UTC',
+          currency: 'GBP',
+        },
   });
 }
 

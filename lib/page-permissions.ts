@@ -28,6 +28,7 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   
   // Settings
   '/admin/settings': PERMISSIONS.SETTINGS_VIEW,
+  '/admin/company-config': PERMISSIONS.SETTINGS_VIEW,
   
   // Reports
   '/admin/reporting': PERMISSIONS.REPORTS_VIEW,

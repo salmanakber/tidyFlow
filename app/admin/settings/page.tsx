@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { 
   CreditCard, 
   Receipt, 
@@ -19,7 +20,10 @@ import {
   EyeOff,
   CheckCircle2,
   AlertCircle,
-  Loader2
+  Loader2,
+  Camera,
+  SlidersHorizontal,
+  ChevronRight
 } from 'lucide-react';
 import { PERMISSIONS } from '@/lib/permissions';
 import { usePermissions } from '@/lib/hooks/usePermissions';
@@ -253,6 +257,29 @@ export default function AdminSettingsPage() {
             System Settings
           </h1>
           <p className="mt-1 text-xs text-gray-500">Global configuration</p>
+        </div>
+        <div className="px-4 pt-4 pb-2 border-b border-gray-100 space-y-1">
+          <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
+            Configuration pages
+          </p>
+          <Link
+            href="/admin/company-config"
+            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all"
+          >
+            <Camera size={18} className="text-gray-400" />
+            <span className="flex-1">Company Configuration</span>
+            <ChevronRight size={16} className="text-gray-300" />
+          </Link>
+          {hasPermission(PERMISSIONS.SYSTEM_ADMIN) && (
+            <Link
+              href="/admin/control-center/configurations"
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all"
+            >
+              <SlidersHorizontal size={18} className="text-gray-400" />
+              <span className="flex-1">Admin Configurations</span>
+              <ChevronRight size={16} className="text-gray-300" />
+            </Link>
+          )}
         </div>
         <nav className="p-4 space-y-1">
           {CATEGORIES.map((cat) => (

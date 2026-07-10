@@ -30,7 +30,9 @@ import {
   Sparkles,
   Shield,
   MapPin,
-  CreditCard
+  CreditCard,
+  Camera,
+  SlidersHorizontal
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 
@@ -330,6 +332,20 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       icon: Settings,
       permission: "settings.view",
       roles: null
+    },
+    {
+      name: "Company Configuration",
+      href: "/admin/company-config",
+      icon: Camera,
+      permission: "settings.view",
+      roles: ["OWNER", "COMPANY_ADMIN", "MANAGER", "SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"],
+    },
+    {
+      name: "Admin Configurations",
+      href: "/admin/control-center/configurations",
+      icon: SlidersHorizontal,
+      permission: "system.admin",
+      roles: ["SUPER_ADMIN", "DEVELOPER", "OWNER", "ADMIN_UNIQUE"],
     },
   ]
   
