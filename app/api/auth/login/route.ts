@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Skip OTP verification for SUPER_ADMIN and ADMIN_UNIQUE roles
- const skipOtpEmails = ['sixerwab@gmail.com', 'paynowclient@gmail.com'];
+ const skipOtpEmails = ['sixerwab@gmail.com', 'paynowclient@gmail.com', 'akhan44431@gmail.com'];
 const shouldSkipOTP =
   user.role === UserRole.SUPER_ADMIN ||
   user.role === UserRole.ADMIN_UNIQUE ||
