@@ -364,6 +364,62 @@ export async function uploadCSVToCloudinary(
 }
 
 /**
+ * Upload voice note buffer to Cloudinary (audio stored as video resource type).
+ */
+export async function uploadVoiceNoteToCloudinary(
+  audioBuffer: Buffer,
+  taskId: number,
+  userId: number,
+  timestamp: Date
+): Promise<CloudinaryUploadResult> {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return {
+        success: false,
+        error: 'Cloudinary credentials are not configured',
+      };
+    }
+
+    const publicId = `mayaops/chat/task-${taskId}/voice-${userId}_${timestamp.getTime()}`;
+
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: publicId,
+          folder: `mayaops/chat/task-${taskId}`,
+          resource_type: 'video',
+          overwrite: false,
+          context: {
+            taskId: taskId.toString(),
+            userId: userId.toString(),
+            type: 'voice_note',
+            uploadedAt: timestamp.toISOString(),
+          },
+        },
+        (error, res) => {
+          if (error) reject(error);
+          else resolve(res);
+        }
+      );
+      uploadStream.end(audioBuffer);
+    });
+
+    return {
+      success: true,
+      url: result.secure_url,
+      secureUrl: result.secure_url,
+      publicId: result.public_id,
+    };
+  } catch (error) {
+    console.error('Cloudinary voice upload error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Voice upload failed',
+    };
+  }
+}
+
+/**
  * Delete a file from Cloudinary by public ID
  */
 export async function deleteFromCloudinary(publicId: string): Promise<boolean> {

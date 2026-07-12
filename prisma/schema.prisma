@@ -118,6 +118,9 @@ model Company {
   clientInvoices             ClientInvoice[]
   invoiceSettings            CompanyInvoiceSettings?
   googleSheetConnection      CompanyGoogleSheet?
+  quickBooksConnection       QuickBooksConnection?
+  quickBooksSyncLogs         QuickBooksSyncLog[]
+  quickBooksCustomerMaps     QuickBooksCustomerMap[]
 
   @@map("companies")
 }
@@ -1361,6 +1364,11 @@ model ClientInvoice {
   dueDate       DateTime? @map("due_date")
   aiGenerated   Boolean   @default(false) @map("ai_generated")
   createdById   Int?      @map("created_by_id")
+  quickbooksInvoiceId  String?   @map("quickbooks_invoice_id")
+  quickbooksDocNumber  String?   @map("quickbooks_doc_number")
+  quickbooksSyncStatus String?   @map("quickbooks_sync_status") // pending, synced, failed
+  quickbooksSyncedAt   DateTime? @map("quickbooks_synced_at")
+  quickbooksSyncError  String?   @map("quickbooks_sync_error") @db.Text
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -1371,6 +1379,7 @@ model ClientInvoice {
   @@index([companyId])
   @@index([taskId])
   @@index([status])
+  @@index([quickbooksSyncStatus])
   @@map("client_invoices")
 }
 
@@ -1431,4 +1440,57 @@ model CompanyGoogleSheet {
 
   @@index([spreadsheetId])
   @@map("company_google_sheets")
+}
+
+// QuickBooks Online OAuth connection (one per company)
+model QuickBooksConnection {
+  id              Int       @id @default(autoincrement())
+  companyId       Int       @unique @map("company_id")
+  realmId         String    @map("realm_id")
+  accessTokenEnc  String    @map("access_token_enc") @db.Text
+  refreshTokenEnc String    @map("refresh_token_enc") @db.Text
+  accessTokenExp  DateTime  @map("access_token_exp")
+  refreshTokenExp DateTime? @map("refresh_token_exp")
+  qbCompanyName   String?   @map("qb_company_name")
+  autoSyncOnSend  Boolean   @default(true) @map("auto_sync_on_send")
+  autoSyncOnPaid  Boolean   @default(true) @map("auto_sync_on_paid")
+  connectedById   Int?      @map("connected_by_id")
+  connectedAt     DateTime  @default(now()) @map("connected_at")
+  lastSyncAt      DateTime? @map("last_sync_at")
+  invoicesSynced  Int       @default(0) @map("invoices_synced")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("quickbooks_connections")
+}
+
+model QuickBooksCustomerMap {
+  id                   Int    @id @default(autoincrement())
+  companyId            Int    @map("company_id")
+  clientName           String @map("client_name")
+  clientEmail          String? @map("client_email")
+  quickbooksCustomerId String @map("quickbooks_customer_id")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, clientName, clientEmail])
+  @@index([companyId])
+  @@map("quickbooks_customer_maps")
+}
+
+model QuickBooksSyncLog {
+  id        Int      @id @default(autoincrement())
+  companyId Int      @map("company_id")
+  invoiceId Int?     @map("invoice_id")
+  action    String   // sync_invoice, mark_paid, disconnect
+  status    String   // success, failed
+  message   String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("quickbooks_sync_logs")
 }

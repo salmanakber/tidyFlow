@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { maybeAutoSyncInvoice } from '@/lib/quickbooks';
 
 export async function GET(
   _request: NextRequest,
@@ -54,6 +55,10 @@ export async function PATCH(
       ...(status ? { status, ...(status === 'paid' ? { paidAt: new Date() } : {}) } : {}),
     },
   });
+
+  if (status === 'paid') {
+    await maybeAutoSyncInvoice(invoice.companyId, invoice.id, 'paid');
+  }
 
   return NextResponse.json({ success: true, data: updated });
 }

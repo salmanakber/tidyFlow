@@ -49,6 +49,10 @@ export async function GET(request: NextRequest) {
       totalAmount: Number(inv.totalAmount),
       taxRate: Number(inv.taxRate),
       lineItems: JSON.parse(inv.lineItems) as InvoiceLineItem[],
+      quickbooksSyncStatus: inv.quickbooksSyncStatus,
+      quickbooksSyncedAt: inv.quickbooksSyncedAt?.toISOString() ?? null,
+      quickbooksDocNumber: inv.quickbooksDocNumber,
+      quickbooksSyncError: inv.quickbooksSyncError,
     })),
   });
 }

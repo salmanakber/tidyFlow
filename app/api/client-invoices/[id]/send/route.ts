@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { sendEmail } from '@/lib/email';
+import { maybeAutoSyncInvoice } from '@/lib/quickbooks';
 
 export async function POST(
   request: NextRequest,
@@ -43,6 +44,8 @@ export async function POST(
       data: { status: invoice.status === 'draft' ? 'sent' : invoice.status, sentAt: new Date() },
     });
 
+    await maybeAutoSyncInvoice(invoice.companyId, invoice.id, 'send');
+
     return NextResponse.json({ success: true, data: { channel: 'email', sent: true } });
   }
 
@@ -58,6 +61,8 @@ export async function POST(
     where: { id: invoice.id },
     data: { status: invoice.status === 'draft' ? 'sent' : invoice.status, sentAt: new Date() },
   });
+
+  await maybeAutoSyncInvoice(invoice.companyId, invoice.id, 'send');
 
   return NextResponse.json({ success: true, data: { channel: 'whatsapp', url: whatsappUrl } });
 }
