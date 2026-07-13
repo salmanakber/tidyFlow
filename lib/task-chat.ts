@@ -68,10 +68,14 @@ export function parseVoiceMessage(message: string): {
 export function displayUserName(user: {
   firstName: string | null;
   lastName: string | null;
-  email: string;
+  email?: string | null;
+  id?: number;
 }) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-  return name || user.email;
+  if (name) return name;
+  if (user.email) return user.email;
+  if (user.id != null) return `User #${user.id}`;
+  return 'Unknown';
 }
 
 export function isCompanyChatStaff(role: UserRole | string): boolean {
