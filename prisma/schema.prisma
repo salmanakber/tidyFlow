@@ -77,6 +77,7 @@ model User {
   acknowledgedSosAlerts   SOSAlert[]        @relation("SOSAcknowledgedBy")
   reviewedPhotoScores     AIPhotoScore[]    @relation("PhotoScoreReviewer")
   clientFeedbackReceived  ClientFeedback[]  @relation("CleanerClientFeedback")
+  complianceUploads       ComplianceDocument[] @relation("ComplianceUploads")
 
   @@index([email])
   @@index([companyId])
@@ -122,6 +123,7 @@ model Company {
   quickBooksSyncLogs         QuickBooksSyncLog[]
   quickBooksCustomerMaps     QuickBooksCustomerMap[]
   quickBooksVendorMaps       QuickBooksVendorMap[]
+  complianceDocuments        ComplianceDocument[]
 
   @@map("companies")
 }
@@ -462,6 +464,29 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model ComplianceDocument {
+  id         Int       @id @default(autoincrement())
+  companyId  Int       @map("company_id")
+  title      String
+  docType    String    @map("doc_type")
+  fileUrl    String?   @map("file_url") @db.Text
+  fileName   String?   @map("file_name")
+  status     String    @default("pending")
+  expiresAt  DateTime? @map("expires_at")
+  notes      String?   @db.Text
+  uploadedBy Int?      @map("uploaded_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  company  Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploader User?   @relation("ComplianceUploads", fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([docType])
+  @@index([status])
+  @@map("compliance_documents")
 }
 
 // Admin configurations

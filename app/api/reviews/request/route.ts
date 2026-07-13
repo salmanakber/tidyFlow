@@ -5,6 +5,14 @@ import crypto from 'crypto';
 import { sendSMS } from '@/lib/sms';
 import { buildReviewLink, getTaskCleanerIds } from '@/lib/reviews';
 
+const REVIEW_ELIGIBLE_STATUSES = [
+  'SUBMITTED',
+  'QA_REVIEW',
+  'APPROVED',
+  'COMPLETED',
+  'ARCHIVED',
+] as const;
+
 async function loadTaskForReview(taskId: number, companyId?: number | null) {
   return prisma.task.findFirst({
     where: {
@@ -117,6 +125,16 @@ export async function POST(request: NextRequest) {
   const task = await loadTaskForReview(Number(taskId), companyId);
   if (!task) {
     return NextResponse.json({ success: false, message: 'Task not found' }, { status: 404 });
+  }
+
+  if (!REVIEW_ELIGIBLE_STATUSES.includes(task.status as (typeof REVIEW_ELIGIBLE_STATUSES)[number])) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Review links are available after the task is submitted',
+      },
+      { status: 400 }
+    );
   }
 
   const existing = task.reviewRequests.find(

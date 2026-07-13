@@ -474,3 +474,60 @@ export function getCloudinaryUrl(
   return `https://res.cloudinary.com/${cloudName}/image/upload/${transformationString}${publicId}`;
 }
 
+/** Upload compliance PDF/image documents to Cloudinary */
+export async function uploadDocumentToCloudinary(
+  fileBuffer: Buffer,
+  companyId: number,
+  docType: string,
+  fileName: string,
+  mimeType?: string | null
+): Promise<CloudinaryUploadResult> {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return {
+        success: false,
+        error: 'Cloudinary credentials are not configured',
+      };
+    }
+
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+    const resourceType = mimeType?.startsWith('image/') ? 'image' : 'raw';
+    const publicId = `mayaops/compliance/company-${companyId}/${docType}/${Date.now()}_${safeName}`;
+
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: publicId,
+          folder: `mayaops/compliance/company-${companyId}/${docType}`,
+          resource_type: resourceType,
+          overwrite: false,
+          context: {
+            companyId: companyId.toString(),
+            docType,
+            fileName: safeName,
+          },
+        },
+        (error, uploadResult) => {
+          if (error) reject(error);
+          else resolve(uploadResult);
+        }
+      );
+
+      uploadStream.end(fileBuffer);
+    });
+
+    return {
+      success: true,
+      url: result.secure_url,
+      secureUrl: result.secure_url,
+      publicId: result.public_id,
+    };
+  } catch (error) {
+    console.error('Cloudinary document upload error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Cloudinary upload failed',
+    };
+  }
+}
+

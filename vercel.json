@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/expire-device-tokens",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/rebook-alerts",
+      "schedule": "0 9 * * *"
     }
   ],
   "env": {
