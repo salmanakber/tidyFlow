@@ -121,6 +121,7 @@ model Company {
   quickBooksConnection       QuickBooksConnection?
   quickBooksSyncLogs         QuickBooksSyncLog[]
   quickBooksCustomerMaps     QuickBooksCustomerMap[]
+  quickBooksVendorMaps       QuickBooksVendorMap[]
 
   @@map("companies")
 }
@@ -864,6 +865,11 @@ model PayrollRecord {
   bankName            String?   @map("bank_name")
   bankSortCode        String?   @map("bank_sort_code")
   paymentMethod       String?   @map("payment_method") // "bank_transfer", "cash", "cheque"
+  quickbooksBillId    String?   @map("quickbooks_bill_id")
+  quickbooksDocNumber String?   @map("quickbooks_doc_number")
+  quickbooksSyncStatus String?  @map("quickbooks_sync_status")
+  quickbooksSyncedAt  DateTime? @map("quickbooks_synced_at")
+  quickbooksSyncError String?   @map("quickbooks_sync_error") @db.Text
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1306,6 +1312,8 @@ model SubscriptionPlanLimit {
   aiInvoiceAssist      Boolean  @default(false) @map("ai_invoice_assist")
   maxPhotoVerificationsPerMonth Int @default(100) @map("max_photo_verifications_per_month")
   maxPdfGenerationsPerMonth     Int @default(50) @map("max_pdf_generations_per_month")
+  googleSheetsEnabled           Boolean @default(false) @map("google_sheets_enabled")
+  quickbooksEnabled             Boolean @default(false) @map("quickbooks_enabled")
   monthlyPrice                  Decimal @default(55.00) @map("monthly_price") @db.Decimal(10, 2)
   updatedAt            DateTime @updatedAt @map("updated_at")
 
@@ -1454,10 +1462,12 @@ model QuickBooksConnection {
   qbCompanyName   String?   @map("qb_company_name")
   autoSyncOnSend  Boolean   @default(true) @map("auto_sync_on_send")
   autoSyncOnPaid  Boolean   @default(true) @map("auto_sync_on_paid")
+  autoSyncOnPayroll Boolean @default(true) @map("auto_sync_on_payroll")
   connectedById   Int?      @map("connected_by_id")
   connectedAt     DateTime  @default(now()) @map("connected_at")
   lastSyncAt      DateTime? @map("last_sync_at")
   invoicesSynced  Int       @default(0) @map("invoices_synced")
+  payrollSynced   Int       @default(0) @map("payroll_synced")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -1484,7 +1494,8 @@ model QuickBooksSyncLog {
   id        Int      @id @default(autoincrement())
   companyId Int      @map("company_id")
   invoiceId Int?     @map("invoice_id")
-  action    String   // sync_invoice, mark_paid, disconnect
+  payrollRecordId Int? @map("payroll_record_id")
+  action    String   // sync_invoice, sync_payroll, mark_paid, disconnect
   status    String   // success, failed
   message   String?  @db.Text
   createdAt DateTime @default(now()) @map("created_at")
@@ -1493,4 +1504,18 @@ model QuickBooksSyncLog {
 
   @@index([companyId, createdAt])
   @@map("quickbooks_sync_logs")
+}
+
+model QuickBooksVendorMap {
+  id                 Int    @id @default(autoincrement())
+  companyId          Int    @map("company_id")
+  userId             Int    @map("user_id")
+  vendorName         String @map("vendor_name")
+  quickbooksVendorId String @map("quickbooks_vendor_id")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([companyId])
+  @@map("quickbooks_vendor_maps")
 }

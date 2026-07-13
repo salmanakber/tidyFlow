@@ -20,6 +20,8 @@ export interface PlanLimits {
   aiInvoiceAssist: boolean;
   maxPhotoVerificationsPerMonth: number;
   maxPdfGenerationsPerMonth: number;
+  googleSheetsEnabled: boolean;
+  quickbooksEnabled: boolean;
 }
 
 export interface PlanUsageSnapshot {
@@ -34,6 +36,8 @@ export interface PlanUsageSnapshot {
     invoices: boolean;
     aiInvoiceAssist: boolean;
     pdfGeneration: boolean;
+    googleSheets: boolean;
+    quickbooks: boolean;
   };
   planIncludes: {
     aiPhoto: boolean;
@@ -42,6 +46,8 @@ export interface PlanUsageSnapshot {
     aiTaskSuggestions: boolean;
     invoices: boolean;
     aiInvoiceAssist: boolean;
+    googleSheets: boolean;
+    quickbooks: boolean;
   };
   remaining: {
     aiThisMonth: number;
@@ -97,6 +103,8 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInvoiceAssist: false,
     maxPhotoVerificationsPerMonth: 30,
     maxPdfGenerationsPerMonth: 20,
+    googleSheetsEnabled: false,
+    quickbooksEnabled: false,
   },
   STANDARD: {
     tier: 'STANDARD',
@@ -115,6 +123,8 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInvoiceAssist: true,
     maxPhotoVerificationsPerMonth: 200,
     maxPdfGenerationsPerMonth: 100,
+    googleSheetsEnabled: true,
+    quickbooksEnabled: false,
   },
   PREMIUM: {
     tier: 'PREMIUM',
@@ -133,6 +143,8 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInvoiceAssist: true,
     maxPhotoVerificationsPerMonth: 99999,
     maxPdfGenerationsPerMonth: 99999,
+    googleSheetsEnabled: true,
+    quickbooksEnabled: true,
   },
 };
 
@@ -215,6 +227,10 @@ export async function getAllSubscriptionPlansForAdmin(): Promise<PlanLimits[]> {
       maxPdfGenerationsPerMonth:
         (row as { maxPdfGenerationsPerMonth?: number }).maxPdfGenerationsPerMonth ??
         fallback.maxPdfGenerationsPerMonth,
+      googleSheetsEnabled:
+        (row as { googleSheetsEnabled?: boolean }).googleSheetsEnabled ?? fallback.googleSheetsEnabled,
+      quickbooksEnabled:
+        (row as { quickbooksEnabled?: boolean }).quickbooksEnabled ?? fallback.quickbooksEnabled,
     };
   });
 }
@@ -250,6 +266,8 @@ export function serializePublicPricingPlan(plan: PlanLimits, trialDays?: number)
       aiTaskSuggestions: plan.aiTaskSuggestions,
       invoicesEnabled: plan.invoicesEnabled,
       aiInvoiceAssist: plan.aiInvoiceAssist,
+      googleSheetsEnabled: plan.googleSheetsEnabled,
+      quickbooksEnabled: plan.quickbooksEnabled,
     },
     ...(trialDays !== undefined ? { trialDays } : {}),
   };
@@ -284,6 +302,9 @@ export async function upsertSubscriptionPlanTier(
       maxPhotoVerificationsPerMonth: Number(fields.maxPhotoVerificationsPerMonth ?? 100),
       maxPdfGenerationsPerMonth: Number(fields.maxPdfGenerationsPerMonth ?? 50),
       monthlyPrice: fields.monthlyPrice != null ? Number(fields.monthlyPrice) : 55,
+      googleSheetsEnabled:
+        fields.googleSheetsEnabled !== undefined ? !!fields.googleSheetsEnabled : false,
+      quickbooksEnabled: fields.quickbooksEnabled !== undefined ? !!fields.quickbooksEnabled : false,
     },
     update: {
       ...(fields.label !== undefined ? { label: String(fields.label) } : {}),
@@ -315,6 +336,12 @@ export async function upsertSubscriptionPlanTier(
         : {}),
       ...(fields.maxPdfGenerationsPerMonth !== undefined
         ? { maxPdfGenerationsPerMonth: Number(fields.maxPdfGenerationsPerMonth) }
+        : {}),
+      ...(fields.googleSheetsEnabled !== undefined
+        ? { googleSheetsEnabled: !!fields.googleSheetsEnabled }
+        : {}),
+      ...(fields.quickbooksEnabled !== undefined
+        ? { quickbooksEnabled: !!fields.quickbooksEnabled }
         : {}),
       ...(fields.monthlyPrice !== undefined ? { monthlyPrice: Number(fields.monthlyPrice) } : {}),
     },
@@ -352,6 +379,10 @@ export async function getPlanLimits(tier?: string | null): Promise<PlanLimits> {
     maxPdfGenerationsPerMonth:
       (row as { maxPdfGenerationsPerMonth?: number }).maxPdfGenerationsPerMonth ??
       fallback.maxPdfGenerationsPerMonth,
+    googleSheetsEnabled:
+      (row as { googleSheetsEnabled?: boolean }).googleSheetsEnabled ?? fallback.googleSheetsEnabled,
+    quickbooksEnabled:
+      (row as { quickbooksEnabled?: boolean }).quickbooksEnabled ?? fallback.quickbooksEnabled,
   };
 }
 
@@ -593,6 +624,32 @@ export async function requireInvoiceFeature(companyId: number) {
   return checkPlanLimit(companyId, 'invoice');
 }
 
+export async function requireGoogleSheetsFeature(companyId: number) {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+  const plan = await getCompanyPlan(companyId);
+  if (!plan?.limits.googleSheetsEnabled) {
+    return {
+      allowed: false,
+      message: `${plan?.limits.label ?? 'Your'} plan does not include Google Sheets sync. Upgrade to enable.`,
+    };
+  }
+  return { allowed: true };
+}
+
+export async function requireQuickBooksFeature(companyId: number) {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+  const plan = await getCompanyPlan(companyId);
+  if (!plan?.limits.quickbooksEnabled) {
+    return {
+      allowed: false,
+      message: `${plan?.limits.label ?? 'Your'} plan does not include QuickBooks integration. Upgrade to enable.`,
+    };
+  }
+  return { allowed: true };
+}
+
 export async function logAIUsage(companyId: number, feature: string) {
   await prisma.aIUsageLog.create({ data: { companyId, feature } }).catch(() => {});
 
@@ -681,6 +738,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
       invoices: limits.invoicesEnabled && !invoicesAtLimit && subscriptionActive,
       aiInvoiceAssist: limits.aiInvoiceAssist && !aiAtLimit && subscriptionActive,
       pdfGeneration: !pdfAtLimit && subscriptionActive,
+      googleSheets: limits.googleSheetsEnabled && subscriptionActive,
+      quickbooks: limits.quickbooksEnabled && subscriptionActive,
     },
     planIncludes: {
       aiPhoto: limits.aiPhotoAnalysis,
@@ -689,6 +748,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
       aiTaskSuggestions: limits.aiTaskSuggestions,
       invoices: limits.invoicesEnabled,
       aiInvoiceAssist: limits.aiInvoiceAssist,
+      googleSheets: limits.googleSheetsEnabled,
+      quickbooks: limits.quickbooksEnabled,
     },
     remaining: {
       aiThisMonth: Math.max(0, limits.aiRequestsPerMonth - aiUsed),

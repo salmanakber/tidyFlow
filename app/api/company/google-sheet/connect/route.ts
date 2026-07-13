@@ -5,6 +5,7 @@ import {
   getCompanySheetConnection,
   registerSheetWatch,
 } from '@/lib/google-sheets';
+import { requireGoogleSheetsFeature } from '@/lib/subscription';
 import { UserRole } from '@prisma/client';
 
 export async function POST(request: NextRequest) {
@@ -19,6 +20,11 @@ export async function POST(request: NextRequest) {
   const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
   if (!companyId) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
+  }
+
+  const planFeature = await requireGoogleSheetsFeature(companyId);
+  if (!planFeature.allowed) {
+    return NextResponse.json({ success: false, message: planFeature.message }, { status: 403 });
   }
 
   try {

@@ -22,6 +22,8 @@ interface PlanLimit {
   aiInvoiceAssist: boolean
   maxPhotoVerificationsPerMonth: number
   maxPdfGenerationsPerMonth: number
+  googleSheetsEnabled: boolean
+  quickbooksEnabled: boolean
 }
 
 interface CompanyRow {
@@ -148,6 +150,8 @@ export default function SubscriptionAdminPage() {
                     ["aiTaskSuggestions", "Task suggestions"],
                     ["invoicesEnabled", "Client invoices"],
                     ["aiInvoiceAssist", "AI invoice assist"],
+                    ["googleSheetsEnabled", "Google Sheets sync"],
+                    ["quickbooksEnabled", "QuickBooks integration"],
                   ] as const
                 ).map(([field, label]) => (
                   <label key={field} className="flex items-center gap-2 text-sm">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, resolveCompanyId, isManagerPlusRole } from '@/lib/rbac';
-import { syncClientInvoiceToQuickBooks } from '@/lib/quickbooks';
 import { requireQuickBooksFeature } from '@/lib/subscription';
+import { syncPayrollToQuickBooks } from '@/lib/quickbooks';
 import prisma from '@/lib/prisma';
 import { UserRole } from '@prisma/client';
 
@@ -20,17 +20,17 @@ export async function POST(
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
   }
 
-  const planFeature = await requireQuickBooksFeature(companyId);
-  if (!planFeature.allowed) {
-    return NextResponse.json({ success: false, message: planFeature.message }, { status: 403 });
+  const feature = await requireQuickBooksFeature(companyId);
+  if (!feature.allowed) {
+    return NextResponse.json({ success: false, message: feature.message }, { status: 403 });
   }
 
-  const invoiceId = Number(params.id);
-  const invoice = await prisma.clientInvoice.findFirst({
-    where: { id: invoiceId, companyId },
+  const payrollId = Number(params.id);
+  const record = await prisma.payrollRecord.findFirst({
+    where: { id: payrollId, companyId },
   });
-  if (!invoice) {
-    return NextResponse.json({ success: false, message: 'Invoice not found' }, { status: 404 });
+  if (!record) {
+    return NextResponse.json({ success: false, message: 'Payroll record not found' }, { status: 404 });
   }
 
   const conn = await prisma.quickBooksConnection.findUnique({ where: { companyId } });
@@ -39,13 +39,13 @@ export async function POST(
   }
 
   try {
-    const result = await syncClientInvoiceToQuickBooks(companyId, invoiceId);
-    const updated = await prisma.clientInvoice.findUnique({ where: { id: invoiceId } });
+    const result = await syncPayrollToQuickBooks(companyId, payrollId);
+    const updated = await prisma.payrollRecord.findUnique({ where: { id: payrollId } });
     return NextResponse.json({
       success: true,
       data: {
         ...result,
-        invoice: updated
+        payroll: updated
           ? {
               id: updated.id,
               quickbooksSyncStatus: updated.quickbooksSyncStatus,

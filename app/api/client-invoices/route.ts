@@ -223,11 +223,30 @@ export async function POST(request: NextRequest) {
       data: { pdfUrl, status: 'draft' },
     });
 
+    const syncToQuickbooks = body.syncToQuickbooks === true;
+    if (syncToQuickbooks) {
+      try {
+        const { requireQuickBooksFeature } = await import('@/lib/subscription');
+        const qbPlan = await requireQuickBooksFeature(companyId);
+        if (qbPlan.allowed) {
+          const conn = await prisma.quickBooksConnection.findUnique({ where: { companyId } });
+          if (conn) {
+            const { syncClientInvoiceToQuickBooks } = await import('@/lib/quickbooks');
+            await syncClientInvoiceToQuickBooks(companyId, updated.id);
+          }
+        }
+      } catch (e) {
+        console.error('QuickBooks sync on create failed:', e);
+      }
+    }
+
+    const finalInvoice = await prisma.clientInvoice.findUnique({ where: { id: updated.id } });
+
     return NextResponse.json(
       {
         success: true,
         data: {
-          ...updated,
+          ...(finalInvoice ?? updated),
           lineItems,
           aiGenerated: !!canUseAI,
           subtotal: Number(updated.subtotal),

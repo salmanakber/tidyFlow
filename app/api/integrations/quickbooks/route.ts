@@ -5,8 +5,10 @@ import {
   disconnectQuickBooks,
   getQuickBooksStatus,
   syncClientInvoiceToQuickBooks,
+  syncPayrollToQuickBooks,
   updateQuickBooksSettings,
 } from '@/lib/quickbooks';
+import { requireQuickBooksFeature } from '@/lib/subscription';
 import prisma from '@/lib/prisma';
 
 function integrationForbidden(role: string) {
@@ -38,8 +40,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
   }
 
+  const planFeature = await requireQuickBooksFeature(companyId);
   const status = await getQuickBooksStatus(companyId);
-  return NextResponse.json({ success: true, data: status });
+  return NextResponse.json({
+    success: true,
+    data: {
+      ...status,
+      planAllowed: planFeature.allowed,
+      planMessage: planFeature.allowed ? undefined : planFeature.message,
+      brandingLogoUrl: process.env.NEXT_PUBLIC_API_URL
+        ? `${process.env.NEXT_PUBLIC_API_URL}/branding/tidyflow-oauth-icon.png`
+        : '/branding/tidyflow-oauth-icon.png',
+    },
+  });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -54,10 +67,16 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
   }
 
+  const planFeature = await requireQuickBooksFeature(companyId);
+  if (!planFeature.allowed) {
+    return NextResponse.json({ success: false, message: planFeature.message }, { status: 403 });
+  }
+
   const body = await request.json();
-  const { autoSyncOnSend, autoSyncOnPaid } = body as {
+  const { autoSyncOnSend, autoSyncOnPaid, autoSyncOnPayroll } = body as {
     autoSyncOnSend?: boolean;
     autoSyncOnPaid?: boolean;
+    autoSyncOnPayroll?: boolean;
   };
 
   const conn = await prisma.quickBooksConnection.findUnique({ where: { companyId } });
@@ -68,6 +87,7 @@ export async function PATCH(request: NextRequest) {
   await updateQuickBooksSettings(companyId, {
     ...(typeof autoSyncOnSend === 'boolean' ? { autoSyncOnSend } : {}),
     ...(typeof autoSyncOnPaid === 'boolean' ? { autoSyncOnPaid } : {}),
+    ...(typeof autoSyncOnPayroll === 'boolean' ? { autoSyncOnPayroll } : {}),
   });
 
   const status = await getQuickBooksStatus(companyId);
@@ -103,18 +123,64 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
   }
 
+  const planFeature = await requireQuickBooksFeature(companyId);
+  if (!planFeature.allowed) {
+    return NextResponse.json({ success: false, message: planFeature.message }, { status: 403 });
+  }
+
   const conn = await prisma.quickBooksConnection.findUnique({ where: { companyId } });
   if (!conn) {
     return NextResponse.json({ success: false, message: 'QuickBooks not connected' }, { status: 400 });
   }
 
   const body = await request.json().catch(() => ({}));
-  const { invoiceId, syncPending } = body as { invoiceId?: number; syncPending?: boolean };
+  const { invoiceId, syncPending, invoiceIds, syncPayrollIds } = body as {
+    invoiceId?: number;
+    syncPending?: boolean;
+    invoiceIds?: number[];
+    syncPayrollIds?: number[];
+  };
 
   try {
     if (invoiceId) {
       const result = await syncClientInvoiceToQuickBooks(companyId, Number(invoiceId));
       return NextResponse.json({ success: true, data: result });
+    }
+
+    if (Array.isArray(invoiceIds) && invoiceIds.length) {
+      const results: Array<{ invoiceId: number; ok: boolean; error?: string }> = [];
+      for (const id of invoiceIds.slice(0, 50)) {
+        try {
+          await syncClientInvoiceToQuickBooks(companyId, Number(id));
+          results.push({ invoiceId: Number(id), ok: true });
+        } catch (e) {
+          results.push({
+            invoiceId: Number(id),
+            ok: false,
+            error: e instanceof Error ? e.message : 'Failed',
+          });
+        }
+      }
+      const status = await getQuickBooksStatus(companyId);
+      return NextResponse.json({ success: true, data: { results, status } });
+    }
+
+    if (Array.isArray(syncPayrollIds) && syncPayrollIds.length) {
+      const results: Array<{ payrollRecordId: number; ok: boolean; error?: string }> = [];
+      for (const id of syncPayrollIds.slice(0, 50)) {
+        try {
+          await syncPayrollToQuickBooks(companyId, Number(id));
+          results.push({ payrollRecordId: Number(id), ok: true });
+        } catch (e) {
+          results.push({
+            payrollRecordId: Number(id),
+            ok: false,
+            error: e instanceof Error ? e.message : 'Failed',
+          });
+        }
+      }
+      const status = await getQuickBooksStatus(companyId);
+      return NextResponse.json({ success: true, data: { results, status } });
     }
 
     if (syncPending) {
@@ -151,7 +217,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, data: { results, status } });
     }
 
-    return NextResponse.json({ success: false, message: 'invoiceId or syncPending required' }, { status: 400 });
+    return NextResponse.json(
+      { success: false, message: 'invoiceId, invoiceIds, syncPayrollIds, or syncPending required' },
+      { status: 400 }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Sync failed';
     return NextResponse.json({ success: false, message }, { status: 500 });

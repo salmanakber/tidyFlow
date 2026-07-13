@@ -164,7 +164,7 @@ export async function POST(
       notificationMessage = `Your payroll for the period ${new Date(payrollRecord.periodStart).toLocaleDateString('en-GB')} - ${new Date(payrollRecord.periodEnd).toLocaleDateString('en-GB')} has been approved. Amount: £${Number(payrollRecord.totalAmount).toFixed(2)}`;
     } else if (status === 'paid') {
       notificationTitle = 'Payment Received';
-      notificationMessage = `Your payment of £${Number(payrollRecord.totalAmount).toFixed(2)} has been processed for the period ${new Date(payrollRecord.periodStart).toLocaleDateString('en-GB')} - ${new Date(payrollRecord.periodEnd).toLocaleDateString('en-GB')}`;
+      notificationMessage = `Your payment of ${Number(payrollRecord.totalAmount).toFixed(2)} has been processed for the period ${new Date(payrollRecord.periodStart).toLocaleDateString('en-GB')} - ${new Date(payrollRecord.periodEnd).toLocaleDateString('en-GB')}`;
     }
 
     // Send notification asynchronously (don't fail the request if notification fails)
@@ -184,6 +184,11 @@ export async function POST(
       console.error('Error sending payroll notification:', notifError);
       // Don't throw - notification failure shouldn't fail the approval
     });
+
+    if (status === 'approved' || status === 'paid') {
+      const { maybeAutoSyncPayroll } = await import('@/lib/quickbooks');
+      await maybeAutoSyncPayroll(payrollRecord.companyId, payroll.id);
+    }
 
     return NextResponse.json({ success: true, data: payroll });
   } catch (error: any) {

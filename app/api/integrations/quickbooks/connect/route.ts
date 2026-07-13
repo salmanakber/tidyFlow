@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, resolveCompanyId, isManagerPlusRole } from '@/lib/rbac';
 import { buildQuickBooksAuthUrl, isQuickBooksConfigured } from '@/lib/quickbooks';
+import { requireQuickBooksFeature } from '@/lib/subscription';
 import prisma from '@/lib/prisma';
 import { UserRole } from '@prisma/client';
 
@@ -29,6 +30,11 @@ export async function GET(request: NextRequest) {
   }
   if (!companyId) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
+  }
+
+  const planFeature = await requireQuickBooksFeature(companyId);
+  if (!planFeature.allowed) {
+    return NextResponse.json({ success: false, message: planFeature.message }, { status: 403 });
   }
 
   const mobileRedirect =

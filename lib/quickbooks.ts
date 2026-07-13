@@ -350,10 +350,11 @@ export async function logQuickBooksActivity(
   invoiceId: number | null,
   action: string,
   status: 'success' | 'failed',
-  message?: string
+  message?: string,
+  payrollRecordId?: number | null
 ) {
   await prisma.quickBooksSyncLog.create({
-    data: { companyId, invoiceId, action, status, message },
+    data: { companyId, invoiceId, payrollRecordId: payrollRecordId ?? null, action, status, message },
   });
 }
 
@@ -493,10 +494,13 @@ export async function getQuickBooksStatus(companyId: number) {
     invoicesSynced: conn.invoicesSynced,
     autoSyncOnSend: conn.autoSyncOnSend,
     autoSyncOnPaid: conn.autoSyncOnPaid,
+    autoSyncOnPayroll: conn.autoSyncOnPayroll,
+    payrollSynced: conn.payrollSynced,
     stats: { syncedCount, pendingCount, failedCount },
     recentActivity: recentLogs.map((l) => ({
       id: l.id,
       invoiceId: l.invoiceId,
+      payrollRecordId: l.payrollRecordId,
       action: l.action,
       status: l.status,
       message: l.message,
@@ -508,17 +512,173 @@ export async function getQuickBooksStatus(companyId: number) {
 export async function disconnectQuickBooks(companyId: number) {
   await prisma.quickBooksConnection.deleteMany({ where: { companyId } });
   await prisma.quickBooksCustomerMap.deleteMany({ where: { companyId } });
+  await prisma.quickBooksVendorMap.deleteMany({ where: { companyId } });
   await logQuickBooksActivity(companyId, null, 'disconnect', 'success', 'QuickBooks disconnected');
 }
 
 export async function updateQuickBooksSettings(
   companyId: number,
-  settings: { autoSyncOnSend?: boolean; autoSyncOnPaid?: boolean }
+  settings: { autoSyncOnSend?: boolean; autoSyncOnPaid?: boolean; autoSyncOnPayroll?: boolean }
 ) {
   return prisma.quickBooksConnection.update({
     where: { companyId },
     data: settings,
   });
+}
+
+async function findOrCreateVendor(
+  companyId: number,
+  realmId: string,
+  accessToken: string,
+  user: { id: number; firstName: string | null; lastName: string | null; email: string }
+): Promise<string> {
+  const vendorName =
+    [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.email || `Employee #${user.id}`;
+
+  const cached = await prisma.quickBooksVendorMap.findUnique({
+    where: { companyId_userId: { companyId, userId: user.id } },
+  });
+  if (cached) return cached.quickbooksVendorId;
+
+  const payload: Record<string, unknown> = {
+    DisplayName: vendorName.slice(0, 100),
+  };
+  if (user.email) payload.PrimaryEmailAddr = { Address: user.email };
+
+  const created = await qbApiRequest<{ Vendor: { Id: string } }>(
+    realmId,
+    accessToken,
+    'POST',
+    `/v3/company/${realmId}/vendor`,
+    payload
+  );
+
+  await prisma.quickBooksVendorMap.create({
+    data: {
+      companyId,
+      userId: user.id,
+      vendorName,
+      quickbooksVendorId: created.Vendor.Id,
+    },
+  });
+
+  return created.Vendor.Id;
+}
+
+export async function syncPayrollToQuickBooks(
+  companyId: number,
+  payrollRecordId: number
+): Promise<{ quickbooksBillId: string; docNumber?: string }> {
+  const record = await prisma.payrollRecord.findFirst({
+    where: { id: payrollRecordId, companyId },
+    include: {
+      user: { select: { id: true, firstName: true, lastName: true, email: true } },
+    },
+  });
+  if (!record) throw new Error('Payroll record not found');
+
+  if (record.quickbooksSyncStatus === 'synced' && record.quickbooksBillId) {
+    return {
+      quickbooksBillId: record.quickbooksBillId,
+      docNumber: record.quickbooksDocNumber ?? undefined,
+    };
+  }
+
+  await prisma.payrollRecord.update({
+    where: { id: payrollRecordId },
+    data: { quickbooksSyncStatus: 'pending', quickbooksSyncError: null },
+  });
+
+  try {
+    const { accessToken, realmId } = await getQuickBooksAccessToken(companyId);
+    const vendorId = await findOrCreateVendor(companyId, realmId, accessToken, record.user);
+    const serviceItemId = await ensureServiceItem(realmId, accessToken);
+    const amount = Number(record.netSalary ?? record.totalAmount);
+    const periodLabel = `${new Date(record.periodStart).toLocaleDateString('en-GB')} – ${new Date(record.periodEnd).toLocaleDateString('en-GB')}`;
+    const docNumber = `PAY-${record.id}`.slice(0, 21);
+
+    const payload: Record<string, unknown> = {
+      VendorRef: { value: vendorId },
+      DocNumber: docNumber,
+      PrivateNote: `TidyFlow payroll #${record.id} · ${periodLabel}`,
+      Line: [
+        {
+          DetailType: 'ItemBasedExpenseLineDetail',
+          Amount: amount,
+          Description: `Payroll ${periodLabel}`,
+          ItemBasedExpenseLineDetail: {
+            ItemRef: { value: serviceItemId },
+            Qty: 1,
+            UnitPrice: amount,
+          },
+        },
+      ],
+    };
+
+    const created = await qbApiRequest<{ Bill: { Id: string; DocNumber?: string } }>(
+      realmId,
+      accessToken,
+      'POST',
+      `/v3/company/${realmId}/bill`,
+      payload
+    );
+
+    const qbId = created.Bill.Id;
+    const qbDoc = created.Bill.DocNumber;
+
+    await prisma.payrollRecord.update({
+      where: { id: payrollRecordId },
+      data: {
+        quickbooksBillId: qbId,
+        quickbooksDocNumber: qbDoc ?? docNumber,
+        quickbooksSyncStatus: 'synced',
+        quickbooksSyncedAt: new Date(),
+        quickbooksSyncError: null,
+      },
+    });
+
+    await prisma.quickBooksConnection.update({
+      where: { companyId },
+      data: { lastSyncAt: new Date(), payrollSynced: { increment: 1 } },
+    });
+
+    await logQuickBooksActivity(
+      companyId,
+      null,
+      'sync_payroll',
+      'success',
+      `Synced payroll #${record.id} to QuickBooks`,
+      payrollRecordId
+    );
+
+    return { quickbooksBillId: qbId, docNumber: qbDoc };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Sync failed';
+    await prisma.payrollRecord.update({
+      where: { id: payrollRecordId },
+      data: { quickbooksSyncStatus: 'failed', quickbooksSyncError: message },
+    });
+    await logQuickBooksActivity(
+      companyId,
+      null,
+      'sync_payroll',
+      'failed',
+      message,
+      payrollRecordId
+    );
+    throw error;
+  }
+}
+
+export async function maybeAutoSyncPayroll(companyId: number, payrollRecordId: number) {
+  const conn = await prisma.quickBooksConnection.findUnique({ where: { companyId } });
+  if (!conn?.autoSyncOnPayroll) return null;
+  try {
+    return await syncPayrollToQuickBooks(companyId, payrollRecordId);
+  } catch (error) {
+    console.error('QuickBooks payroll auto-sync failed:', error);
+    return null;
+  }
 }
 
 export async function maybeAutoSyncInvoice(companyId: number, invoiceId: number, trigger: 'send' | 'paid') {
