@@ -284,6 +284,35 @@ async function ensureServiceItem(realmId: string, accessToken: string): Promise<
   return created.Item.Id;
 }
 
+async function ensurePayrollExpenseAccount(realmId: string, accessToken: string): Promise<string> {
+  const accounts = await qbQuery<{ Id: string; Name: string }>(
+    realmId,
+    accessToken,
+    "select Id, Name from Account where AccountType='Expense' MAXRESULTS 100"
+  );
+
+  const preferred = accounts.find((account) =>
+    /payroll|salary|salaries|wage|labor|labour|staff|cleaning/i.test(account.Name)
+  );
+  if (preferred?.Id) return preferred.Id;
+  if (accounts[0]?.Id) return accounts[0].Id;
+
+  const cogsAccounts = await qbQuery<{ Id: string; Name: string }>(
+    realmId,
+    accessToken,
+    "select Id, Name from Account where AccountType='Cost of Goods Sold' MAXRESULTS 10"
+  );
+  const cogsPreferred = cogsAccounts.find((account) =>
+    /payroll|salary|salaries|wage|labor|labour|staff|cleaning/i.test(account.Name)
+  );
+  if (cogsPreferred?.Id) return cogsPreferred.Id;
+  if (cogsAccounts[0]?.Id) return cogsAccounts[0].Id;
+
+  throw new Error(
+    'No expense account found in QuickBooks. Add an Expense account (e.g. Payroll or Salaries) in your Chart of Accounts.'
+  );
+}
+
 async function findOrCreateCustomer(
   companyId: number,
   realmId: string,
@@ -592,24 +621,27 @@ export async function syncPayrollToQuickBooks(
   try {
     const { accessToken, realmId } = await getQuickBooksAccessToken(companyId);
     const vendorId = await findOrCreateVendor(companyId, realmId, accessToken, record.user);
-    const serviceItemId = await ensureServiceItem(realmId, accessToken);
-    const amount = Number(record.netSalary ?? record.totalAmount);
+    const expenseAccountId = await ensurePayrollExpenseAccount(realmId, accessToken);
+    const amount = Number(record.netSalary ?? record.grossSalary ?? record.totalAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Payroll amount must be greater than zero before syncing to QuickBooks');
+    }
     const periodLabel = `${new Date(record.periodStart).toLocaleDateString('en-GB')} – ${new Date(record.periodEnd).toLocaleDateString('en-GB')}`;
     const docNumber = `PAY-${record.id}`.slice(0, 21);
+    const txnDate = (record.paymentDate ?? record.periodEnd ?? new Date()).toISOString().slice(0, 10);
 
     const payload: Record<string, unknown> = {
       VendorRef: { value: vendorId },
       DocNumber: docNumber,
+      TxnDate: txnDate,
       PrivateNote: `TidyFlow payroll #${record.id} · ${periodLabel}`,
       Line: [
         {
-          DetailType: 'ItemBasedExpenseLineDetail',
+          DetailType: 'AccountBasedExpenseLineDetail',
           Amount: amount,
           Description: `Payroll ${periodLabel}`,
-          ItemBasedExpenseLineDetail: {
-            ItemRef: { value: serviceItemId },
-            Qty: 1,
-            UnitPrice: amount,
+          AccountBasedExpenseLineDetail: {
+            AccountRef: { value: expenseAccountId },
           },
         },
       ],
