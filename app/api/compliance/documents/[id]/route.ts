@@ -70,6 +70,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     },
   });
 
+  if (updated.expiresAt) {
+    const { scheduleComplianceExpiryReminders } = await import('@/lib/compliance-alerts');
+    scheduleComplianceExpiryReminders({
+      companyId,
+      documentId: updated.id,
+      docType: updated.docType,
+      title: updated.title,
+      expiresAt: updated.expiresAt,
+    }).catch((err) => console.warn('Compliance reminder schedule failed:', err));
+  }
+
   return NextResponse.json({
     success: true,
     data: {

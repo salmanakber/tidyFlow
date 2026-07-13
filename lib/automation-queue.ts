@@ -189,6 +189,27 @@ export async function ensureBillingReminderScanScheduler() {
   return true;
 }
 
+/** Daily scan for expiring/expired/missing compliance documents. */
+export async function ensureComplianceReminderScanScheduler() {
+  try {
+    await automationQueue.add(
+      'scan-compliance-expiry',
+      {},
+      {
+        jobId: 'scan-compliance-expiry-repeat',
+        repeat: { every: 24 * 60 * 60 * 1000 },
+      }
+    );
+  } catch (error) {
+    if (isRedisUnavailable(error)) {
+      console.warn('[Automation] Redis unavailable — compliance reminder scan not scheduled');
+      return false;
+    }
+    throw error;
+  }
+  return true;
+}
+
 export async function cancelTrialReminderJobs(companyId: number, trialEndsAt: Date) {
   for (const daysLeft of BILLING_REMINDER_MILESTONES) {
     const jobId = trialReminderJobId(companyId, trialEndsAt, daysLeft);

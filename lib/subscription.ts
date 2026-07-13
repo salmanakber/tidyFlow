@@ -15,6 +15,7 @@ export interface PlanLimits {
   aiInsights: boolean;
   aiAssignment: boolean;
   aiTaskSuggestions: boolean;
+  aiSupplyForecast: boolean;
   invoicesEnabled: boolean;
   maxInvoicesPerMonth: number;
   aiInvoiceAssist: boolean;
@@ -33,6 +34,7 @@ export interface PlanUsageSnapshot {
     aiInsights: boolean;
     aiAssignment: boolean;
     aiTaskSuggestions: boolean;
+    aiSupplyForecast: boolean;
     invoices: boolean;
     aiInvoiceAssist: boolean;
     pdfGeneration: boolean;
@@ -44,6 +46,7 @@ export interface PlanUsageSnapshot {
     aiInsights: boolean;
     aiAssignment: boolean;
     aiTaskSuggestions: boolean;
+    aiSupplyForecast: boolean;
     invoices: boolean;
     aiInvoiceAssist: boolean;
     googleSheets: boolean;
@@ -98,6 +101,7 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInsights: false,
     aiAssignment: true,
     aiTaskSuggestions: true,
+    aiSupplyForecast: false,
     invoicesEnabled: false,
     maxInvoicesPerMonth: 5,
     aiInvoiceAssist: false,
@@ -118,6 +122,7 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInsights: true,
     aiAssignment: true,
     aiTaskSuggestions: true,
+    aiSupplyForecast: false,
     invoicesEnabled: true,
     maxInvoicesPerMonth: 50,
     aiInvoiceAssist: true,
@@ -138,6 +143,7 @@ const DEFAULT_LIMITS: Record<PlanTier, PlanLimits> = {
     aiInsights: true,
     aiAssignment: true,
     aiTaskSuggestions: true,
+    aiSupplyForecast: true,
     invoicesEnabled: true,
     maxInvoicesPerMonth: 99999,
     aiInvoiceAssist: true,
@@ -218,6 +224,7 @@ export async function getAllSubscriptionPlansForAdmin(): Promise<PlanLimits[]> {
       aiInsights: row.aiInsights,
       aiAssignment: row.aiAssignment,
       aiTaskSuggestions: row.aiTaskSuggestions,
+      aiSupplyForecast: row.aiSupplyForecast ?? fallback.aiSupplyForecast,
       invoicesEnabled: row.invoicesEnabled,
       maxInvoicesPerMonth: row.maxInvoicesPerMonth,
       aiInvoiceAssist: row.aiInvoiceAssist,
@@ -264,6 +271,7 @@ export function serializePublicPricingPlan(plan: PlanLimits, trialDays?: number)
       aiInsights: plan.aiInsights,
       aiAssignment: plan.aiAssignment,
       aiTaskSuggestions: plan.aiTaskSuggestions,
+      aiSupplyForecast: plan.aiSupplyForecast,
       invoicesEnabled: plan.invoicesEnabled,
       aiInvoiceAssist: plan.aiInvoiceAssist,
       googleSheetsEnabled: plan.googleSheetsEnabled,
@@ -296,6 +304,8 @@ export async function upsertSubscriptionPlanTier(
       aiAssignment: fields.aiAssignment !== undefined ? !!fields.aiAssignment : true,
       aiTaskSuggestions:
         fields.aiTaskSuggestions !== undefined ? !!fields.aiTaskSuggestions : true,
+      aiSupplyForecast:
+        fields.aiSupplyForecast !== undefined ? !!fields.aiSupplyForecast : false,
       invoicesEnabled: fields.invoicesEnabled !== undefined ? !!fields.invoicesEnabled : false,
       maxInvoicesPerMonth: Number(fields.maxInvoicesPerMonth ?? 5),
       aiInvoiceAssist: fields.aiInvoiceAssist !== undefined ? !!fields.aiInvoiceAssist : false,
@@ -321,6 +331,9 @@ export async function upsertSubscriptionPlanTier(
       ...(fields.aiAssignment !== undefined ? { aiAssignment: !!fields.aiAssignment } : {}),
       ...(fields.aiTaskSuggestions !== undefined
         ? { aiTaskSuggestions: !!fields.aiTaskSuggestions }
+        : {}),
+      ...(fields.aiSupplyForecast !== undefined
+        ? { aiSupplyForecast: !!fields.aiSupplyForecast }
         : {}),
       ...(fields.invoicesEnabled !== undefined
         ? { invoicesEnabled: !!fields.invoicesEnabled }
@@ -370,6 +383,7 @@ export async function getPlanLimits(tier?: string | null): Promise<PlanLimits> {
     aiInsights: row.aiInsights,
     aiAssignment: row.aiAssignment,
     aiTaskSuggestions: row.aiTaskSuggestions,
+    aiSupplyForecast: row.aiSupplyForecast ?? fallback.aiSupplyForecast,
     invoicesEnabled: row.invoicesEnabled,
     maxInvoicesPerMonth: row.maxInvoicesPerMonth,
     aiInvoiceAssist: row.aiInvoiceAssist,
@@ -612,6 +626,29 @@ export async function requireAIFeature(
   return { allowed: true };
 }
 
+/** Smart supply forecasting — enabled per plan in admin subscription settings. */
+export async function requireSupplyForecast(
+  companyId: number
+): Promise<{ allowed: boolean; message?: string }> {
+  const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
+  if (!sub.allowed) return sub;
+
+  const plan = await getCompanyPlan(companyId);
+  if (!plan) return { allowed: false, message: 'Company not found' };
+
+  if (!plan.limits.aiSupplyForecast) {
+    return {
+      allowed: false,
+      message: `${plan.limits.label} plan does not include supply forecasting. Upgrade or enable it on your plan.`,
+    };
+  }
+
+  const usage = await checkPlanLimit(companyId, 'ai_request');
+  if (!usage.allowed) return usage;
+
+  return { allowed: true };
+}
+
 export async function requirePdfGeneration(companyId: number) {
   const sub = await requireActiveSubscription({ companyId, role: 'OWNER' });
   if (!sub.allowed) return sub;
@@ -735,6 +772,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
       aiInsights: limits.aiInsights && !aiAtLimit && subscriptionActive,
       aiAssignment: limits.aiAssignment && !aiAtLimit && subscriptionActive,
       aiTaskSuggestions: limits.aiTaskSuggestions && !aiAtLimit && subscriptionActive,
+      aiSupplyForecast:
+        limits.aiSupplyForecast && !aiAtLimit && subscriptionActive,
       invoices: limits.invoicesEnabled && !invoicesAtLimit && subscriptionActive,
       aiInvoiceAssist: limits.aiInvoiceAssist && !aiAtLimit && subscriptionActive,
       pdfGeneration: !pdfAtLimit && subscriptionActive,
@@ -746,6 +785,7 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
       aiInsights: limits.aiInsights,
       aiAssignment: limits.aiAssignment,
       aiTaskSuggestions: limits.aiTaskSuggestions,
+      aiSupplyForecast: limits.aiSupplyForecast,
       invoices: limits.invoicesEnabled,
       aiInvoiceAssist: limits.aiInvoiceAssist,
       googleSheets: limits.googleSheetsEnabled,

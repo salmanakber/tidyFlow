@@ -136,6 +136,17 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    if (expiresAt) {
+      const { scheduleComplianceExpiryReminders } = await import('@/lib/compliance-alerts');
+      scheduleComplianceExpiryReminders({
+        companyId,
+        documentId: document.id,
+        docType,
+        title: resolvedTitle,
+        expiresAt,
+      }).catch((err) => console.warn('Compliance reminder schedule failed:', err));
+    }
+
     return NextResponse.json(
       {
         success: true,

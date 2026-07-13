@@ -17,6 +17,7 @@ interface PlanLimit {
   aiInsights: boolean
   aiAssignment: boolean
   aiTaskSuggestions: boolean
+  aiSupplyForecast: boolean
   invoicesEnabled: boolean
   maxInvoicesPerMonth: number
   aiInvoiceAssist: boolean
@@ -148,6 +149,7 @@ export default function SubscriptionAdminPage() {
                     ["aiInsights", "Insights"],
                     ["aiAssignment", "Assignment AI"],
                     ["aiTaskSuggestions", "Task suggestions"],
+                    ["aiSupplyForecast", "Supply forecasting"],
                     ["invoicesEnabled", "Client invoices"],
                     ["aiInvoiceAssist", "AI invoice assist"],
                     ["googleSheetsEnabled", "Google Sheets sync"],

@@ -1332,6 +1332,7 @@ model SubscriptionPlanLimit {
   aiInsights           Boolean  @default(true) @map("ai_insights")
   aiAssignment         Boolean  @default(true) @map("ai_assignment")
   aiTaskSuggestions    Boolean  @default(true) @map("ai_task_suggestions")
+  aiSupplyForecast     Boolean  @default(false) @map("ai_supply_forecast")
   invoicesEnabled      Boolean  @default(true) @map("invoices_enabled")
   maxInvoicesPerMonth  Int      @default(50) @map("max_invoices_per_month")
   aiInvoiceAssist      Boolean  @default(false) @map("ai_invoice_assist")

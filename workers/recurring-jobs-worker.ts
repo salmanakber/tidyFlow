@@ -39,7 +39,7 @@ async function startWorker() {
   console.log(
     `[Worker] Redis: ${process.env.REDIS_URL || `${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`}`
   );
-  console.log('[Worker] Queues: recurring-jobs, tidyflow-automation');
+  console.log('[Worker] Queues: recurring-jobs, tidyflow-automation (billing + compliance alerts)');
   console.log('[Worker] ========================================');
 
   try {
@@ -49,7 +49,7 @@ async function startWorker() {
 
     console.log('[Worker] Initializing automation/billing worker...');
     initializeAutomationWorker();
-    console.log('[Worker] ✓ Automation worker ready (webhook notifications + trial reminders)');
+    console.log('[Worker] ✓ Automation worker ready (billing, trial reminders, compliance expiry pushes)');
 
     console.log('[Worker] Running recurring job recovery...');
     try {

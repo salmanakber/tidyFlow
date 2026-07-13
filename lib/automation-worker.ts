@@ -13,6 +13,7 @@ import {
   ensureBillingReminderScanScheduler,
   schedulePendingPlanSwitchReminders,
   scheduleTrialEndingReminders,
+  ensureComplianceReminderScanScheduler,
 } from './automation-queue';
 import { getRedisConnectionOptions } from './redis-connection';
 
@@ -220,6 +221,16 @@ async function processAutomationJob(job: Job) {
     case 'scan-billing-reminders':
       return scanBillingReminders();
 
+    case 'scan-compliance-expiry': {
+      const { scanComplianceExpiryAlerts } = await import('./compliance-alerts');
+      return scanComplianceExpiryAlerts();
+    }
+
+    case 'compliance-expiry-alert': {
+      const { sendComplianceAlert } = await import('./compliance-alerts');
+      return sendComplianceAlert(job.data as import('./compliance-alerts').ComplianceExpiryAlertJob);
+    }
+
     default:
       return { skipped: true };
   }
@@ -253,7 +264,11 @@ export function initializeAutomationWorker() {
     console.warn('[Automation Worker] billing reminder scan scheduler failed:', err);
   });
 
-  console.log('[Automation Worker] initialized (billing, trial reminders, plan limits)');
+  ensureComplianceReminderScanScheduler().catch((err) => {
+    console.warn('[Automation Worker] compliance reminder scan scheduler failed:', err);
+  });
+
+  console.log('[Automation Worker] initialized (billing, trial reminders, plan limits, compliance)');
   return automationWorkerInstance;
 }
 

@@ -91,6 +91,27 @@ export async function generateCompanyInsights(companyId: number, locale?: string
   }
 
   try {
+    const { getCompanyPlan } = await import('@/lib/subscription');
+    const plan = await getCompanyPlan(companyId);
+    if (plan?.limits.aiSupplyForecast) {
+      const { getCompanySupplyForecast } = await import('@/lib/supply-forecast');
+      const forecast = await getCompanySupplyForecast(companyId);
+      for (const alert of forecast.alerts.slice(0, 3)) {
+        insights.push({
+          type: 'supply',
+          severity: alert.severity === 'critical' ? 'critical' : alert.severity === 'high' ? 'high' : 'medium',
+          title: 'Supply Forecast',
+          message: alert.message,
+          entityType: 'supply',
+          entityId: alert.supplyItemId,
+        });
+      }
+    }
+  } catch (error) {
+    console.warn('Supply forecast insights skipped:', error);
+  }
+
+  try {
     const prompt = `As TidyFlow AI operations advisor, review this company data and add up to 3 actionable insights.
 Tasks by status: ${JSON.stringify(tasks)}
 Avg client rating: ${avgRating.toFixed(1)}
