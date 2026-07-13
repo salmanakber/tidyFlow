@@ -47,30 +47,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     const body = await request.json();
     const updated = await upsertSubscriptionPlanTier(tier, body);
     const trialDays = await getTrialDays();
+    const plan = await getPlanLimits(updated.tier);
 
     return NextResponse.json({
       success: true,
-      data: serializePublicPricingPlan(
-        {
-          tier: updated.tier as 'STARTUP' | 'STANDARD' | 'PREMIUM',
-          label: updated.label,
-          monthlyPrice: Number(updated.monthlyPrice),
-          maxCleaners: updated.maxCleaners,
-          maxProperties: updated.maxProperties,
-          maxManagers: updated.maxManagers,
-          aiRequestsPerMonth: updated.aiRequestsPerMonth,
-          aiPhotoAnalysis: updated.aiPhotoAnalysis,
-          aiInsights: updated.aiInsights,
-          aiAssignment: updated.aiAssignment,
-          aiTaskSuggestions: updated.aiTaskSuggestions,
-          invoicesEnabled: updated.invoicesEnabled,
-          maxInvoicesPerMonth: updated.maxInvoicesPerMonth,
-          aiInvoiceAssist: updated.aiInvoiceAssist,
-          maxPhotoVerificationsPerMonth: updated.maxPhotoVerificationsPerMonth,
-          maxPdfGenerationsPerMonth: updated.maxPdfGenerationsPerMonth,
-        },
-        trialDays
-      ),
+      data: serializePublicPricingPlan(plan, trialDays),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid request';
