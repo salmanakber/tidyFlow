@@ -78,6 +78,8 @@ model User {
   reviewedPhotoScores     AIPhotoScore[]    @relation("PhotoScoreReviewer")
   clientFeedbackReceived  ClientFeedback[]  @relation("CleanerClientFeedback")
   complianceUploads       ComplianceDocument[] @relation("ComplianceUploads")
+  hoursEditRequests       HoursEditRequest[] @relation("HoursEditRequester")
+  hoursEditReviews        HoursEditRequest[] @relation("HoursEditReviewer")
 
   @@index([email])
   @@index([companyId])
@@ -124,6 +126,7 @@ model Company {
   quickBooksCustomerMaps     QuickBooksCustomerMap[]
   quickBooksVendorMaps       QuickBooksVendorMap[]
   complianceDocuments        ComplianceDocument[]
+  hoursEditRequests          HoursEditRequest[]
 
   @@map("companies")
 }
@@ -212,9 +215,11 @@ model Task {
   expenses                Expense[]
   clientFeedback          ClientFeedback[]
   clientInvoices          ClientInvoice[]
+  clientInvoiceLinks      ClientInvoiceTask[]
   pdfRecords              PDFRecord[]
   reviewRequests          ReviewRequest[]
-  workingHoursSubmissions WorkingHoursSubmissionTask[] // Working hours submissions that reference this task // Working hours submissions that reference this task
+  workingHoursSubmissions WorkingHoursSubmissionTask[]
+  supplyUsages            SupplyUsage[]
 
   @@unique([propertyId, uniqueIdentifier]) // Ensure unique identifier is unique per property (NULL values are allowed)
   @@index([companyId])
@@ -258,6 +263,7 @@ model TaskAssignment {
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User @relation("TaskAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  hoursEditRequests HoursEditRequest[]
 
   @@unique([taskId, userId])
   @@index([taskId])
@@ -1271,6 +1277,7 @@ model SupplyItem {
   unit         String   @default("units")
   currentStock Int      @default(0) @map("current_stock")
   minStock     Int      @default(5) @map("min_stock")
+  unitCost     Decimal? @map("unit_cost") @db.Decimal(10, 2)
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -1293,10 +1300,39 @@ model SupplyUsage {
 
   supplyItem SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task       Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([supplyItemId])
   @@index([userId])
+  @@index([taskId])
   @@map("supply_usages")
+}
+
+// Cleaner requests a duration correction; managers approve into editedDurationMinutes.
+model HoursEditRequest {
+  id                       Int       @id @default(autoincrement())
+  companyId                Int       @map("company_id")
+  assignmentId             Int       @map("assignment_id")
+  requesterId              Int       @map("requester_id")
+  proposedDurationMinutes  Int       @map("proposed_duration_minutes")
+  currentDurationMinutes   Int?      @map("current_duration_minutes")
+  reason                   String?   @db.Text
+  status                   String    @default("pending") // pending, approved, rejected
+  reviewedById             Int?      @map("reviewed_by_id")
+  reviewedAt               DateTime? @map("reviewed_at")
+  reviewNote               String?   @map("review_note") @db.Text
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignment TaskAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  requester  User           @relation("HoursEditRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  reviewer   User?          @relation("HoursEditReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@index([assignmentId])
+  @@index([requesterId])
+  @@map("hours_edit_requests")
 }
 
 // Client review requests (public vs private flow)
@@ -1409,12 +1445,27 @@ model ClientInvoice {
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   task     Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   property Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  invoiceTasks ClientInvoiceTask[]
 
   @@index([companyId])
   @@index([taskId])
   @@index([status])
   @@index([quickbooksSyncStatus])
   @@map("client_invoices")
+}
+
+// Links multiple completed tasks to one period/client invoice.
+model ClientInvoiceTask {
+  id        Int @id @default(autoincrement())
+  invoiceId Int @map("invoice_id")
+  taskId    Int @map("task_id")
+
+  invoice ClientInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  task    Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, taskId])
+  @@index([taskId])
+  @@map("client_invoice_tasks")
 }
 
 // Per-company invoice branding, numbering, and tax rules

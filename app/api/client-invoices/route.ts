@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       taskId,
+      taskIds: bodyTaskIds,
       clientName,
       clientEmail,
       clientPhone,
@@ -93,61 +94,142 @@ export async function POST(request: NextRequest) {
       locale,
     } = body;
 
-    if (!taskId) {
-      return NextResponse.json({ success: false, message: 'taskId required' }, { status: 400 });
+    const taskIdList: number[] = Array.isArray(bodyTaskIds)
+      ? bodyTaskIds.map((id: unknown) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0)
+      : taskId
+        ? [Number(taskId)]
+        : [];
+
+    if (taskIdList.length === 0) {
+      return NextResponse.json({ success: false, message: 'taskId or taskIds required' }, { status: 400 });
     }
 
-    const task = await prisma.task.findFirst({
-      where: { id: Number(taskId), companyId },
+    const uniqueTaskIds = [...new Set(taskIdList)];
+
+    const tasks = await prisma.task.findMany({
+      where: { id: { in: uniqueTaskIds }, companyId },
       include: { property: true, company: { select: { name: true } } },
     });
 
-    if (!task) {
-      return NextResponse.json({ success: false, message: 'Task not found' }, { status: 404 });
+    if (tasks.length !== uniqueTaskIds.length) {
+      return NextResponse.json({ success: false, message: 'One or more tasks not found' }, { status: 404 });
     }
 
-    if (!COMPLETED_STATUSES.includes(task.status)) {
-      return NextResponse.json(
-        { success: false, message: 'Invoice can only be created for completed or approved tasks' },
-        { status: 400 }
-      );
+    for (const task of tasks) {
+      if (!COMPLETED_STATUSES.includes(task.status)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `Invoice can only be created for completed or approved tasks (task #${task.id})`,
+          },
+          { status: 400 }
+        );
+      }
     }
 
-    const existing = await prisma.clientInvoice.findFirst({
-      where: { taskId: task.id, status: { not: 'void' } },
+    const existingPrimary = await prisma.clientInvoice.findFirst({
+      where: { taskId: { in: uniqueTaskIds }, status: { not: 'void' } },
     });
-    if (existing) {
+    if (existingPrimary) {
       return NextResponse.json(
-        { success: false, message: 'An invoice already exists for this task', data: { id: existing.id } },
+        {
+          success: false,
+          message: 'An invoice already exists for one of these tasks',
+          data: { id: existingPrimary.id },
+        },
         { status: 409 }
       );
     }
 
-    const plan = await import('@/lib/subscription').then((m) => m.getCompanyPlan(companyId));
-    const canUseAI = useAI && plan?.limits.aiInvoiceAssist;
-
-    const requestLocale = getRequestLocale(request, body);
-
-    const resolvedRate = resolveInvoiceRate(
-      task,
-      task.property,
-      customAmount != null ? Number(customAmount) : undefined
-    );
-    try {
-      assertInvoiceRate(resolvedRate);
-    } catch (e: any) {
-      return NextResponse.json({ success: false, message: e.message }, { status: 400 });
+    const existingLinked = await prisma.clientInvoiceTask.findFirst({
+      where: {
+        taskId: { in: uniqueTaskIds },
+        invoice: { status: { not: 'void' } },
+      },
+      include: { invoice: { select: { id: true } } },
+    });
+    if (existingLinked) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'An invoice already exists for one of these tasks',
+          data: { id: existingLinked.invoice.id },
+        },
+        { status: 409 }
+      );
     }
+
+    // Multi-task invoices must share the same client identity (email / name / property client).
+    if (uniqueTaskIds.length > 1) {
+      const clientKeys = new Set(
+        tasks.map((t) =>
+          (t.property.clientEmail || t.property.clientName || `prop:${t.propertyId}`).trim().toLowerCase()
+        )
+      );
+      if (clientKeys.size > 1) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'Selected tasks belong to different clients. Group by the same client or property.',
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const primaryTask = tasks[0];
+    const plan = await import('@/lib/subscription').then((m) => m.getCompanyPlan(companyId));
+    const canUseAI = useAI && plan?.limits.aiInvoiceAssist && uniqueTaskIds.length === 1;
+    const requestLocale = getRequestLocale(request, body);
 
     let lineItems: InvoiceLineItem[] =
       bodyLineItems && Array.isArray(bodyLineItems) && bodyLineItems.length > 0
         ? bodyLineItems
-        : await buildLineItemsFromTask(task.id, {
-            useAI: canUseAI,
+        : [];
+
+    if (lineItems.length === 0) {
+      if (uniqueTaskIds.length === 1) {
+        const resolvedRate = resolveInvoiceRate(
+          primaryTask,
+          primaryTask.property,
+          customAmount != null ? Number(customAmount) : undefined
+        );
+        try {
+          assertInvoiceRate(resolvedRate);
+        } catch (e: any) {
+          return NextResponse.json({ success: false, message: e.message }, { status: 400 });
+        }
+        lineItems = await buildLineItemsFromTask(primaryTask.id, {
+          useAI: canUseAI,
+          companyId,
+          customAmount: customAmount ? Number(customAmount) : undefined,
+          locale: requestLocale,
+        });
+      } else {
+        for (const task of tasks) {
+          try {
+            const resolvedRate = resolveInvoiceRate(task, task.property, undefined);
+            assertInvoiceRate(resolvedRate);
+          } catch (e: any) {
+            return NextResponse.json(
+              { success: false, message: `${e.message} (task #${task.id})` },
+              { status: 400 }
+            );
+          }
+          const items = await buildLineItemsFromTask(task.id, {
+            useAI: false,
             companyId,
-            customAmount: customAmount ? Number(customAmount) : undefined,
             locale: requestLocale,
           });
+          for (const item of items) {
+            lineItems.push({
+              ...item,
+              description: `#${task.id} ${task.title}: ${item.description}`,
+            });
+          }
+        }
+      }
+    }
 
     const totals = await calcInvoiceTotalsForCompany(companyId, lineItems);
     const { subtotal, taxRate: resolvedTaxRate, taxAmount, totalAmount } =
@@ -165,17 +247,17 @@ export async function POST(request: NextRequest) {
 
     const name =
       clientName ||
-      task.property.clientName ||
+      primaryTask.property.clientName ||
       'Client';
-    const email = clientEmail || task.property.clientEmail || null;
-    const phone = clientPhone || task.property.clientPhone || null;
-    const address = clientAddress || task.property.address;
+    const email = clientEmail || primaryTask.property.clientEmail || null;
+    const phone = clientPhone || primaryTask.property.clientPhone || null;
+    const address = clientAddress || primaryTask.property.address;
 
     const invoice = await prisma.clientInvoice.create({
       data: {
         companyId,
-        taskId: task.id,
-        propertyId: task.propertyId,
+        taskId: uniqueTaskIds.length === 1 ? primaryTask.id : primaryTask.id,
+        propertyId: primaryTask.propertyId,
         invoiceNumber,
         clientName: name,
         clientEmail: email,
@@ -187,15 +269,23 @@ export async function POST(request: NextRequest) {
         taxAmount,
         totalAmount,
         currency,
-        notes: notes || null,
+        notes:
+          notes ||
+          (uniqueTaskIds.length > 1
+            ? `Period invoice for ${uniqueTaskIds.length} jobs (#${uniqueTaskIds.join(', #')})`
+            : null),
         dueDate: dueDate ? new Date(dueDate) : new Date(Date.now() + 14 * 86400000),
         aiGenerated: !!canUseAI,
         createdById: auth.tokenUser.userId,
         status: 'draft',
+        invoiceTasks: {
+          create: uniqueTaskIds.map((id) => ({ taskId: id })),
+        },
       },
       include: {
         company: { select: { name: true } },
         task: { select: { title: true } },
+        invoiceTasks: { select: { taskId: true } },
       },
     });
 
@@ -240,7 +330,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const finalInvoice = await prisma.clientInvoice.findUnique({ where: { id: updated.id } });
+    const finalInvoice = await prisma.clientInvoice.findUnique({
+      where: { id: updated.id },
+      include: { invoiceTasks: { select: { taskId: true } } },
+    });
 
     return NextResponse.json(
       {
@@ -251,6 +344,7 @@ export async function POST(request: NextRequest) {
           aiGenerated: !!canUseAI,
           subtotal: Number(updated.subtotal),
           totalAmount: Number(updated.totalAmount),
+          taskIds: finalInvoice?.invoiceTasks?.map((l) => l.taskId) ?? uniqueTaskIds,
         },
       },
       { status: 201 }

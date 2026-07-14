@@ -14,7 +14,13 @@ export async function GET(request: NextRequest) {
     orderBy: { name: 'asc' },
   });
 
-  return NextResponse.json({ success: true, data: items });
+  return NextResponse.json({
+    success: true,
+    data: items.map((item) => ({
+      ...item,
+      unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+    })),
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -25,7 +31,7 @@ export async function POST(request: NextRequest) {
   if (!companyId) return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
 
   const body = await request.json();
-  const { name, unit, currentStock, minStock } = body;
+  const { name, unit, currentStock, minStock, unitCost } = body;
 
   if (!name) return NextResponse.json({ success: false, message: 'name required' }, { status: 400 });
 
@@ -36,6 +42,9 @@ export async function POST(request: NextRequest) {
       unit: unit || 'units',
       currentStock: currentStock ?? 0,
       minStock: minStock ?? 5,
+      ...(unitCost != null && unitCost !== ''
+        ? { unitCost: Math.max(0, Number(unitCost)) }
+        : {}),
     },
   });
 

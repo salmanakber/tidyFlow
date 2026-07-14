@@ -22,7 +22,7 @@ export async function PATCH(
   }
 
   const body = await request.json();
-  const { name, unit, currentStock, minStock, isActive } = body;
+  const { name, unit, currentStock, minStock, isActive, unitCost } = body;
 
   const updated = await prisma.supplyItem.update({
     where: { id: itemId },
@@ -32,6 +32,9 @@ export async function PATCH(
       ...(currentStock !== undefined && { currentStock: Number(currentStock) }),
       ...(minStock !== undefined && { minStock: Number(minStock) }),
       ...(isActive !== undefined && { isActive }),
+      ...(unitCost !== undefined && {
+        unitCost: unitCost === null || unitCost === '' ? null : Math.max(0, Number(unitCost)),
+      }),
     },
   });
 

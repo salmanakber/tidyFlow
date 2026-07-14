@@ -36,6 +36,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         budget: true,
         taskAssignments: {
           select: {
+            id: true,
             user: {
               select: {
                 id: true,
@@ -153,6 +154,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           create: { taskId: task.id, userId: task.assignedUserId },
           update: {},
           select: {
+            id: true,
             startedAt: true,
             endedAt: true,
             durationMinutes: true,
@@ -346,6 +348,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         updatedAt: true,
         taskAssignments: {
           select: {
+            id: true,
             user: {
               select: {
                 id: true,
