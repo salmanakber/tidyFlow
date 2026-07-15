@@ -5,6 +5,14 @@ const LOCALE_NAMES: Record<string, string> = {
   pt: 'Portuguese',
   es: 'Spanish',
   ar: 'Arabic',
+  de: 'German',
+  fr: 'French',
+  it: 'Italian',
+  pl: 'Polish',
+  no: 'Norwegian',
+  sv: 'Swedish',
+  cn: 'Chinese',
+  zh: 'Chinese',
 };
 
 export function resolveAILocale(locale?: string | null): string {
