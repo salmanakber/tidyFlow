@@ -54,18 +54,26 @@ export function requireAuth(request: NextRequest): AuthContext | null {
 /** Resolve JWT user to a live User row (handles stale userId after DB restore/re-import). */
 export async function resolveAuthenticatedUser(tokenUser: JWTPayload) {
   const tokenUserId = Number(tokenUser.userId);
+  const userSelect = {
+    id: true,
+    companyId: true,
+    isActive: true,
+    email: true,
+    role: true,
+  } as const;
+
   let actor =
     Number.isFinite(tokenUserId) && tokenUserId > 0
       ? await prisma.user.findUnique({
           where: { id: tokenUserId },
-          select: { id: true, companyId: true, isActive: true, email: true },
+          select: userSelect,
         })
       : null;
 
   if ((!actor || !actor.isActive) && tokenUser.email) {
     actor = await prisma.user.findFirst({
       where: { email: tokenUser.email, isActive: true },
-      select: { id: true, companyId: true, isActive: true, email: true },
+      select: userSelect,
     });
   }
 
