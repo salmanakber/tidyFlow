@@ -51,6 +51,27 @@ export function requireAuth(request: NextRequest): AuthContext | null {
   return { tokenUser };
 }
 
+/** Resolve JWT user to a live User row (handles stale userId after DB restore/re-import). */
+export async function resolveAuthenticatedUser(tokenUser: JWTPayload) {
+  const tokenUserId = Number(tokenUser.userId);
+  let actor =
+    Number.isFinite(tokenUserId) && tokenUserId > 0
+      ? await prisma.user.findUnique({
+          where: { id: tokenUserId },
+          select: { id: true, companyId: true, isActive: true, email: true },
+        })
+      : null;
+
+  if ((!actor || !actor.isActive) && tokenUser.email) {
+    actor = await prisma.user.findFirst({
+      where: { email: tokenUser.email, isActive: true },
+      select: { id: true, companyId: true, isActive: true, email: true },
+    });
+  }
+
+  return actor?.isActive ? actor : null;
+}
+
 export function requireRole(tokenUser: JWTPayload, minRole: UserRole): boolean {
   try {
     const role = (tokenUser.role as UserRole) || UserRole.CLEANER;

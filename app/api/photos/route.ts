@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { requireAuth } from "@/lib/rbac"
+import { requireAuth, resolveAuthenticatedUser } from "@/lib/rbac"
 
 // GET /api/photos - Get photos for a task
 export async function GET(request: NextRequest) {
@@ -48,6 +48,17 @@ export async function POST(request: NextRequest) {
   const { tokenUser } = auth
 
   try {
+    const actor = await resolveAuthenticatedUser(tokenUser)
+    if (!actor) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Your session is out of date. Please sign out and sign in again.",
+        },
+        { status: 401 }
+      )
+    }
+
     const formData = await request.formData()
     const taskId = formData.get("taskId")
     const photoType = formData.get("photoType") as string
@@ -109,7 +120,7 @@ export async function POST(request: NextRequest) {
     const uploadResult = await uploadPhotoToCloudinary(
       buffer,
       Number(taskId),
-      tokenUser.userId,
+      actor.id,
       photoType as "before" | "after",
       timestamp,
       { watermarkText }
@@ -125,7 +136,7 @@ export async function POST(request: NextRequest) {
     const photo = await prisma.photo.create({
       data: {
         taskId: Number(taskId),
-        userId: tokenUser.userId,
+        userId: actor.id,
         url: uploadResult.url,
         photoType,
         caption: caption || undefined,

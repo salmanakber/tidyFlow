@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth } from '@/lib/rbac';
+import { requireAuth, resolveAuthenticatedUser } from '@/lib/rbac';
 
 export async function POST(request: NextRequest) {
   const auth = requireAuth(request);
@@ -9,24 +9,8 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { supplyItemId, quantity = 1, taskId, notes } = body;
 
-  const tokenUserId = Number(auth.tokenUser.userId);
-  // Resolve a real User row — JWT userId can go stale after restores/re-imports
-  let actor =
-    Number.isFinite(tokenUserId) && tokenUserId > 0
-      ? await prisma.user.findUnique({
-          where: { id: tokenUserId },
-          select: { id: true, companyId: true, isActive: true },
-        })
-      : null;
-
-  if ((!actor || !actor.isActive) && auth.tokenUser.email) {
-    actor = await prisma.user.findFirst({
-      where: { email: auth.tokenUser.email, isActive: true },
-      select: { id: true, companyId: true, isActive: true },
-    });
-  }
-
-  if (!actor?.isActive) {
+  const actor = await resolveAuthenticatedUser(auth.tokenUser);
+  if (!actor) {
     return NextResponse.json(
       {
         success: false,

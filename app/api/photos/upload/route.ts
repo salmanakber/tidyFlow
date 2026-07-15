@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth } from '@/lib/rbac';
+import { requireAuth, resolveAuthenticatedUser } from '@/lib/rbac';
 import { uploadPhotoToCloudinary } from '@/lib/cloudinary';
 
 export async function POST(request: NextRequest) {
@@ -10,6 +10,17 @@ export async function POST(request: NextRequest) {
   const { tokenUser } = auth;
 
   try {
+    const actor = await resolveAuthenticatedUser(tokenUser);
+    if (!actor) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'Your session is out of date. Please sign out and sign in again.',
+        },
+        { status: 401 }
+      );
+    }
+
     const formData = await request.formData();
     const taskId = Number(formData.get('taskId'));
     const photoType = formData.get('photoType') as 'before' | 'after';
@@ -75,7 +86,7 @@ export async function POST(request: NextRequest) {
     const uploadResult = await uploadPhotoToCloudinary(
       buffer,
       taskId,
-      tokenUser.userId,
+      actor.id,
       photoType,
       timestamp,
       { watermarkText }
@@ -91,7 +102,7 @@ export async function POST(request: NextRequest) {
     const photo = await prisma.photo.create({
       data: {
         taskId,
-        userId: tokenUser.userId,
+        userId: actor.id,
         url: uploadResult.url,
         caption,
         photoType,
