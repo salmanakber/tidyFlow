@@ -210,6 +210,32 @@ export async function ensureComplianceReminderScanScheduler() {
   return true;
 }
 
+/**
+ * Daily rebook opportunity scan (09:00 UTC) — notifies managers when a property
+ * has no upcoming job and last completed service is older than the threshold.
+ * Same job name as /api/cron/rebook-alerts (manual runs stay available).
+ */
+export async function ensureRebookAlertsScanScheduler() {
+  try {
+    await automationQueue.add(
+      'scan-rebook-alerts',
+      {},
+      {
+        jobId: 'scan-rebook-alerts-daily',
+        // Match vercel.json: 0 9 * * *
+        repeat: { pattern: '0 9 * * *' },
+      }
+    );
+  } catch (error) {
+    if (isRedisUnavailable(error)) {
+      console.warn('[Automation] Redis unavailable — rebook alerts scan not scheduled');
+      return false;
+    }
+    throw error;
+  }
+  return true;
+}
+
 export async function cancelTrialReminderJobs(companyId: number, trialEndsAt: Date) {
   for (const daysLeft of BILLING_REMINDER_MILESTONES) {
     const jobId = trialReminderJobId(companyId, trialEndsAt, daysLeft);

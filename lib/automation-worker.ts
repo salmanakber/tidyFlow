@@ -14,6 +14,7 @@ import {
   schedulePendingPlanSwitchReminders,
   scheduleTrialEndingReminders,
   ensureComplianceReminderScanScheduler,
+  ensureRebookAlertsScanScheduler,
 } from './automation-queue';
 import { getRedisConnectionOptions } from './redis-connection';
 
@@ -231,6 +232,13 @@ async function processAutomationJob(job: Job) {
       return sendComplianceAlert(job.data as import('./compliance-alerts').ComplianceExpiryAlertJob);
     }
 
+    case 'scan-rebook-alerts': {
+      const { runRebookAlerts } = await import('./rebook-alerts');
+      const result = await runRebookAlerts();
+      console.log('[Automation Worker] rebook alerts scan:', result);
+      return result;
+    }
+
     default:
       return { skipped: true };
   }
@@ -268,7 +276,13 @@ export function initializeAutomationWorker() {
     console.warn('[Automation Worker] compliance reminder scan scheduler failed:', err);
   });
 
-  console.log('[Automation Worker] initialized (billing, trial reminders, plan limits, compliance)');
+  ensureRebookAlertsScanScheduler().catch((err) => {
+    console.warn('[Automation Worker] rebook alerts scan scheduler failed:', err);
+  });
+
+  console.log(
+    '[Automation Worker] initialized (billing, trial reminders, plan limits, compliance, rebook alerts)'
+  );
   return automationWorkerInstance;
 }
 
