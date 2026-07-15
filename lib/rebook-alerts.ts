@@ -52,6 +52,7 @@ async function notifyManagersRebookAlert(input: {
   propertyAddress: string;
   daysSinceLastJob: number;
   lastTaskTitle?: string | null;
+  lastTaskId?: number | null;
   dedupeSince: Date;
 }) {
   const managers = await prisma.user.findMany({
@@ -75,11 +76,15 @@ async function notifyManagersRebookAlert(input: {
       type: 'rebook_alert',
       metadata: {
         propertyId: input.propertyId,
+        lastTaskId: input.lastTaskId ?? null,
         daysSinceLastJob: input.daysSinceLastJob,
         source: 'rebook_cron',
       },
       screenRoute: 'CreateTask',
-      screenParams: { propertyId: input.propertyId },
+      screenParams: {
+        propertyId: input.propertyId,
+        ...(input.lastTaskId ? { rebookFromTaskId: input.lastTaskId } : {}),
+      },
     }).catch(() => {});
 
     sent += 1;
@@ -212,6 +217,7 @@ export async function runRebookAlerts(options?: {
         propertyAddress: property.address,
         daysSinceLastJob,
         lastTaskTitle: lastTask.title,
+        lastTaskId: lastTask.id,
         dedupeSince,
       });
 

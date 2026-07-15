@@ -9,34 +9,68 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { supplyItemId, quantity = 1, taskId, notes } = body;
 
+  const tokenUserId = Number(auth.tokenUser.userId);
+  // Resolve a real User row — JWT userId can go stale after restores/re-imports
+  let actor =
+    Number.isFinite(tokenUserId) && tokenUserId > 0
+      ? await prisma.user.findUnique({
+          where: { id: tokenUserId },
+          select: { id: true, companyId: true, isActive: true },
+        })
+      : null;
+
+  if ((!actor || !actor.isActive) && auth.tokenUser.email) {
+    actor = await prisma.user.findFirst({
+      where: { email: auth.tokenUser.email, isActive: true },
+      select: { id: true, companyId: true, isActive: true },
+    });
+  }
+
+  if (!actor?.isActive) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: 'Your session is out of date. Please sign out and sign in again.',
+      },
+      { status: 401 }
+    );
+  }
+
   const item = await prisma.supplyItem.findUnique({ where: { id: Number(supplyItemId) } });
   if (!item) return NextResponse.json({ success: false, message: 'Supply not found' }, { status: 404 });
+
+  if (actor.companyId != null && item.companyId !== actor.companyId) {
+    return NextResponse.json({ success: false, message: 'Supply not found' }, { status: 404 });
+  }
+
+  const qty = Math.max(1, Number(quantity) || 1);
+  const parsedTaskId = taskId ? Number(taskId) : null;
 
   const usage = await prisma.supplyUsage.create({
     data: {
       supplyItemId: item.id,
-      userId: auth.tokenUser.userId,
-      taskId: taskId ? Number(taskId) : null,
-      quantity: Number(quantity),
-      notes,
+      userId: actor.id,
+      taskId: parsedTaskId && Number.isFinite(parsedTaskId) ? parsedTaskId : null,
+      quantity: qty,
+      notes: notes || null,
     },
   });
 
   await prisma.supplyItem.update({
     where: { id: item.id },
-    data: { currentStock: Math.max(0, item.currentStock - Number(quantity)) },
+    data: { currentStock: Math.max(0, item.currentStock - qty) },
   });
 
-  if (taskId) {
+  if (parsedTaskId && Number.isFinite(parsedTaskId)) {
     const task = await prisma.task.findUnique({
-      where: { id: Number(taskId) },
+      where: { id: parsedTaskId },
       select: { companyId: true },
     });
     if (task) {
       const { emitTaskEvent } = await import('@/lib/realtime');
-      await emitTaskEvent('task:supply', task.companyId, Number(taskId), {
+      await emitTaskEvent('task:supply', task.companyId, parsedTaskId, {
         supplyItemId: item.id,
-        quantity: Number(quantity),
+        quantity: qty,
       });
     }
   }

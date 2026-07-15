@@ -134,6 +134,26 @@ async function scoreCleanersForContext(ctx: {
       : [];
   const lastLogByUser = new Map(recentLocationLogs.map((l) => [l.userId, l]));
 
+  // How often each cleaner has finished jobs at this property (strong signal for rebook team)
+  const pastAtProperty =
+    cleanerIds.length > 0
+      ? await prisma.taskAssignment.groupBy({
+          by: ['userId'],
+          where: {
+            userId: { in: cleanerIds },
+            task: {
+              propertyId: ctx.property.id,
+              companyId: ctx.companyId,
+              status: { in: ['COMPLETED', 'APPROVED', 'SUBMITTED'] },
+            },
+          },
+          _count: { userId: true },
+        })
+      : [];
+  const historyCountByUser = new Map(
+    pastAtProperty.map((row) => [row.userId, row._count.userId])
+  );
+
   function resolveCleanerCoords(userId: number): Coordinates | null {
     const live = getCleanerLocation(userId);
     if (live) {
@@ -200,6 +220,8 @@ async function scoreCleanersForContext(ctx: {
     const clientSat = profile?.clientSatisfaction ?? 75;
     const workloadPenalty = existingAssignments * 5;
     const proximity = distance != null ? proximityBonus(distance) : 0;
+    const jobsAtProperty = historyCountByUser.get(cleaner.id) ?? 0;
+    const historyBonus = Math.min(18, jobsAtProperty * 6);
 
     const score =
       qualityScore * 0.35 +
@@ -207,13 +229,18 @@ async function scoreCleanersForContext(ctx: {
       clientSat * 0.25 +
       (profile?.reliabilityScore ?? 70) * 0.15 -
       workloadPenalty +
-      proximity;
+      proximity +
+      historyBonus;
 
     const name = `${cleaner.firstName || ''} ${cleaner.lastName || ''}`.trim() || cleaner.email;
     const tasksCompleted = profile?.tasksCompleted ?? 0;
 
     let reason = `Quality ${qualityScore.toFixed(0)}%, punctuality ${punctuality.toFixed(0)}%`;
-    if (tasksCompleted > 0) reason += `, ${tasksCompleted} similar tasks completed`;
+    if (jobsAtProperty > 0) {
+      reason += `, cleaned this property ${jobsAtProperty}× before`;
+    } else if (tasksCompleted > 0) {
+      reason += `, ${tasksCompleted} similar tasks completed`;
+    }
     if (distance != null) {
       reason += `, ${formatDistanceLabel(distance)}`;
     } else if (propertyCoords && !locationKnown) {
@@ -233,52 +260,77 @@ async function scoreCleanersForContext(ctx: {
 
   scored.sort((a, b) => b.score - a.score);
 
+  // Suggest a small team (not only one) so managers can assign multiple cleaners fast
+  const teamSize = Math.min(3, Math.max(1, scored.length));
   let recommendations: AssignmentRecommendations = {
     recommended: scored[0] || null,
-    alternatives: scored.slice(1, 3),
+    alternatives: scored.slice(1, Math.max(teamSize, 4)),
     aiGenerated: false,
   };
 
   const config = await getAIConfig(ctx.companyId);
   if (isAIEnabled(config) && config.assignmentRecommend && scored.length > 0) {
     try {
-      const prompt = `You are TidyFlow AI assignment advisor. Given task and cleaner data, refine recommendations.
+      const prompt = `You are TidyFlow AI assignment advisor for a cleaning operations app.
+Given the job and cleaner scores (including how often they cleaned this property), recommend a TEAM of 1–3 cleaners that work well together — not just a single person.
+Prefer cleaners with history at this property when scores are close.
+
 Task: ${ctx.taskTitle} at ${ctx.property.address} (${ctx.property.propertyType})
-Cleaners (JSON): ${JSON.stringify(scored.slice(0, 5))}
+Cleaners (JSON): ${JSON.stringify(scored.slice(0, 8))}
 
 Respond with JSON only:
 {
-  "recommendedUserId": <number>,
-  "reasons": { "<userId>": "<human readable reason>" }
+  "recommendedUserIds": [<1 to 3 user ids from the list, best first>],
+  "reasons": { "<userId>": "<short human readable reason>" }
 }
 Managers always decide. Provide helpful explanations only.`;
 
       const aiResult = await aiChat(
         [
-          { role: 'system', content: 'TidyFlow AI assignment recommendations. JSON only.' },
+          { role: 'system', content: 'TidyFlow AI assignment recommendations. JSON only. Prefer multi-cleaner teams when useful.' },
           { role: 'user', content: prompt },
         ],
         { companyId: ctx.companyId, jsonMode: true, locale: ctx.locale }
       );
 
       const aiResponse = parseJSONResponse<{
-        recommendedUserId: number;
+        recommendedUserId?: number;
+        recommendedUserIds?: number[];
         reasons: Record<string, string>;
       }>(aiResult.text);
 
       const applyReason = (rec: CleanerRecommendation) => ({
         ...rec,
-        reason: aiResponse.reasons[String(rec.userId)] || rec.reason,
+        reason: aiResponse.reasons?.[String(rec.userId)] || rec.reason,
       });
 
-      const recommended =
-        scored.find((s) => s.userId === aiResponse.recommendedUserId) || scored[0];
+      const preferredIds = (
+        Array.isArray(aiResponse.recommendedUserIds) && aiResponse.recommendedUserIds.length > 0
+          ? aiResponse.recommendedUserIds
+          : aiResponse.recommendedUserId
+            ? [aiResponse.recommendedUserId]
+            : scored.slice(0, teamSize).map((s) => s.userId)
+      )
+        .map(Number)
+        .filter((id) => scored.some((s) => s.userId === id))
+        .slice(0, 3);
 
+      const ordered =
+        preferredIds.length > 0
+          ? [
+              ...preferredIds
+                .map((id) => scored.find((s) => s.userId === id)!)
+                .filter(Boolean),
+              ...scored.filter((s) => !preferredIds.includes(s.userId)),
+            ]
+          : scored;
+
+      const primary = ordered[0] || scored[0];
       recommendations = {
-        recommended: applyReason(recommended),
-        alternatives: scored
-          .filter((s) => s.userId !== recommended.userId)
-          .slice(0, 2)
+        recommended: primary ? applyReason(primary) : null,
+        alternatives: ordered
+          .filter((s) => s.userId !== primary?.userId)
+          .slice(0, 3)
           .map(applyReason),
         aiGenerated: true,
       };

@@ -226,9 +226,14 @@ export async function generateTaskSuggestions(input: {
         ...(taskId ? { id: { not: taskId } } : {}),
       },
       orderBy: { completedAt: 'desc' },
-      take: 5,
+      take: 8,
       include: {
         checklists: { select: { title: true }, take: 15 },
+        taskAssignments: {
+          select: {
+            user: { select: { id: true, firstName: true, lastName: true } },
+          },
+        },
       },
     }),
     prisma.supplyItem.findMany({
@@ -242,6 +247,15 @@ export async function generateTaskSuggestions(input: {
   ]);
 
   const pastChecklistTitles = pastTasks.flatMap((t) => t.checklists.map((c) => c.title));
+  const pastCleanerNames = Array.from(
+    new Set(
+      pastTasks.flatMap((t) =>
+        t.taskAssignments.map((a) =>
+          `${a.user.firstName || ''} ${a.user.lastName || ''}`.trim()
+        ).filter(Boolean)
+      )
+    )
+  ).slice(0, 6);
   let checklist = buildRuleBasedChecklist(property.propertyType, pastChecklistTitles);
   let supplies = buildSuppliesFromStock(supplyItems);
 
@@ -256,6 +270,12 @@ export async function generateTaskSuggestions(input: {
   let propertySummary = `${property.propertyType} at ${property.address}.`;
   if (property.unitCount > 1) propertySummary += ` ${property.unitCount} units.`;
   if (property.notes) propertySummary += ` Notes: ${property.notes.slice(0, 120)}.`;
+  if (pastCleanerNames.length > 0) {
+    propertySummary += ` Often cleaned by: ${pastCleanerNames.join(', ')}.`;
+  }
+  if (pastTasks.length > 0) {
+    propertySummary += ` ${pastTasks.length} past completed job(s) used for suggestions.`;
+  }
   if (cleaningScore != null) propertySummary += ` Current AI cleaning score: ${cleaningScore}/100.`;
   if (supplyItems.length === 0) {
     propertySummary += ' No supplies in stock — add inventory in the mobile app.';
@@ -292,9 +312,10 @@ ${property.notes ? `Notes: ${property.notes.slice(0, 200)}` : ''}
 Task title: ${title || task?.title || 'Cleaning task'}
 Description: ${description || task?.description || 'Standard clean'}
 Past checklist items at this property: ${JSON.stringify(pastChecklistTitles.slice(0, 10))}
+Past cleaners at this property: ${JSON.stringify(pastCleanerNames)}
 ${cleaningScore != null ? `Existing photo QA score: ${cleaningScore}/100` : ''}
 
-Checklist 6–10 items. Supplies: pick 3–6 items from inventory only. Quantity must not exceed inStock.`;
+Checklist 6–10 items based on this property's history. Supplies: pick 3–6 items from inventory only. Quantity must not exceed inStock.`;
 
       const aiResult = await aiChat(
         [
