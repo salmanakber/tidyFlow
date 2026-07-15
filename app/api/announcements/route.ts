@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireAuth, resolveAuthenticatedUser, resolveCompanyIdAsync } from '@/lib/rbac';
 import { createNotification } from '@/lib/notifications';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 
+/** Only owners (and platform roles) manage announcements — not managers/cleaners. */
 const CREATOR_ROLES: UserRole[] = [
   UserRole.OWNER,
   UserRole.DEVELOPER,
-  UserRole.MANAGER,
-  UserRole.COMPANY_ADMIN,
   UserRole.SUPER_ADMIN,
 ];
 
@@ -18,14 +17,27 @@ function canCreate(role: UserRole) {
   return CREATOR_ROLES.includes(role);
 }
 
-function canManage(role: UserRole) {
-  return CREATOR_ROLES.includes(role);
-}
-
 const SESSION_STALE = {
   success: false,
   message: 'Your session is out of date. Please sign out and sign in again.',
 };
+
+/** Parse YYYY-MM-DD or ISO into end-of-day UTC so the banner shows through that calendar date. */
+function parseExpiresAt(input: unknown): Date | null {
+  if (typeof input !== 'string' || !input.trim()) return null;
+  const raw = input.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T23:59:59.999Z`);
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function notExpiredFilter(now = new Date()): Prisma.AnnouncementWhereInput {
+  return {
+    OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
+  };
+}
 
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
@@ -43,13 +55,21 @@ export async function GET(request: NextRequest) {
     }
 
     const role = actor.role as UserRole;
+    const activeOnly =
+      request.nextUrl.searchParams.get('activeOnly') === '1' ||
+      request.nextUrl.searchParams.get('activeOnly') === 'true';
 
-    // Creators see everything they post (including role-targeted); others see all + matching role
-    const where = canManage(role)
-      ? { companyId }
+    const where: Prisma.AnnouncementWhereInput = canCreate(role)
+      ? {
+          companyId,
+          ...(activeOnly ? notExpiredFilter() : {}),
+        }
       : {
           companyId,
-          OR: [{ targetRole: null }, { targetRole: role }],
+          AND: [
+            { OR: [{ targetRole: null }, { targetRole: role }] },
+            notExpiredFilter(),
+          ],
         };
 
     const announcements = await prisma.announcement.findMany({
@@ -90,10 +110,27 @@ export async function POST(request: NextRequest) {
       typeof body.targetRole === 'string' && body.targetRole.trim()
         ? body.targetRole.trim().toUpperCase()
         : null;
+    const expiresAt = parseExpiresAt(body.expiresAt ?? body.expiresOn);
 
     if (!title || !message) {
       return NextResponse.json(
         { success: false, message: 'Title and message are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!expiresAt) {
+      return NextResponse.json(
+        { success: false, message: 'Expiration date is required' },
+        { status: 400 }
+      );
+    }
+
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    if (expiresAt < startOfToday) {
+      return NextResponse.json(
+        { success: false, message: 'Expiration date must be today or later' },
         { status: 400 }
       );
     }
@@ -114,7 +151,8 @@ export async function POST(request: NextRequest) {
         title,
         message,
         targetRole,
-        createdBy: actor.id, // live DB user id (not stale JWT userId)
+        expiresAt,
+        createdBy: actor.id,
       },
       include: {
         creator: { select: { id: true, firstName: true, lastName: true, role: true } },
@@ -128,20 +166,30 @@ export async function POST(request: NextRequest) {
         id: { not: actor.id },
         ...(targetRole ? { role: targetRole as UserRole } : {}),
       },
-      select: { id: true },
+      select: { id: true, role: true },
     });
 
     await Promise.all(
-      recipients.map((user) =>
-        createNotification({
+      recipients.map((user) => {
+        const homeRoute =
+          user.role === UserRole.CLEANER
+            ? 'CleanerHome'
+            : user.role === UserRole.MANAGER
+              ? 'ManagerHome'
+              : undefined;
+        return createNotification({
           userId: user.id,
           title,
           message,
           type: 'announcement',
-          metadata: { announcementId: announcement.id, screenRoute: 'Announcements' },
-          screenRoute: 'Announcements',
-        })
-      )
+          metadata: {
+            announcementId: announcement.id,
+            expiresAt: expiresAt.toISOString(),
+            ...(homeRoute ? { screenRoute: homeRoute } : {}),
+          },
+          screenRoute: homeRoute,
+        });
+      })
     );
 
     return NextResponse.json({ success: true, data: announcement }, { status: 201 });
@@ -162,7 +210,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const role = actor.role as UserRole;
-    if (!canManage(role)) {
+    if (!canCreate(role)) {
       return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
     }
 

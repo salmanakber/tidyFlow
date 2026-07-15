@@ -780,18 +780,20 @@ model ChatMessage {
 
 // Phase 2: Broadcast announcements
 model Announcement {
-  id         Int      @id @default(autoincrement())
-  companyId  Int      @map("company_id")
+  id         Int       @id @default(autoincrement())
+  companyId  Int       @map("company_id")
   title      String
-  message    String   @db.Text
-  targetRole String?  @map("target_role") // null = all, or specific role
-  createdBy  Int      @map("created_by")
-  createdAt  DateTime @default(now()) @map("created_at")
+  message    String    @db.Text
+  targetRole String?   @map("target_role") // null = all, or specific role
+  createdBy  Int       @map("created_by")
+  expiresAt  DateTime? @map("expires_at") // hide from banners after this datetime
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   creator User    @relation(fields: [createdBy], references: [id], onDelete: Cascade)
 
   @@index([companyId])
+  @@index([expiresAt])
   @@map("announcements")
 }
 

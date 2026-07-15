@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS "announcements" (
   "message" TEXT NOT NULL,
   "target_role" TEXT,
   "created_by" INTEGER NOT NULL,
+  "expires_at" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
