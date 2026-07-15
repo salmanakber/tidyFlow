@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth } from '@/lib/rbac';
+import { requireAuth, resolveAuthenticatedUser, resolveCompanyIdAsync } from '@/lib/rbac';
 import { createNotification } from '@/lib/notifications';
 import { UserRole } from '@prisma/client';
 
@@ -22,18 +22,27 @@ function canManage(role: UserRole) {
   return CREATOR_ROLES.includes(role);
 }
 
+const SESSION_STALE = {
+  success: false,
+  message: 'Your session is out of date. Please sign out and sign in again.',
+};
+
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
-
   try {
-    const companyId = tokenUser.companyId;
+    const actor = await resolveAuthenticatedUser(auth.tokenUser);
+    if (!actor) {
+      return NextResponse.json(SESSION_STALE, { status: 401 });
+    }
+
+    const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
     if (!companyId) {
       return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
     }
+
+    const role = actor.role as UserRole;
 
     // Creators see everything they post (including role-targeted); others see all + matching role
     const where = canManage(role)
@@ -63,18 +72,21 @@ export async function POST(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
-
-  if (!canCreate(role)) {
-    return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
-  }
-
   try {
+    const actor = await resolveAuthenticatedUser(auth.tokenUser);
+    if (!actor) {
+      return NextResponse.json(SESSION_STALE, { status: 401 });
+    }
+
+    const role = actor.role as UserRole;
+    if (!canCreate(role)) {
+      return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
+    }
+
     const body = await request.json();
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     const message = typeof body.message === 'string' ? body.message.trim() : '';
-    let targetRole: string | null =
+    const targetRole: string | null =
       typeof body.targetRole === 'string' && body.targetRole.trim()
         ? body.targetRole.trim().toUpperCase()
         : null;
@@ -90,7 +102,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'Invalid target role' }, { status: 400 });
     }
 
-    const companyId = tokenUser.companyId;
+    const companyId =
+      (await resolveCompanyIdAsync(request, auth.tokenUser)) ?? actor.companyId ?? null;
     if (!companyId) {
       return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
     }
@@ -101,7 +114,7 @@ export async function POST(request: NextRequest) {
         title,
         message,
         targetRole,
-        createdBy: tokenUser.userId,
+        createdBy: actor.id, // live DB user id (not stale JWT userId)
       },
       include: {
         creator: { select: { id: true, firstName: true, lastName: true, role: true } },
@@ -112,7 +125,7 @@ export async function POST(request: NextRequest) {
       where: {
         companyId,
         isActive: true,
-        id: { not: tokenUser.userId },
+        id: { not: actor.id },
         ...(targetRole ? { role: targetRole as UserRole } : {}),
       },
       select: { id: true },
@@ -142,20 +155,24 @@ export async function DELETE(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
-  const { tokenUser } = auth;
-  const role = tokenUser.role as UserRole;
-
-  if (!canManage(role)) {
-    return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
-  }
-
   try {
+    const actor = await resolveAuthenticatedUser(auth.tokenUser);
+    if (!actor) {
+      return NextResponse.json(SESSION_STALE, { status: 401 });
+    }
+
+    const role = actor.role as UserRole;
+    if (!canManage(role)) {
+      return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
+    }
+
     const id = Number(request.nextUrl.searchParams.get('id'));
     if (!id || Number.isNaN(id)) {
       return NextResponse.json({ success: false, message: 'id required' }, { status: 400 });
     }
 
-    const companyId = tokenUser.companyId;
+    const companyId =
+      (await resolveCompanyIdAsync(request, auth.tokenUser)) ?? actor.companyId ?? null;
     if (!companyId) {
       return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
     }
