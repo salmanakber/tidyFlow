@@ -32,7 +32,8 @@ import {
   MapPin,
   CreditCard,
   Camera,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Target
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 
@@ -325,6 +326,13 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       icon: Sparkles,
       permission: null,
       roles: ["COMPANY_ADMIN", "OWNER", "MANAGER", "DEVELOPER", "SUPER_ADMIN"]
+    },
+    {
+      name: "AI Sales Agent",
+      href: "/admin/marketing/ai-sales-agent",
+      icon: Target,
+      permission: null,
+      roles: ["DEVELOPER", "OWNER", "SUPER_ADMIN", "ADMIN_UNIQUE"]
     },
     { 
       name: "Settings", 

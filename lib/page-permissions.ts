@@ -55,6 +55,9 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   
   // Checklist Templates - tasks related
   '/admin/checklist-templates': PERMISSIONS.TASKS_VIEW,
+
+  // Marketing / AI Sales Agent — admin-only (role gated in page + API)
+  '/admin/marketing/ai-sales-agent': null,
 };
 
 /**

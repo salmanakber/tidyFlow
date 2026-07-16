@@ -239,6 +239,19 @@ async function processAutomationJob(job: Job) {
       return result;
     }
 
+    // AI Sales Agent jobs (isolated handlers — do not alter billing/cron behaviour)
+    case 'sa-discover-places':
+    case 'sa-discover-search':
+    case 'sa-discover-multi':
+    case 'sa-analyze-lead':
+    case 'sa-send-email':
+    case 'sa-retry-email':
+    case 'sa-sync-replies':
+    case 'sa-run-scheduler-job': {
+      const { processSalesAgentAutomationJob } = await import('./sales-agent/queue');
+      return processSalesAgentAutomationJob(job);
+    }
+
     default:
       return { skipped: true };
   }
@@ -280,8 +293,14 @@ export function initializeAutomationWorker() {
     console.warn('[Automation Worker] rebook alerts scan scheduler failed:', err);
   });
 
+  import('./sales-agent/queue')
+    .then(({ ensureReplySyncScheduler }) => ensureReplySyncScheduler())
+    .catch((err) => {
+      console.warn('[Automation Worker] sales-agent reply sync scheduler failed:', err);
+    });
+
   console.log(
-    '[Automation Worker] initialized (billing, trial reminders, plan limits, compliance, rebook alerts)'
+    '[Automation Worker] initialized (billing, trial reminders, plan limits, compliance, rebook alerts, sales agent)'
   );
   return automationWorkerInstance;
 }

@@ -1,0 +1,269 @@
+import prisma from '@/lib/prisma';
+
+export const HIGH_PRIORITY_METHOD = 'PRIORITY_REPLIES';
+export const HIGH_PRIORITY_LABEL = '⭐ High priority — Replied';
+
+export function buildDiscoveryGroupLabel(input: {
+  countries?: string[];
+  cities?: string[];
+  keywords?: string[];
+  method?: string;
+}) {
+  const geo =
+    [input.countries?.join(', '), input.cities?.slice(0, 3).join(', ')].filter(Boolean).join(' · ') ||
+    'All locations';
+  const kw = (input.keywords || []).slice(0, 2).join(', ') || 'leads';
+  const when = new Date().toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${geo} — ${kw} (${when})`;
+}
+
+export async function createDiscoveryGroup(input: {
+  method: string;
+  countries?: string[];
+  cities?: string[];
+  keywords?: string[];
+  totalChunks: number;
+  userId?: number;
+  status?: string;
+  label?: string;
+}) {
+  return (prisma as any).saDiscoveryGroup.create({
+    data: {
+      label: input.label || buildDiscoveryGroupLabel(input),
+      method: input.method,
+      countries: JSON.stringify(input.countries || []),
+      cities: JSON.stringify(input.cities || []),
+      keywords: JSON.stringify(input.keywords || []),
+      status: input.status || 'QUEUED',
+      totalChunks: input.totalChunks,
+      completedChunks: 0,
+      createdCount: 0,
+      skippedCount: 0,
+      userId: input.userId || null,
+    },
+  });
+}
+
+/** Manual empty / named group for organizing leads */
+export async function createManualGroup(input: {
+  label: string;
+  userId?: number;
+  leadIds?: number[];
+}) {
+  const label = input.label.trim();
+  if (!label) throw new Error('Group name is required');
+  const group = await createDiscoveryGroup({
+    method: 'MANUAL',
+    label,
+    totalChunks: 0,
+    userId: input.userId,
+    status: 'COMPLETED',
+  });
+  if (input.leadIds?.length) {
+    const added = await addLeadsToDiscoveryGroup(group.id, input.leadIds);
+    if (added) {
+      await (prisma as any).saDiscoveryGroup.update({
+        where: { id: group.id },
+        data: { createdCount: { increment: added } },
+      });
+    }
+  }
+  return group;
+}
+
+export async function addLeadsToDiscoveryGroup(groupId: number, leadIds: number[]) {
+  const unique = Array.from(new Set(leadIds.filter(Boolean)));
+  if (!unique.length) return 0;
+  let added = 0;
+  for (const companyId of unique) {
+    try {
+      await (prisma as any).saDiscoveryGroupMember.create({
+        data: { groupId, companyId },
+      });
+      added++;
+    } catch {
+      /* already in group */
+    }
+  }
+  return added;
+}
+
+export async function removeLeadsFromDiscoveryGroup(groupId: number, leadIds: number[]) {
+  const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
+    where: { groupId, companyId: { in: leadIds } },
+  });
+  return result.count as number;
+}
+
+/** Assign leads to a group; optionally remove from other groups first (move). */
+export async function assignLeadsToGroup(input: {
+  groupId: number;
+  leadIds: number[];
+  move?: boolean;
+  removeFromGroupIds?: number[];
+}) {
+  const leadIds = Array.from(new Set(input.leadIds.map(Number).filter(Boolean)));
+  if (!leadIds.length) return { added: 0, removed: 0 };
+
+  let removed = 0;
+  if (input.move) {
+    const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
+      where: {
+        companyId: { in: leadIds },
+        groupId: { not: input.groupId },
+      },
+    });
+    removed = result.count;
+  } else if (input.removeFromGroupIds?.length) {
+    const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
+      where: {
+        companyId: { in: leadIds },
+        groupId: { in: input.removeFromGroupIds },
+      },
+    });
+    removed = result.count;
+  }
+
+  const added = await addLeadsToDiscoveryGroup(input.groupId, leadIds);
+  return { added, removed, groupId: input.groupId, leadIds };
+}
+
+export async function deleteDiscoveryGroup(groupId: number) {
+  const group = await (prisma as any).saDiscoveryGroup.findUnique({ where: { id: groupId } });
+  if (!group) throw new Error('Group not found');
+  // Members cascade; leads stay. Priority group can be recreated.
+  await (prisma as any).saDiscoveryGroup.delete({ where: { id: groupId } });
+  return group;
+}
+
+export async function ensureHighPriorityRepliesGroup(opts?: { backfill?: boolean }) {
+  let group = await (prisma as any).saDiscoveryGroup.findFirst({
+    where: { method: HIGH_PRIORITY_METHOD },
+    orderBy: { id: 'asc' },
+  });
+  let created = false;
+  if (!group) {
+    group = await createDiscoveryGroup({
+      method: HIGH_PRIORITY_METHOD,
+      label: HIGH_PRIORITY_LABEL,
+      totalChunks: 0,
+      status: 'COMPLETED',
+    });
+    created = true;
+  } else if (group.label !== HIGH_PRIORITY_LABEL) {
+    group = await (prisma as any).saDiscoveryGroup.update({
+      where: { id: group.id },
+      data: { label: HIGH_PRIORITY_LABEL },
+    });
+  }
+
+  if (created || opts?.backfill) {
+    const replied = await (prisma as any).saLeadCompany.findMany({
+      where: {
+        OR: [
+          { status: { in: ['REPLIED', 'CONVERTED'] } },
+          { replyStatus: { not: null } },
+          { replies: { some: {} } },
+        ],
+      },
+      select: { id: true },
+      take: 2000,
+    });
+    if (replied.length) {
+      await addLeadsToDiscoveryGroup(
+        group.id,
+        replied.map((r: any) => r.id)
+      );
+    }
+  }
+  return group;
+}
+
+/** When a company replies, put them in the high-priority group */
+export async function addLeadToHighPriorityGroup(companyId: number) {
+  if (!companyId) return null;
+  const group = await ensureHighPriorityRepliesGroup();
+  await addLeadsToDiscoveryGroup(group.id, [companyId]);
+  return group;
+}
+
+export async function recordDiscoveryChunkResult(
+  groupId: number | undefined | null,
+  result: { created?: number; skipped?: number; leads?: { id: number }[] }
+) {
+  if (!groupId) return;
+
+  const leadIds = (result.leads || []).map((l) => l.id).filter(Boolean);
+  if (leadIds.length) await addLeadsToDiscoveryGroup(groupId, leadIds);
+
+  const group = await (prisma as any).saDiscoveryGroup.update({
+    where: { id: groupId },
+    data: {
+      completedChunks: { increment: 1 },
+      createdCount: { increment: result.created || 0 },
+      skippedCount: { increment: result.skipped || 0 },
+      status: 'RUNNING',
+    },
+  });
+
+  if (group.totalChunks > 0 && group.completedChunks >= group.totalChunks) {
+    await (prisma as any).saDiscoveryGroup.update({
+      where: { id: groupId },
+      data: { status: 'COMPLETED' },
+    });
+  }
+}
+
+function mapGroup(g: any) {
+  return {
+    ...g,
+    memberCount: g._count?.members ?? 0,
+    countries: safeJson(g.countries, []),
+    cities: safeJson(g.cities, []),
+    keywords: safeJson(g.keywords, []),
+    isPriority: g.method === HIGH_PRIORITY_METHOD,
+    progressPct:
+      g.totalChunks > 0 ? Math.min(100, Math.round((g.completedChunks / g.totalChunks) * 100)) : 0,
+  };
+}
+
+export async function listDiscoveryGroups(limit = 50) {
+  await ensureHighPriorityRepliesGroup();
+  const groups = await (prisma as any).saDiscoveryGroup.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    include: {
+      _count: { select: { members: true } },
+    },
+  });
+  const mapped = groups.map(mapGroup);
+  // Priority group always first
+  mapped.sort((a: any, b: any) => {
+    if (a.isPriority && !b.isPriority) return -1;
+    if (!a.isPriority && b.isPriority) return 1;
+    return 0;
+  });
+  return mapped;
+}
+
+function safeJson(raw: unknown, fallback: any) {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return fallback;
+  }
+}
+
+export async function getLeadIdsInGroup(groupId: number): Promise<number[]> {
+  const members = await (prisma as any).saDiscoveryGroupMember.findMany({
+    where: { groupId },
+    select: { companyId: true },
+  });
+  return members.map((m: any) => m.companyId);
+}

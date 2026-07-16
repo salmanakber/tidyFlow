@@ -1598,3 +1598,438 @@ model QuickBooksVendorMap {
   @@index([companyId])
   @@map("quickbooks_vendor_maps")
 }
+
+// ============================================================================
+// AI Sales & Outreach Agent (platform admin marketing module)
+// Isolated tables — do not couple to existing Company/User business models
+// ============================================================================
+
+enum SaLeadStatus {
+  NEW
+  ANALYZED
+  QUEUED
+  CONTACTED
+  REPLIED
+  CONVERTED
+  DISCARDED
+}
+
+enum SaCampaignStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+}
+
+enum SaTemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SaEmailDeliveryStatus {
+  PENDING
+  QUEUED
+  SENT
+  DELIVERED
+  OPENED
+  BOUNCED
+  FAILED
+  RETRYING
+}
+
+enum SaReplyIntent {
+  INTERESTED
+  NOT_INTERESTED
+  BOOK_DEMO
+  NEED_PRICING
+  REQUEST_INFORMATION
+  ALREADY_USING_COMPETITOR
+  WRONG_CONTACT
+  SPAM
+  OTHER
+}
+
+enum SaDiscoverySource {
+  GOOGLE_PLACES
+  SEARCH_ENGINE
+  MANUAL
+  IMPORT
+}
+
+model SaLeadCompany {
+  id                 Int              @id @default(autoincrement())
+  name               String
+  website            String?
+  websiteNormalized  String?          @map("website_normalized")
+  address            String?          @db.Text
+  phone              String?
+  email              String?
+  city               String?
+  state              String?
+  country            String?
+  googlePlaceId      String?          @unique @map("google_place_id")
+  googleRating       Float?           @map("google_rating")
+  reviewCount        Int?             @map("review_count")
+  businessStatus     String?          @map("business_status")
+  category           String?
+  industry           String?
+  companySize        String?          @map("company_size")
+  source             SaDiscoverySource @default(MANUAL)
+  discoveryKeyword   String?          @map("discovery_keyword")
+  campaignId         Int?             @map("campaign_id")
+  hasWebsite         Boolean          @default(false) @map("has_website")
+  hasEmail           Boolean          @default(false) @map("has_email")
+  hasPhone           Boolean          @default(false) @map("has_phone")
+  lastContactedAt    DateTime?        @map("last_contacted_at")
+  emailSentCount     Int              @default(0) @map("email_sent_count")
+  replyStatus        String?          @map("reply_status")
+  status             SaLeadStatus     @default(NEW)
+  leadScore          Int?             @map("lead_score")
+  socialLinks        String?          @map("social_links") @db.Text
+  services           String?          @db.Text
+  aboutSnippet       String?          @map("about_snippet") @db.Text
+  contactPageUrl     String?          @map("contact_page_url")
+  aboutPageUrl       String?          @map("about_page_url")
+  crawlStatus        String?          @map("crawl_status")
+  crawlError         String?          @map("crawl_error") @db.Text
+  lastCrawledAt      DateTime?        @map("last_crawled_at")
+  lastAnalyzedAt     DateTime?        @map("last_analyzed_at")
+  metadata           String?          @db.Text
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  campaign     SaCampaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contacts     SaContact[]
+  analyses     SaAiAnalysis[]
+  sentEmails   SaSentEmail[]
+  replies      SaReply[]
+  groupMembers SaDiscoveryGroupMember[]
+
+  @@unique([websiteNormalized])
+  @@index([status])
+  @@index([city])
+  @@index([country])
+  @@index([email])
+  @@index([leadScore])
+  @@index([createdAt])
+  @@index([campaignId])
+  @@map("sa_lead_companies")
+}
+
+// One search run (e.g. United States × keywords) — pick whole batch in campaigns
+model SaDiscoveryGroup {
+  id              Int      @id @default(autoincrement())
+  label           String
+  method          String
+  countries       String?  @db.Text
+  cities          String?  @db.Text
+  keywords        String?  @db.Text
+  status          String   @default("QUEUED")
+  totalChunks     Int      @default(0) @map("total_chunks")
+  completedChunks Int      @default(0) @map("completed_chunks")
+  createdCount    Int      @default(0) @map("created_count")
+  skippedCount    Int      @default(0) @map("skipped_count")
+  userId          Int?     @map("user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  members SaDiscoveryGroupMember[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("sa_discovery_groups")
+}
+
+model SaDiscoveryGroupMember {
+  id        Int      @id @default(autoincrement())
+  groupId   Int      @map("group_id")
+  companyId Int      @map("company_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group   SaDiscoveryGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  company SaLeadCompany    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, companyId])
+  @@index([groupId])
+  @@index([companyId])
+  @@map("sa_discovery_group_members")
+}
+
+model SaContact {
+  id          Int      @id @default(autoincrement())
+  companyId   Int      @map("company_id")
+  name        String?
+  email       String?
+  phone       String?
+  role        String?
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company SaLeadCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([email])
+  @@map("sa_contacts")
+}
+
+model SaAiAnalysis {
+  id                      Int      @id @default(autoincrement())
+  companyId               Int      @map("company_id")
+  provider                String
+  model                   String?
+  needsTidyFlow           Boolean? @map("needs_tidyflow")
+  hasBookingSoftware      Boolean? @map("has_booking_software")
+  hasClientPortal         Boolean? @map("has_client_portal")
+  hasSchedulingSoftware   Boolean? @map("has_scheduling_software")
+  hasInspectionMgmt       Boolean? @map("has_inspection_mgmt")
+  hasStaffManagement      Boolean? @map("has_staff_management")
+  websiteOutdated         Boolean? @map("website_outdated")
+  leadScore               Int      @map("lead_score")
+  scoreReason             String?  @map("score_reason") @db.Text
+  personalizedIntro       String?  @map("personalized_intro") @db.Text
+  rawResponse             String?  @map("raw_response") @db.Text
+  promptUsed              String?  @map("prompt_used") @db.Text
+  tokensUsed              Int?     @map("tokens_used")
+  latencyMs               Int?     @map("latency_ms")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  company SaLeadCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([leadScore])
+  @@index([createdAt])
+  @@map("sa_ai_analyses")
+}
+
+model SaCampaign {
+  id                  Int               @id @default(autoincrement())
+  name                String
+  country             String?
+  cities              String?           @db.Text
+  keywords            String?           @db.Text
+  templateId          Int?              @map("template_id")
+  aiPrompt            String?           @map("ai_prompt") @db.Text
+  sendingLimit        Int?              @map("sending_limit")
+  delayBetweenEmails  Int               @default(60) @map("delay_between_emails")
+  maxEmailsPerDay     Int               @default(50) @map("max_emails_per_day")
+  followUpSchedule    String?           @map("follow_up_schedule") @db.Text
+  status              SaCampaignStatus  @default(DRAFT)
+  discoveryMethod     String?           @map("discovery_method")
+  discoveryConfig     String?           @map("discovery_config") @db.Text
+  emailsSent          Int               @default(0) @map("emails_sent")
+  leadsDiscovered     Int               @default(0) @map("leads_discovered")
+  startedAt           DateTime?         @map("started_at")
+  completedAt         DateTime?         @map("completed_at")
+  lastError           String?           @map("last_error") @db.Text
+  createdById         Int?              @map("created_by_id")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  template    SaEmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  leads       SaLeadCompany[]
+  sentEmails  SaSentEmail[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("sa_campaigns")
+}
+
+model SaEmailTemplate {
+  id          Int              @id @default(autoincrement())
+  name        String
+  subject     String
+  htmlBody    String?          @map("html_body") @db.Text
+  textBody    String?          @map("text_body") @db.Text
+  status      SaTemplateStatus @default(DRAFT)
+  version     Int              @default(1)
+  createdById Int?             @map("created_by_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  versions   SaEmailTemplateVersion[]
+  campaigns  SaCampaign[]
+  sentEmails SaSentEmail[]
+
+  @@index([status])
+  @@map("sa_email_templates")
+}
+
+model SaEmailTemplateVersion {
+  id          Int      @id @default(autoincrement())
+  templateId  Int      @map("template_id")
+  version     Int
+  subject     String
+  htmlBody    String?  @map("html_body") @db.Text
+  textBody    String?  @map("text_body") @db.Text
+  createdById Int?     @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  template SaEmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([templateId])
+  @@map("sa_email_template_versions")
+}
+
+model SaSentEmail {
+  id              Int                   @id @default(autoincrement())
+  companyId       Int?                  @map("company_id")
+  campaignId      Int?                  @map("campaign_id")
+  templateId      Int?                  @map("template_id")
+  recipientEmail  String                @map("recipient_email")
+  recipientName   String?               @map("recipient_name")
+  subject         String
+  htmlBody        String?               @map("html_body") @db.Text
+  textBody        String?               @map("text_body") @db.Text
+  aiPrompt        String?               @map("ai_prompt") @db.Text
+  aiProvider      String?               @map("ai_provider")
+  deliveryStatus  SaEmailDeliveryStatus @default(PENDING) @map("delivery_status")
+  retryCount      Int                   @default(0) @map("retry_count")
+  smtpResponse    String?               @map("smtp_response") @db.Text
+  threadId        String?               @map("thread_id")
+  messageId       String?               @map("message_id")
+  openCount       Int                   @default(0) @map("open_count")
+  openedAt        DateTime?             @map("opened_at")
+  sentAt          DateTime?             @map("sent_at")
+  scheduledFor    DateTime?             @map("scheduled_for")
+  errorMessage    String?               @map("error_message") @db.Text
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  company  SaLeadCompany?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  campaign SaCampaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  template SaEmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  replies  SaReply[]
+
+  @@index([companyId])
+  @@index([campaignId])
+  @@index([deliveryStatus])
+  @@index([recipientEmail])
+  @@index([sentAt])
+  @@index([messageId])
+  @@index([createdAt])
+  @@map("sa_sent_emails")
+}
+
+model SaReply {
+  id              Int            @id @default(autoincrement())
+  companyId       Int?           @map("company_id")
+  sentEmailId     Int?           @map("sent_email_id")
+  fromEmail       String         @map("from_email")
+  fromName        String?        @map("from_name")
+  subject         String?
+  bodyText        String?        @map("body_text") @db.Text
+  bodyHtml        String?        @map("body_html") @db.Text
+  threadId        String?        @map("thread_id")
+  messageId       String?        @map("message_id")
+  inReplyTo       String?        @map("in_reply_to")
+  sentiment       String?
+  intent          SaReplyIntent  @default(OTHER)
+  aiSummary       String?        @map("ai_summary") @db.Text
+  isPositive      Boolean?       @map("is_positive")
+  receivedAt      DateTime       @default(now()) @map("received_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  company   SaLeadCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sentEmail SaSentEmail?   @relation(fields: [sentEmailId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([sentEmailId])
+  @@index([intent])
+  @@index([receivedAt])
+  @@map("sa_replies")
+}
+
+model SaModuleSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String   @db.Text
+  category    String
+  isEncrypted Boolean  @default(false) @map("is_encrypted")
+  description String?  @db.Text
+  updatedById Int?     @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([category])
+  @@map("sa_module_settings")
+}
+
+model SaSystemLog {
+  id         Int      @id @default(autoincrement())
+  level      String   @default("info")
+  category   String
+  action     String
+  message    String   @db.Text
+  details    String?  @db.Text
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  userId     Int?     @map("user_id")
+  durationMs Int?     @map("duration_ms")
+  success    Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([category])
+  @@index([level])
+  @@index([createdAt])
+  @@index([action])
+  @@map("sa_system_logs")
+}
+
+model SaSchedulerJob {
+  id            Int       @id @default(autoincrement())
+  name          String
+  jobType       String    @map("job_type")
+  cronExpression String?  @map("cron_expression")
+  runAt         DateTime? @map("run_at")
+  timezone      String    @default("UTC")
+  config        String?   @db.Text
+  enabled       Boolean   @default(true)
+  lastRunAt     DateTime? @map("last_run_at")
+  nextRunAt     DateTime? @map("next_run_at")
+  createdById   Int?      @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  runs SaSchedulerRun[]
+
+  @@index([enabled])
+  @@index([jobType])
+  @@map("sa_scheduler_jobs")
+}
+
+model SaSchedulerRun {
+  id          Int       @id @default(autoincrement())
+  jobId       Int       @map("job_id")
+  status      String
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  result      String?   @db.Text
+  error       String?   @db.Text
+
+  job SaSchedulerJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([startedAt])
+  @@map("sa_scheduler_runs")
+}
+
+model SaAiUsageLog {
+  id         Int      @id @default(autoincrement())
+  provider   String
+  model      String?
+  action     String
+  tokensUsed Int?     @map("tokens_used")
+  success    Boolean  @default(true)
+  error      String?  @db.Text
+  latencyMs  Int?     @map("latency_ms")
+  companyId  Int?     @map("company_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([provider])
+  @@index([createdAt])
+  @@map("sa_ai_usage_logs")
+}

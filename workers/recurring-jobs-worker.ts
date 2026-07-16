@@ -2,6 +2,7 @@
 
 /**
  * Unified TidyFlow BullMQ worker — recurring jobs + billing/automation notifications.
+ * Sales Agent jobs also run on tidyflow-automation (handled inside automation-worker).
  *
  * Usage:
  *   npm run worker
@@ -39,7 +40,7 @@ async function startWorker() {
   console.log(
     `[Worker] Redis: ${process.env.REDIS_URL || `${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`}`
   );
-  console.log('[Worker] Queues: recurring-jobs, tidyflow-automation (billing + compliance alerts)');
+  console.log('[Worker] Queues: recurring-jobs, tidyflow-automation (billing + sales agent)');
   console.log('[Worker] ========================================');
 
   try {
@@ -47,9 +48,9 @@ async function startWorker() {
     initializeRecurringJobsWorker();
     console.log('[Worker] ✓ Recurring jobs worker ready');
 
-    console.log('[Worker] Initializing automation/billing worker...');
+    console.log('[Worker] Initializing automation worker...');
     initializeAutomationWorker();
-    console.log('[Worker] ✓ Automation worker ready (billing, trial reminders, compliance expiry pushes)');
+    console.log('[Worker] ✓ Automation worker ready (billing, compliance, rebook, sales agent)');
 
     console.log('[Worker] Running recurring job recovery...');
     try {
@@ -70,10 +71,6 @@ async function startWorker() {
     console.log('[Worker] ========================================');
   } catch (error: unknown) {
     console.error('[Worker] ❌ Failed to start worker:', error);
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('ECONNREFUSED') || message.includes('Redis')) {
-      process.exit(1);
-    }
     process.exit(1);
   }
 }
