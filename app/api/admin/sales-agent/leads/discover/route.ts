@@ -35,7 +35,9 @@ export async function POST(request: NextRequest) {
     return jsonOk(suggestions);
   }
 
-  const method = body.method === 'search_engine' ? 'search_engine' : 'google_places';
+  const method = (body.method === 'search_engine' ? 'search_engine' : 'google_places') as
+    | 'google_places'
+    | 'search_engine';
   const keywords = parseList(body.keywords?.length ? body.keywords : body.keyword);
   const countries = parseList(body.countries?.length ? body.countries : body.country);
   const cities = parseList(body.cities?.length ? body.cities : body.city);
@@ -45,7 +47,15 @@ export async function POST(request: NextRequest) {
     return jsonError('Add at least one keyword (or ask AI to suggest keywords)');
   }
 
-  const payload = {
+  const payload: {
+    method: 'google_places' | 'search_engine';
+    keywords: string[];
+    countries: string[];
+    cities: string[];
+    maxResults?: number;
+    campaignId?: number;
+    userId: number;
+  } = {
     method,
     keywords,
     countries,
