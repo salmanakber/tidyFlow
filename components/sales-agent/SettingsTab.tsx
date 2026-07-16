@@ -358,6 +358,11 @@ export default function SettingsTab() {
             </li>
           </ul>
         </div>
+        <p className="text-xs text-gray-500">
+          Full reply test: Send test email → open it → Reply → wait ~1 min → Test reply sync → check Outreach →
+          Replies.
+        </p>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
         <h3 className="text-sm font-semibold text-gray-900">Brevo SMTP (send)</h3>
