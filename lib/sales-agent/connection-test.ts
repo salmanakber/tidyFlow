@@ -10,19 +10,25 @@ const SEND_TIMEOUT_MS = 25_000;
 const SYNC_TIMEOUT_MS = 45_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
       reject(
         new Error(
           `${label} timed out after ${Math.round(ms / 1000)}s. Check host/port, firewall, and that Brevo SMTP is smtp-relay.brevo.com:587 (or 465).`
         )
       );
     }, ms);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
   });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  }) as Promise<T>;
 }
 
 function createSmtpTransport(smtp: {
@@ -144,8 +150,8 @@ export async function testImapConnection() {
 
   try {
     await withTimeout(client.connect(), IMAP_TIMEOUT_MS, 'IMAP connect');
-    const status = await withTimeout(
-      client.status('INBOX', { messages: true, unseen: true }),
+    const status = await withTimeout<{ messages?: number; unseen?: number }>(
+      Promise.resolve(client.status('INBOX', { messages: true, unseen: true })),
       8_000,
       'IMAP status'
     );
@@ -275,7 +281,15 @@ Sent at: ${new Date().toISOString()}
 
   const transporter = createSmtpTransport(smtp);
   try {
-    const info = await withTimeout(
+    type SmtpSendInfo = {
+      accepted?: (string | object)[];
+      rejected?: (string | object)[];
+      messageId?: string;
+      response?: string;
+      envelope?: unknown;
+    };
+
+    const info: SmtpSendInfo = await withTimeout<SmtpSendInfo>(
       transporter.sendMail({
         from: `"${smtp.senderName}" <${smtp.senderEmail}>`,
         to,
@@ -291,7 +305,7 @@ Sent at: ${new Date().toISOString()}
           from: smtp.senderEmail,
           to: [to],
         },
-      }),
+      }) as Promise<SmtpSendInfo>,
       SEND_TIMEOUT_MS,
       'SMTP send'
     );
