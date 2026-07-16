@@ -4,7 +4,47 @@ import { getSalesAgentSmtpConfig } from './config';
 import { getReplyInboxConfig, syncRepliesFromInbox } from './reply-sync';
 import { saLog } from './logger';
 
-/** Verify Brevo SMTP credentials (no email sent). */
+const SMTP_TIMEOUT_MS = 12_000;
+const IMAP_TIMEOUT_MS = 15_000;
+const SEND_TIMEOUT_MS = 25_000;
+const SYNC_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `${label} timed out after ${Math.round(ms / 1000)}s. Check host/port, firewall, and that Brevo SMTP is smtp-relay.brevo.com:587 (or 465).`
+        )
+      );
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
+}
+
+function createSmtpTransport(smtp: {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}) {
+  return nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.port === 465,
+    requireTLS: smtp.port === 587,
+    auth: { user: smtp.username, pass: smtp.password },
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
+    tls: { rejectUnauthorized: true },
+  });
+}
+
+/** Verify Brevo SMTP credentials (no email sent). Hard-timeout so UI never spins forever. */
 export async function testSmtpConnection() {
   const smtp = await getSalesAgentSmtpConfig();
   if (!smtp.host || !smtp.username || !smtp.password) {
@@ -12,18 +52,23 @@ export async function testSmtpConnection() {
       ok: false,
       step: 'smtp',
       error: 'SMTP host/username/password not configured (Brevo)',
-      smtp: { host: smtp.host, port: smtp.port, senderEmail: smtp.senderEmail, replyToEmail: smtp.replyToEmail },
+      smtp: {
+        host: smtp.host,
+        port: smtp.port,
+        senderEmail: smtp.senderEmail,
+        replyToEmail: smtp.replyToEmail,
+      },
     };
   }
 
+  const transporter = createSmtpTransport(smtp);
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.port === 465,
-      auth: { user: smtp.username, pass: smtp.password },
-    });
-    await transporter.verify();
+    await withTimeout(transporter.verify(), SMTP_TIMEOUT_MS, 'SMTP verify');
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
     return {
       ok: true,
       step: 'smtp',
@@ -38,11 +83,19 @@ export async function testSmtpConnection() {
       },
     };
   } catch (err: any) {
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+    const msg = err.message || 'SMTP verification failed';
     return {
       ok: false,
       step: 'smtp',
-      error: err.message || 'SMTP verification failed',
-      smtp: { host: smtp.host, port: smtp.port },
+      error: msg,
+      hint:
+        'Brevo SMTP: host smtp-relay.brevo.com, port 587, username = your Brevo login email, password = SMTP key (not account password). From email must be a verified sender/domain.',
+      smtp: { host: smtp.host, port: smtp.port, senderEmail: smtp.senderEmail },
     };
   }
 }
@@ -84,12 +137,23 @@ export async function testImapConnection() {
     secure: config.tls,
     auth: { user: config.user, pass: config.password },
     logger: false,
+    connectionTimeout: IMAP_TIMEOUT_MS,
+    greetingTimeout: IMAP_TIMEOUT_MS,
+    socketTimeout: IMAP_TIMEOUT_MS,
   });
 
   try {
-    await client.connect();
-    const status = await client.status('INBOX', { messages: true, unseen: true });
-    await client.logout();
+    await withTimeout(client.connect(), IMAP_TIMEOUT_MS, 'IMAP connect');
+    const status = await withTimeout(
+      client.status('INBOX', { messages: true, unseen: true }),
+      8_000,
+      'IMAP status'
+    );
+    try {
+      await client.logout();
+    } catch {
+      /* ignore */
+    }
     return {
       ok: true,
       step: 'imap',
@@ -105,6 +169,11 @@ export async function testImapConnection() {
   } catch (err: any) {
     try {
       await client.logout();
+    } catch {
+      /* ignore */
+    }
+    try {
+      client.close();
     } catch {
       /* ignore */
     }
@@ -132,10 +201,15 @@ export async function sendTestSalesEmail(input: {
     return { ok: false, step: 'send', error: 'Valid toEmail is required' };
   }
 
-  const smtpCheck = await testSmtpConnection();
-  if (!smtpCheck.ok) return { ...smtpCheck, step: 'send' };
-
+  // Quick config check only — do NOT call verify() first (that was hanging the UI)
   const smtp = await getSalesAgentSmtpConfig();
+  if (!smtp.host || !smtp.username || !smtp.password) {
+    return {
+      ok: false,
+      step: 'send',
+      error: 'SMTP host/username/password not configured (Brevo)',
+    };
+  }
   if (!smtp.replyToEmail) {
     return {
       ok: false,
@@ -144,7 +218,6 @@ export async function sendTestSalesEmail(input: {
     };
   }
 
-  // Ensure a test lead exists for tracking
   let lead = await (prisma as any).saLeadCompany.findFirst({
     where: { email: to },
   });
@@ -171,8 +244,8 @@ Reply-To (your Gmail): ${smtp.replyToEmail}
 How to verify reply tracking:
 1. Open this email in your inbox.
 2. Hit Reply and send any short message (e.g. "interested").
-3. Wait ~1 minute, then click "Test reply sync" in Setup (or wait for the 15-min auto sync).
-4. The reply should appear under Outreach → Replies, and the lead gets a Replied badge.
+3. Wait ~1 minute, then click "Test reply sync" in Setup.
+4. The reply should appear under Outreach → Replies.
 
 Sent at: ${new Date().toISOString()}
 `;
@@ -200,31 +273,34 @@ Sent at: ${new Date().toISOString()}
     },
   });
 
+  const transporter = createSmtpTransport(smtp);
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.port === 465,
-      requireTLS: smtp.port === 587,
-      auth: { user: smtp.username, pass: smtp.password },
-    });
+    const info = await withTimeout(
+      transporter.sendMail({
+        from: `"${smtp.senderName}" <${smtp.senderEmail}>`,
+        to,
+        replyTo: smtp.replyToEmail,
+        subject,
+        html: htmlBody,
+        text: textBody,
+        headers: {
+          'X-TidyFlow-Sales-Agent': String(record.id),
+          'X-TidyFlow-Test': '1',
+        },
+        envelope: {
+          from: smtp.senderEmail,
+          to: [to],
+        },
+      }),
+      SEND_TIMEOUT_MS,
+      'SMTP send'
+    );
 
-    const info = await transporter.sendMail({
-      from: `"${smtp.senderName}" <${smtp.senderEmail}>`,
-      to,
-      replyTo: smtp.replyToEmail,
-      subject,
-      html: htmlBody,
-      text: textBody,
-      headers: {
-        'X-TidyFlow-Sales-Agent': String(record.id),
-        'X-TidyFlow-Test': '1',
-      },
-      envelope: {
-        from: smtp.senderEmail,
-        to: [to],
-      },
-    });
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
 
     const accepted = (info.accepted || []).map(String);
     const rejected = (info.rejected || []).map(String);
@@ -240,7 +316,6 @@ Sent at: ${new Date().toISOString()}
       test: true,
     };
 
-    // SMTP "accepted" at relay ≠ inbox delivery. Fail clearly if rejected.
     if (rejected.length > 0 || (accepted.length === 0 && !messageId)) {
       await (prisma as any).saSentEmail.update({
         where: { id: record.id },
@@ -292,8 +367,7 @@ Sent at: ${new Date().toISOString()}
     });
 
     const looksLikeDefault =
-      /noreply@tidyflowapp\.com/i.test(smtp.senderEmail) ||
-      !smtp.senderEmail.includes('@');
+      /noreply@tidyflowapp\.com/i.test(smtp.senderEmail) || !smtp.senderEmail.includes('@');
 
     return {
       ok: true,
@@ -308,22 +382,35 @@ Sent at: ${new Date().toISOString()}
       accepted,
       rejected,
       warning: looksLikeDefault
-        ? 'From address looks like a default (noreply@tidyflowapp.com). If Brevo has not verified this sender/domain, Gmail may never deliver — verify the sender in Brevo and set From Email in Setup to that verified address.'
-        : 'If nothing arrives in Inbox, check Spam/Promotions. In Brevo dashboard → Transactional → Logs, confirm the message was delivered (not blocked/bounced).',
+        ? 'From address looks like a default (noreply@tidyflowapp.com). If Brevo has not verified this sender/domain, Gmail may never deliver — set From to your verified domain address.'
+        : 'If nothing arrives in Inbox, check Spam/Promotions. In Brevo → Transactional → Logs, confirm delivered (not blocked).',
       nextSteps: [
         `Look in Inbox AND Spam for mail From: ${smtp.senderEmail}`,
-        'Brevo → Transactional → Email logs: find this send and check status (delivered / deferred / blocked)',
-        'If blocked: verify sender domain/email in Brevo → Senders & IP',
-        `Confirm Reply-To would be ${smtp.replyToEmail} once delivered`,
+        'Brevo → Transactional → Email logs: find this send and check status',
+        'If blocked: verify sender in Brevo → Senders & Domains',
+        `Reply-To is ${smtp.replyToEmail}`,
         'After you receive it: Reply → then Test reply sync',
       ],
     };
   } catch (err: any) {
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
     await (prisma as any).saSentEmail.update({
       where: { id: record.id },
       data: { deliveryStatus: 'FAILED', errorMessage: err.message },
     });
-    return { ok: false, step: 'send', error: err.message || 'Failed to send test email', sentEmailId: record.id };
+    return {
+      ok: false,
+      step: 'send',
+      error: err.message || 'Failed to send test email',
+      sentEmailId: record.id,
+      fromEmail: smtp.senderEmail,
+      hint:
+        'Confirm SMTP host smtp-relay.brevo.com:587, SMTP key password, and that From is a verified Brevo sender.',
+    };
   }
 }
 
@@ -332,33 +419,41 @@ export async function testReplySync() {
   const imap = await testImapConnection();
   if (!imap.ok) return { ...imap, step: 'reply_sync' };
 
-  const result = await syncRepliesFromInbox();
-  if (result.error) {
+  try {
+    const result = await withTimeout(syncRepliesFromInbox(), SYNC_TIMEOUT_MS, 'Reply sync');
+    if (result.error) {
+      return {
+        ok: false,
+        step: 'reply_sync',
+        error: result.error,
+        checked: result.checked,
+        imported: result.imported,
+        skipped: result.skipped,
+      };
+    }
+
     return {
-      ok: false,
+      ok: true,
       step: 'reply_sync',
-      error: result.error,
+      message: `Reply sync OK — checked ${result.checked}, imported ${result.imported}, skipped ${result.skipped}`,
       checked: result.checked,
       imported: result.imported,
       skipped: result.skipped,
+      tip:
+        result.imported === 0
+          ? 'No new replies found. Send a test email, reply to it, wait a minute, then try again.'
+          : 'New replies were imported — open Outreach → Replies.',
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      step: 'reply_sync',
+      error: err.message || 'Reply sync failed',
     };
   }
-
-  return {
-    ok: true,
-    step: 'reply_sync',
-    message: `Reply sync OK — checked ${result.checked}, imported ${result.imported}, skipped ${result.skipped}`,
-    checked: result.checked,
-    imported: result.imported,
-    skipped: result.skipped,
-    tip:
-      result.imported === 0
-        ? 'No new replies found. Send a test email, reply to it from another account (or the same), wait a minute, then try again.'
-        : 'New replies were imported — open Outreach → Replies.',
-  };
 }
 
-/** Full diagnostics: SMTP + IMAP (+ optional send). */
+/** Full diagnostics: SMTP + IMAP (+ optional send). Each step has its own timeout. */
 export async function runEmailDiagnostics(input?: { sendTo?: string; userId?: number }) {
   const smtp = await testSmtpConnection();
   const imap = await testImapConnection();

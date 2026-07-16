@@ -161,8 +161,19 @@ export default function SettingsTab() {
   const runTest = async (action: string) => {
     setTesting(action)
     setMessage(null)
+    const timeouts: Record<string, number> = {
+      test_smtp: 20000,
+      test_imap: 25000,
+      test_send: 45000,
+      test_reply_sync: 60000,
+      test_all: 90000,
+    }
     try {
-      const result = await saPost("/settings", { action, toEmail: testTo }, { timeout: 120000 })
+      const result = await saPost(
+        "/settings",
+        { action, toEmail: testTo },
+        { timeout: timeouts[action] ?? 30000 }
+      )
       if (action === "test_smtp") setTestSmtp(result)
       if (action === "test_imap") setTestImap(result)
       if (action === "test_send") setTestSend(result)
@@ -184,7 +195,18 @@ export default function SettingsTab() {
             : "Test finished"),
       })
     } catch (e: any) {
-      setMessage({ type: "error", text: e.message })
+      const timedOut =
+        e?.code === "ECONNABORTED" ||
+        /timeout/i.test(e?.message || "") ||
+        e?.message === "Network Error"
+      const errText = timedOut
+        ? "Test timed out — SMTP/IMAP did not respond. Check host (smtp-relay.brevo.com), port 587, SMTP key, and that outbound SMTP is not blocked on this server."
+        : e?.response?.data?.message || e.message || "Test failed"
+      if (action === "test_smtp") setTestSmtp({ ok: false, error: errText })
+      if (action === "test_imap") setTestImap({ ok: false, error: errText })
+      if (action === "test_send") setTestSend({ ok: false, error: errText })
+      if (action === "test_reply_sync") setTestSync({ ok: false, error: errText })
+      setMessage({ type: "error", text: errText })
     } finally {
       setTesting(null)
     }
@@ -323,11 +345,19 @@ export default function SettingsTab() {
           <ResultCard result={testSync} />
         </div>
 
-        <p className="text-xs text-gray-500">
-          Full reply test: Send test email → open it → Reply → wait ~1 min → Test reply sync → check Outreach →
-          Replies (and the High priority group).
-        </p>
-      </div>
+        <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700 space-y-1">
+          <p className="font-medium text-slate-900">Brevo SMTP checklist (if test hangs or fails)</p>
+          <ul className="list-disc ml-4 space-y-0.5">
+            <li>
+              Host <code className="bg-white px-1 rounded">smtp-relay.brevo.com</code> · Port{" "}
+              <code className="bg-white px-1 rounded">587</code>
+            </li>
+            <li>Username = Brevo login email · Password = <strong>SMTP key</strong> (Settings → SMTP &amp; API), not your account password</li>
+            <li>
+              From Email = an address on your <strong>verified domain</strong> (e.g. hello@yourdomain.com), then Save
+            </li>
+          </ul>
+        </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
         <h3 className="text-sm font-semibold text-gray-900">Brevo SMTP (send)</h3>
