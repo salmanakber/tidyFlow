@@ -96,7 +96,36 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
   const { currentPeriodStart, currentPeriodEnd } = stripeSubscriptionPeriodDates(subscription);
   const billingStatus = mapBillingStatus(subscription.status, subscription.cancel_at_period_end);
 
-  const billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
+  let billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
+
+  // Checkout / external browser flow may create the Stripe customer before the first webhook.
+  // Fall back to companyId in subscription metadata so the company still gets activated.
+  if (!billingRecord) {
+    const metaCompanyId = Number(subscription.metadata?.companyId || 0);
+    if (Number.isFinite(metaCompanyId) && metaCompanyId > 0) {
+      billingRecord = await prisma.billingRecord.findFirst({
+        where: { companyId: metaCompanyId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!billingRecord) {
+        billingRecord = await prisma.billingRecord.create({
+          data: {
+            companyId: metaCompanyId,
+            stripeCustomerId: customerId,
+            subscriptionId,
+            status: billingStatus,
+            amountDue: 0,
+            billingDate: new Date(),
+            currentPeriodStart,
+            nextBillingDate: currentPeriodEnd,
+            trialEndsAt: trialEnd,
+            isTrialPeriod: subscription.status === 'trialing',
+          },
+        });
+      }
+    }
+  }
+
   if (!billingRecord) {
     console.error(`No billing record for subscription ${subscriptionId} / customer ${customerId}`);
     return null;
@@ -108,6 +137,19 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
     trialEnd
   );
 
+  const metaTier = String(subscription.metadata?.planTier || '').toUpperCase();
+  const planTierUpdate =
+    metaTier === 'STARTUP' || metaTier === 'STANDARD' || metaTier === 'PREMIUM'
+      ? { planTier: metaTier }
+      : {};
+
+  let basePriceUpdate: { basePrice?: number } = {};
+  if (planTierUpdate.planTier) {
+    const { getPlanLimits } = await import('@/lib/subscription');
+    const limits = await getPlanLimits(planTierUpdate.planTier as 'STARTUP' | 'STANDARD' | 'PREMIUM');
+    basePriceUpdate = { basePrice: limits.monthlyPrice };
+  }
+
   await prisma.billingRecord.update({
     where: { id: billingRecord.id },
     data: {
@@ -118,6 +160,7 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
       isTrialPeriod: subscription.status === 'trialing',
       currentPeriodStart,
       nextBillingDate: currentPeriodEnd,
+      ...(basePriceUpdate.basePrice != null ? { amountDue: basePriceUpdate.basePrice } : {}),
     },
   });
 
@@ -125,7 +168,12 @@ export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subs
     where: { id: billingRecord.companyId },
     data: {
       ...companyPatch,
+      ...planTierUpdate,
+      ...basePriceUpdate,
       trialEndsAt: trialEnd,
+      ...(planTierUpdate.planTier
+        ? { pendingPlanTier: null, pendingPlanEffectiveAt: null }
+        : {}),
     },
   });
 
