@@ -1,20 +1,33 @@
-
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+const APP_DEEP_LINK = 'tidyflow://subscribe/cancel';
+
 export default function SubscribeCancelPage() {
-  // Brand color palette configuration
+  const [autoOpenFailed, setAutoOpenFailed] = useState(false);
+
   const colors = {
-    navyDark: '#0B1E36',     // Deep Navy for primary headings and button
-    navyMedium: '#1E2E42',   // Soft Navy for readable body text
-    navyLight: '#5A6E85',    // Light Navy for secondary details
-    amber: '#D97706',        // Amber accent for status indication
-    amberLight: '#FEF3C7',   // Light amber background for icons
-    bg: '#F8FAFC',           // Neutral light background
-    cardBg: '#FFFFFF',       // Clean white for the container card
-    border: '#E2E8F0',       // Subtle border color
+    navyDark: '#0B1E36',
+    navyLight: '#5A6E85',
+    amber: '#D97706',
+    amberLight: '#FEF3C7',
+    bg: '#F8FAFC',
+    cardBg: '#FFFFFF',
+    border: '#E2E8F0',
   };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      window.location.href = APP_DEEP_LINK;
+    }, 250);
+    const failTimer = window.setTimeout(() => setAutoOpenFailed(true), 1800);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(failTimer);
+    };
+  }, []);
 
   return (
     <main
@@ -36,12 +49,12 @@ export default function SubscribeCancelPage() {
           borderRadius: 16,
           padding: '40px 32px',
           border: `1px solid ${colors.border}`,
-          borderTop: `4px solid ${colors.navyDark}`, // Deep Navy top-border accent to differentiate from success
+          borderTop: `4px solid ${colors.navyDark}`,
           textAlign: 'center',
-          boxShadow: '0 10px 25px -5px rgba(11, 30, 54, 0.05), 0 8px 10px -6px rgba(11, 30, 54, 0.05)',
+          boxShadow:
+            '0 10px 25px -5px rgba(11, 30, 54, 0.05), 0 8px 10px -6px rgba(11, 30, 54, 0.05)',
         }}
       >
-        {/* Styled close/cancel icon wrapper */}
         <div
           style={{
             width: 56,
@@ -89,12 +102,13 @@ export default function SubscribeCancelPage() {
             margin: '0 0 28px',
           }}
         >
-          No payment was taken. You can close this page and try again from the TidyFlow app when you
-          are ready.
+          {autoOpenFailed
+            ? 'No payment was taken. Tap below to return to the TidyFlow app and try again when you are ready.'
+            : 'Returning to the TidyFlow app…'}
         </p>
 
-        <Link
-          href="/login"
+        <a
+          href={APP_DEEP_LINK}
           style={{
             display: 'block',
             background: colors.navyDark,
@@ -104,10 +118,24 @@ export default function SubscribeCancelPage() {
             borderRadius: 8,
             fontWeight: 600,
             fontSize: 15,
-            transition: 'background-color 0.2s ease',
+            marginBottom: 12,
           }}
         >
-          Back to login
+          Open TidyFlow App
+        </a>
+
+        <Link
+          href="/login"
+          style={{
+            display: 'block',
+            color: colors.navyLight,
+            textDecoration: 'none',
+            padding: '10px 24px',
+            fontWeight: 600,
+            fontSize: 14,
+          }}
+        >
+          Back to web login
         </Link>
       </div>
     </main>

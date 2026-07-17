@@ -1,19 +1,45 @@
-
 'use client';
+
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
+const APP_DEEP_LINK_BASE = 'tidyflow://subscribe/success';
+
 export default function SubscribeSuccessPage() {
-  // Brand color palette configuration
+  const [autoOpenFailed, setAutoOpenFailed] = useState(false);
+
   const colors = {
-    navyDark: '#0B1E36',     // Deep Navy for primary headings and button
-    navyMedium: '#1E2E42',   // Soft Navy for readable body text
-    navyLight: '#5A6E85',    // Light Navy for secondary details
-    amber: '#D97706',        // Amber accent for actions, highlights, and icons
-    amberLight: '#FEF3C7',   // Light amber background for icons
-    bg: '#F8FAFC',           // Neutral light background
-    cardBg: '#FFFFFF',       // Clean white for the container card
-    border: '#E2E8F0',       // Subtle border color
+    navyDark: '#0B1E36',
+    navyLight: '#5A6E85',
+    amber: '#D97706',
+    amberLight: '#FEF3C7',
+    bg: '#F8FAFC',
+    cardBg: '#FFFFFF',
+    border: '#E2E8F0',
   };
+
+  const deepLink = useMemo(() => {
+    if (typeof window === 'undefined') return APP_DEEP_LINK_BASE;
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    return sessionId
+      ? `${APP_DEEP_LINK_BASE}?session_id=${encodeURIComponent(sessionId)}`
+      : APP_DEEP_LINK_BASE;
+  }, []);
+
+  useEffect(() => {
+    // Prefer opening the installed app via custom scheme after Stripe Checkout.
+    const timer = window.setTimeout(() => {
+      window.location.href = deepLink;
+    }, 250);
+
+    const failTimer = window.setTimeout(() => setAutoOpenFailed(true), 1800);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(failTimer);
+    };
+  }, [deepLink]);
 
   return (
     <main
@@ -35,12 +61,12 @@ export default function SubscribeSuccessPage() {
           borderRadius: 16,
           padding: '40px 32px',
           border: `1px solid ${colors.border}`,
-          borderTop: `4px solid ${colors.amber}`, // Amber top-border accent
+          borderTop: `4px solid ${colors.amber}`,
           textAlign: 'center',
-          boxShadow: '0 10px 25px -5px rgba(11, 30, 54, 0.05), 0 8px 10px -6px rgba(11, 30, 54, 0.05)',
+          boxShadow:
+            '0 10px 25px -5px rgba(11, 30, 54, 0.05), 0 8px 10px -6px rgba(11, 30, 54, 0.05)',
         }}
       >
-        {/* Styled checkmark wrapper */}
         <div
           style={{
             width: 56,
@@ -87,12 +113,13 @@ export default function SubscribeSuccessPage() {
             margin: '0 0 28px',
           }}
         >
-          You can close this page and return to the TidyFlow app. Tap Refresh if your plan does not
-          unlock right away.
+          {autoOpenFailed
+            ? 'If the app did not open automatically, tap the button below to return to TidyFlow.'
+            : 'Opening the TidyFlow app…'}
         </p>
 
-        <Link
-          href="/login"
+        <a
+          href={deepLink}
           style={{
             display: 'block',
             background: colors.navyDark,
@@ -102,14 +129,26 @@ export default function SubscribeSuccessPage() {
             borderRadius: 8,
             fontWeight: 600,
             fontSize: 15,
-            transition: 'background-color 0.2s ease',
+            marginBottom: 12,
           }}
         >
-          Open TidyFlow Web
+          Open TidyFlow App
+        </a>
+
+        <Link
+          href="/login"
+          style={{
+            display: 'block',
+            color: colors.navyLight,
+            textDecoration: 'none',
+            padding: '10px 24px',
+            fontWeight: 600,
+            fontSize: 14,
+          }}
+        >
+          Continue on web instead
         </Link>
       </div>
     </main>
   );
 }
-
-
