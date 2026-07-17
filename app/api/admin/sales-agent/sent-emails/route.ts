@@ -56,6 +56,28 @@ export async function POST(request: NextRequest) {
     return jsonOk({ queued: true });
   }
 
+  if (body.action === 'bulk_delete' && Array.isArray(body.ids)) {
+    const ids = body.ids.map(Number).filter(Boolean);
+    if (!ids.length) return jsonError('ids required');
+    // Detach replies first so sent-email rows can be removed cleanly
+    await (prisma as any).saReply.updateMany({
+      where: { sentEmailId: { in: ids } },
+      data: { sentEmailId: null },
+    });
+    const result = await (prisma as any).saSentEmail.deleteMany({ where: { id: { in: ids } } });
+    return jsonOk({ deleted: result.count });
+  }
+
+  if (body.action === 'delete' && body.id) {
+    const id = Number(body.id);
+    await (prisma as any).saReply.updateMany({
+      where: { sentEmailId: id },
+      data: { sentEmailId: null },
+    });
+    await (prisma as any).saSentEmail.delete({ where: { id } });
+    return jsonOk({ deleted: true, id });
+  }
+
   if (body.action === 'send' || body.companyId) {
     if (!body.companyId && !body.to) return jsonError('companyId or to is required');
     let to = body.to;
@@ -108,4 +130,22 @@ export async function POST(request: NextRequest) {
   }
 
   return jsonError('Unknown action');
+}
+
+export async function DELETE(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const id = Number(request.nextUrl.searchParams.get('id'));
+  if (!id) return jsonError('id is required');
+
+  const existing = await (prisma as any).saSentEmail.findUnique({ where: { id } });
+  if (!existing) return jsonError('Sent email not found', 404);
+
+  await (prisma as any).saReply.updateMany({
+    where: { sentEmailId: id },
+    data: { sentEmailId: null },
+  });
+  await (prisma as any).saSentEmail.delete({ where: { id } });
+  return jsonOk({ deleted: true, id });
 }

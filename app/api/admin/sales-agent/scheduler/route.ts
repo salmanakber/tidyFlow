@@ -34,6 +34,12 @@ export async function POST(request: NextRequest) {
     return jsonOk({ queued: true });
   }
 
+  if (body.action === 'delete' && body.id) {
+    const id = Number(body.id);
+    await (prisma as any).saSchedulerJob.delete({ where: { id } });
+    return jsonOk({ deleted: true, id });
+  }
+
   if (!body.name || !body.jobType) return jsonError('name and jobType are required');
 
   const job = await (prisma as any).saSchedulerJob.create({
@@ -81,4 +87,18 @@ export async function PATCH(request: NextRequest) {
     data,
   });
   return jsonOk(job);
+}
+
+export async function DELETE(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const id = Number(request.nextUrl.searchParams.get('id'));
+  if (!id) return jsonError('id is required');
+
+  const existing = await (prisma as any).saSchedulerJob.findUnique({ where: { id } });
+  if (!existing) return jsonError('Job not found', 404);
+
+  await (prisma as any).saSchedulerJob.delete({ where: { id } });
+  return jsonOk({ deleted: true, id });
 }

@@ -1,4 +1,4 @@
-import { getSettingsByCategory, upsertSettings } from './config';
+import { getSettingsByCategory } from './config';
 import { classifyAndStoreReply } from './replies';
 import { saLog } from './logger';
 import prisma from '@/lib/prisma';
@@ -24,11 +24,15 @@ export async function getReplyInboxConfig(): Promise<ReplyInboxConfig> {
   };
 }
 
+function normalizeMessageId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  return String(id).replace(/^<|>$/g, '').trim() || null;
+}
+
 /**
- * Sync replies from the Reply-To inbox (typically Gmail via App Password).
- * Matches In-Reply-To / References to sa_sent_emails.message_id.
- *
- * Uses dynamic import of `imapflow` when available.
+ * Sync only emails that are replies to our outbound sales emails
+ * (matched via In-Reply-To / References → sa_sent_emails.message_id).
+ * Ignores unrelated inbox mail.
  */
 export async function syncRepliesFromInbox(): Promise<{
   checked: number;
@@ -46,7 +50,6 @@ export async function syncRepliesFromInbox(): Promise<{
 
   let ImapFlow: any;
   try {
-    // Optional dependency — install with: npm i imapflow
     ImapFlow = (await import('imapflow')).ImapFlow;
   } catch {
     return {
@@ -73,18 +76,19 @@ export async function syncRepliesFromInbox(): Promise<{
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // Last 7 days, unseen or recent
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      // Only recent mail; still require a match to a sent sales email below
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       for await (const msg of client.fetch(
         { since },
         { envelope: true, source: true, uid: true }
       )) {
         checked++;
         const envelope = msg.envelope;
-        const messageId = envelope?.messageId || null;
-        const inReplyTo = Array.isArray(envelope?.inReplyTo)
+        const messageId = normalizeMessageId(envelope?.messageId);
+        const inReplyToRaw = Array.isArray(envelope?.inReplyTo)
           ? envelope.inReplyTo[0]
           : envelope?.inReplyTo || null;
+        const inReplyTo = normalizeMessageId(inReplyToRaw);
         const references = envelope?.references
           ? (Array.isArray(envelope.references) ? envelope.references : [envelope.references])
           : [];
@@ -99,55 +103,51 @@ export async function syncRepliesFromInbox(): Promise<{
           }
         }
 
-        const matchIds = [inReplyTo, ...references].filter(Boolean).map((id: string) =>
-          String(id).replace(/^<|>$/g, '')
-        );
-
-        let sentEmail: any = null;
-        if (matchIds.length) {
-          const candidates = await (prisma as any).saSentEmail.findMany({
-            where: {
-              OR: matchIds.flatMap((id: string) => [
-                { messageId: id },
-                { messageId: `<${id}>` },
-                { threadId: id },
-                { threadId: `<${id}>` },
-              ]),
-            },
-            take: 1,
-          });
-          sentEmail = candidates[0] || null;
+        // Must look like a reply to one of our messages
+        const matchIds = [inReplyTo, ...references.map(normalizeMessageId)].filter(Boolean) as string[];
+        if (!matchIds.length) {
+          skipped++;
+          continue;
         }
 
-        // Fallback: match by from-email to a contacted lead
+        const candidates = await (prisma as any).saSentEmail.findMany({
+          where: {
+            OR: matchIds.flatMap((id: string) => [
+              { messageId: id },
+              { messageId: `<${id}>` },
+              { threadId: id },
+              { threadId: `<${id}>` },
+            ]),
+            deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED'] },
+          },
+          take: 1,
+        });
+        const sentEmail = candidates[0] || null;
+
+        // Strict: only import if this email replies to a sales-agent sent email
+        if (!sentEmail) {
+          skipped++;
+          continue;
+        }
+
         const fromAddr =
           envelope?.from?.[0]?.address ||
           (typeof envelope?.from?.[0] === 'string' ? envelope.from[0] : null);
-
-        if (!sentEmail && fromAddr) {
-          sentEmail = await (prisma as any).saSentEmail.findFirst({
-            where: {
-              recipientEmail: fromAddr.toLowerCase(),
-              deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED'] },
-            },
-            orderBy: { sentAt: 'desc' },
-          });
-        }
 
         const source = msg.source ? Buffer.from(msg.source).toString('utf8') : '';
         const textMatch = source.match(/\r?\n\r?\n([\s\S]*)$/);
         const bodyText = textMatch ? textMatch[1].slice(0, 20000) : envelope?.subject || '';
 
         await classifyAndStoreReply({
-          fromEmail: fromAddr || 'unknown@unknown',
+          fromEmail: fromAddr || sentEmail.recipientEmail || 'unknown@unknown',
           fromName: envelope?.from?.[0]?.name || undefined,
           subject: envelope?.subject || undefined,
           bodyText,
           messageId: messageId || undefined,
           inReplyTo: inReplyTo || undefined,
-          threadId: sentEmail?.threadId || messageId || undefined,
-          sentEmailId: sentEmail?.id,
-          companyId: sentEmail?.companyId || undefined,
+          threadId: sentEmail.threadId || messageId || undefined,
+          sentEmailId: sentEmail.id,
+          companyId: sentEmail.companyId || undefined,
         });
         imported++;
       }
@@ -159,7 +159,7 @@ export async function syncRepliesFromInbox(): Promise<{
     await saLog({
       category: 'reply',
       action: 'imap_sync',
-      message: `IMAP sync checked=${checked} imported=${imported} skipped=${skipped}`,
+      message: `IMAP sync checked=${checked} imported=${imported} skipped=${skipped} (only replies to sent emails)`,
       details: { checked, imported, skipped },
     });
 

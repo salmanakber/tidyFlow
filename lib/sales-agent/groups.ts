@@ -79,18 +79,21 @@ export async function createManualGroup(input: {
 export async function addLeadsToDiscoveryGroup(groupId: number, leadIds: number[]) {
   const unique = Array.from(new Set(leadIds.filter(Boolean)));
   if (!unique.length) return 0;
-  let added = 0;
-  for (const companyId of unique) {
-    try {
-      await (prisma as any).saDiscoveryGroupMember.create({
-        data: { groupId, companyId },
-      });
-      added++;
-    } catch {
-      /* already in group */
-    }
-  }
-  return added;
+
+  // Avoid unique-constraint noise: skip members already in the group
+  const existing = await (prisma as any).saDiscoveryGroupMember.findMany({
+    where: { groupId, companyId: { in: unique } },
+    select: { companyId: true },
+  });
+  const already = new Set(existing.map((m: any) => m.companyId));
+  const toAdd = unique.filter((id) => !already.has(id));
+  if (!toAdd.length) return 0;
+
+  await (prisma as any).saDiscoveryGroupMember.createMany({
+    data: toAdd.map((companyId) => ({ groupId, companyId })),
+    skipDuplicates: true,
+  });
+  return toAdd.length;
 }
 
 export async function removeLeadsFromDiscoveryGroup(groupId: number, leadIds: number[]) {

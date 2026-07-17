@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
       recentLogs,
       howItWorks: {
         discovery:
-          'Search runs in chunks: each keyword × country × city is its own Redis job (not one giant fetch).',
+          'Each keyword × country × city runs as its own background search job.',
         emails:
           'A company never gets the same campaign email twice. A 2nd campaign can target people who already got campaign #1.',
       },
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
   } catch (err: any) {
     return jsonOk({
       redis: false,
-      error: err.message || 'Redis unavailable',
+      error: err.message || 'Background jobs unavailable',
       counts: { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0 },
       waiting: [],
       active: [],

@@ -137,7 +137,7 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
 
     if (existing) {
       skipped++;
-      leads.push(existing);
+      // Skip companies already in the system — do not attach them to this search
       continue;
     }
 
@@ -268,7 +268,6 @@ export async function discoverViaSearchEngine(input: {
     });
     if (existing) {
       skipped++;
-      leads.push(existing);
       continue;
     }
 

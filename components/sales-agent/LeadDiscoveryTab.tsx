@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -13,7 +14,7 @@ import {
   inputCls,
   ProgressBar,
 } from "./shared"
-import { Search, Sparkles, RefreshCw, X, Plus, Info, Trash2, FolderPlus, FolderInput } from "lucide-react"
+import { Search, Sparkles, RefreshCw, X, Plus, Info, Trash2, FolderPlus, FolderInput, MapPin, Globe } from "lucide-react"
 import QueuePanel from "./QueuePanel"
 
 function parseTags(text: string): string[] {
@@ -46,25 +47,38 @@ function TagInput({
   }
 
   return (
-    <div>
-      <label className="text-xs font-medium text-gray-600">{label}</label>
-      {hint && <p className="text-xs text-gray-400 mb-1">{hint}</p>}
-      <div className="flex flex-wrap gap-1.5 mb-2 min-h-[28px]">
-        {tags.map((t) => (
-          <span
-            key={t}
-            className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-800 text-xs px-2.5 py-1"
-          >
-            {t}
-            <button type="button" onClick={() => onChange(tags.filter((x) => x !== t))} aria-label={`Remove ${t}`}>
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        ))}
+    <div className="space-y-2">
+      <div>
+        <label className="text-sm font-bold text-[#0D1E36]">{label}</label>
+        {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
       </div>
+      
+      <div className="flex flex-wrap gap-2 min-h-[38px] p-2 bg-slate-50 border border-gray-200 rounded-lg">
+        {tags.length === 0 ? (
+          <span className="text-xs text-gray-400 px-2 py-1 select-none">No tags added yet</span>
+        ) : (
+          tags.map((t) => (
+            <span
+              key={t}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white border border-gray-200 text-[#0D1E36] text-xs px-3 py-1 font-semibold shadow-xs"
+            >
+              {t}
+              <button 
+                type="button" 
+                onClick={() => onChange(tags.filter((x) => x !== t))} 
+                className="text-gray-400 hover:text-[#9A2A1E] transition-colors p-0.5 rounded-full hover:bg-slate-100"
+                aria-label={`Remove ${t}`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+
       <div className="flex gap-2">
         <input
-          className={inputCls}
+          className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
           value={draft}
           placeholder={placeholder}
           onChange={(e) => setDraft(e.target.value)}
@@ -75,15 +89,19 @@ function TagInput({
             }
           }}
         />
-        <button type="button" className={btnSecondary} onClick={add}>
-          <Plus className="w-4 h-4" />
+        <button 
+          type="button" 
+          className="flex items-center justify-center bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-4 py-2.5 rounded-lg shadow-sm transition-all h-[42px]" 
+          onClick={add}
+        >
+          <Plus className="w-5 h-5 text-[#D97706]" />
         </button>
       </div>
     </div>
   )
 }
 
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const
+const PAGE_SIZE_OPTIONS = [5, 15,  25, 100, 250] as const
 
 export default function LeadDiscoveryTab() {
   const [method, setMethod] = useState<"google_places" | "search_engine">("google_places")
@@ -162,7 +180,7 @@ export default function LeadDiscoveryTab() {
   }, [loadLeads, loadGroups])
 
   const handleQueueIdle = useCallback(() => {
-    setMessage({ type: "success", text: "Queue finished — leads & groups updated automatically." })
+    setMessage({ type: "success", text: "Finished — leads and groups updated." })
     setDiscovering(false)
     setAnalyzing(false)
     refreshAll()
@@ -239,10 +257,9 @@ export default function LeadDiscoveryTab() {
           type: "success",
           text:
             data.note ||
-            `Queued ${data.enqueued ?? data.chunks ?? 0} search chunk(s) as a lead group. UI will refresh when Redis finishes.`,
+            `Started ${data.enqueued ?? data.chunks ?? 0} search(es). Results will appear here when ready.`,
         })
         await loadGroups()
-        // Keep discovering=true while queue works; cleared on idle
         if (!(data.enqueued > 0)) {
           setDiscovering(false)
           await refreshAll()
@@ -288,7 +305,7 @@ export default function LeadDiscoveryTab() {
       await saPost("/leads", { action: "bulk_analyze", ids: selected })
       setMessage({
         type: "success",
-        text: `Analyzing ${selected.length} leads in the queue (crawl website → find email → score). UI updates when done.`,
+        text: `Analyzing ${selected.length} leads… results update when each finishes.`,
       })
       setSelected([])
     } catch (e: any) {
@@ -306,7 +323,7 @@ export default function LeadDiscoveryTab() {
     try {
       const g = await saPost("/groups", { action: "create", label })
       setNewGroupName("")
-      setMessage({ type: "success", text: `Group “${g.label}” created` })
+      setMessage({ type: "success", text: `Group "${g.label}" created` })
       await loadGroups()
       setGroupFilter(String(g.id))
     } catch (e: any) {
@@ -367,7 +384,7 @@ export default function LeadDiscoveryTab() {
       if (!window.confirm("Delete the High priority replies group? It will be recreated when someone replies again. Leads are kept.")) {
         return
       }
-    } else if (!window.confirm(`Delete group “${g.label}”? Leads stay in the database.`)) {
+    } else if (!window.confirm(`Delete group "${g.label}"? Leads stay in the database.`)) {
       return
     }
     try {
@@ -381,7 +398,7 @@ export default function LeadDiscoveryTab() {
   }
 
   const deleteLead = async (lead: any) => {
-    if (!window.confirm(`Delete lead “${lead.name}”? This cannot be undone.`)) return
+    if (!window.confirm(`Delete lead "${lead.name}"? This cannot be undone.`)) return
     try {
       await saDelete(`/leads/${lead.id}`)
       setMessage({ type: "success", text: "Lead deleted" })
@@ -418,11 +435,14 @@ export default function LeadDiscoveryTab() {
     <div className="space-y-6">
       <MessageBanner message={message} />
 
-      <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 flex gap-3">
-        <Info className="w-5 h-5 text-sky-700 shrink-0 mt-0.5" />
-        <div className="text-sm text-sky-900 space-y-1">
-          <p className="font-semibold">What does Analyze do?</p>
-          <p>
+      {/* Info Banner Container */}
+      <div className="rounded-xl border border-gray-200 bg-[#F8F9FC] p-5 flex gap-4 shadow-xs">
+        <div className="p-2 rounded-lg bg-[#FEF3C7] text-[#D97706] h-fit">
+          <Info className="w-4 h-4 shrink-0" />
+        </div>
+        <div className="text-xs text-[#0D1E36] space-y-1">
+          <p className="font-bold uppercase tracking-wider text-[10px]">What does Analyze do?</p>
+          <p className="text-slate-500 leading-relaxed font-medium text-xs">
             Analyze visits each company website, extracts contact emails/phones, and uses AI to score whether
             they need TidyFlow (ops software gaps). Use it before campaigns so you email leads that have a real
             address and a useful score — not required just to send if email is already known.
@@ -430,47 +450,54 @@ export default function LeadDiscoveryTab() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Find cleaning companies</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Each search creates a <strong>lead group</strong> (e.g. United States batch) so you can pick the
-            whole set when sending a campaign.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setMethod("google_places")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-              method === "google_places" ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-700"
-            }`}
-          >
-            Google Places
-          </button>
-          <button
-            type="button"
-            onClick={() => setMethod("search_engine")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-              method === "search_engine" ? "bg-slate-900 text-white" : "bg-gray-100 text-gray-700"
-            }`}
-          >
-            Search Engine
-          </button>
+      {/* Lead Discovery Engine */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-6">
+        <div className="pb-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[#0D1E36]">Find cleaning companies</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Configure parameters to discover and organize company directories into leads groups
+            </p>
+          </div>
+          
+          {/* Segmented Controller Tab */}
+          <div className="flex p-1 bg-[#EEF0F5] rounded-xl border border-gray-200 items-center h-[42px] shrink-0">
+            <button
+              type="button"
+              onClick={() => setMethod("google_places")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 h-full ${
+                method === "google_places" 
+                  ? "bg-white text-[#0D1E36] shadow-xs" 
+                  : "text-slate-500 hover:text-[#0D1E36]"
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" /> Google Places
+            </button>
+            <button
+              type="button"
+              onClick={() => setMethod("search_engine")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 h-full ${
+                method === "search_engine" 
+                  ? "bg-white text-[#0D1E36] shadow-xs" 
+                  : "text-slate-500 hover:text-[#0D1E36]"
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" /> Search Engine
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TagInput
-            label="Countries"
-            hint="Search many countries at once"
+            label="Target Countries"
+            hint="Add multiple countries to look within"
             tags={countries}
             onChange={setCountries}
             placeholder="e.g. United Kingdom, UAE, Germany"
           />
           <TagInput
-            label="Cities (optional)"
-            hint="Same filter for Places and Search Engine"
+            label="Target Cities (Optional)"
+            hint="Supports Places & Search Engine contexts"
             tags={cities}
             onChange={setCities}
             placeholder="e.g. London, Dubai, Berlin"
@@ -478,179 +505,210 @@ export default function LeadDiscoveryTab() {
         </div>
 
         <TagInput
-          label="Keywords"
-          hint="Or click AI Suggest after adding countries"
+          label="Niche Search Keywords"
+          hint="Click AI Suggest Keywords to automatically build lists"
           tags={keywords}
           onChange={setKeywords}
           placeholder="e.g. Office Cleaning, Janitorial Services"
         />
 
-        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-          <div className="flex-1">
-            <label className="text-xs font-medium text-gray-600">Notes for AI (optional)</label>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="sm:col-span-3 space-y-2">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">AI Search Directives (Optional)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
               value={aiNote}
               onChange={(e) => setAiNote(e.target.value)}
-              placeholder="Focus on commercial / multi-site operators…"
+              placeholder="e.g. Focus on commercial / multi-site operators..."
             />
           </div>
-          <div className="w-28">
-            <label className="text-xs font-medium text-gray-600">Max / search</label>
-            <input className={inputCls} value={maxResults} onChange={(e) => setMaxResults(e.target.value)} />
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Max Search Yield</label>
+            <input className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`} value={maxResults} onChange={(e) => setMaxResults(e.target.value)} />
           </div>
         </div>
 
         {suggesting && (
-          <ProgressBar label="AI suggesting keywords…" indeterminate tone="indigo" />
+          <ProgressBar label="AI suggesting keywords…" indeterminate tone="navy" />
         )}
         {discovering && (
           <ProgressBar
             label={
               activeGroupProgress
                 ? `Finding leads — ${activeGroupProgress.completedChunks}/${activeGroupProgress.totalChunks} chunks (${activeGroupProgress.label})`
-                : "Finding leads — waiting on Redis queue…"
+                : "Finding leads…"
             }
             pct={activeGroupProgress?.progressPct}
             indeterminate={!activeGroupProgress || activeGroupProgress.progressPct < 1}
             tone="amber"
           />
         )}
-        {analyzing && <ProgressBar label="Analyzing selected leads…" indeterminate tone="indigo" />}
+        {analyzing && <ProgressBar label="Analyzing selected leads…" indeterminate tone="navy" />}
 
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={btnSecondary} disabled={suggesting || discovering} onClick={askAI}>
-            <Sparkles className="w-4 h-4" />
-            {suggesting ? "Asking AI…" : "AI Suggest Keywords"}
+        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
+            disabled={suggesting || discovering} 
+            onClick={askAI}
+          >
+            <Sparkles className="w-4.5 h-4.5 text-[#D97706]" />
+            {suggesting ? "Analyzing Parameters..." : "AI Suggest Keywords"}
           </button>
-          <button type="button" className={btnPrimary} disabled={discovering} onClick={() => discover(true)}>
-            <Search className="w-4 h-4" />
-            {discovering ? "Searching…" : "Find Leads (queue)"}
+          
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-2 bg-[#0D1E36] hover:bg-[#142944] text-white px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
+            disabled={discovering} 
+            onClick={() => discover(true)}
+          >
+            <Search className="w-4.5 h-4.5 text-[#D97706]" />
+            {discovering ? "Processing Leads..." : "Find Leads"}
           </button>
-          <button type="button" className={btnSecondary} disabled={discovering} onClick={() => discover(false)}>
-            {discovering ? "Searching…" : "Run now (wait)"}
+          
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
+            disabled={discovering} 
+            onClick={() => discover(false)}
+          >
+            {discovering ? "Processing..." : "Find Leads (Sync Wait)"}
           </button>
-          <p className="w-full text-xs text-gray-500">
-            Live: use queue — results land in a named group. When Redis finishes, this page refreshes automatically.
+          
+          <p className="w-full text-xs text-gray-400 leading-relaxed mt-1">
+            Each query initializes a fresh Lead Group. Duplicates are bypassed dynamically. Output tables refresh on runtime completion.
           </p>
         </div>
       </div>
 
       <QueuePanel onQueueBecameIdle={handleQueueIdle} onQueueUpdate={() => loadGroups()} />
 
-      {/* Lead groups */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Leads Groups Directory */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Lead groups</h3>
-            <p className="text-xs text-gray-500">
-              Organize searches, move ungrouped leads, and use the high-priority replies group for follow-up.
+            <h3 className="text-sm font-bold uppercase tracking-wider text-[#0D1E36]">Active Leads Directories</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Manage custom batches, priority reply categories, and discover groups
             </p>
           </div>
-          <button type="button" className={btnSecondary} onClick={loadGroups}>
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all" 
+            onClick={loadGroups}
+          >
+            <RefreshCw className="w-4 h-4 text-[#D97706]" /> Refresh Directories
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex-1 min-w-[180px]">
-            <label className="text-xs font-medium text-gray-600">New group name</label>
+        <div className="flex flex-wrap gap-3 items-end pt-1">
+          <div className="flex-1 min-w-[220px] space-y-2">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Create Empty Leads Group</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder="e.g. US batch 2 — follow up"
+              placeholder="e.g. Q4 Outreach Segment"
             />
           </div>
-          <button type="button" className={btnSecondary} onClick={createEmptyGroup}>
-            <FolderPlus className="w-4 h-4" /> Create group
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all h-[42px]" 
+            onClick={createEmptyGroup}
+          >
+            <FolderPlus className="w-4.5 h-4.5 text-[#D97706]" /> Add Group
           </button>
         </div>
 
         {groups.length === 0 ? (
-          <p className="text-sm text-gray-500 py-2">No groups yet — run Find Leads or create one above.</p>
+          <p className="text-xs text-gray-400 py-2">No directories compiled. Perform a lead lookup to initialize directories.</p>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
-            {groups.map((g) => (
-              <div
-                key={g.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  setUngroupedOnly(false)
-                  setGroupFilter(String(g.id))
-                  setPage(1)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-56 overflow-y-auto pt-2">
+            {groups.map((g) => {
+              const isActive = groupFilter === String(g.id)
+              return (
+                <div
+                  key={g.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
                     setUngroupedOnly(false)
                     setGroupFilter(String(g.id))
                     setPage(1)
-                  }
-                }}
-                className={`text-left rounded-lg border p-3 transition cursor-pointer ${
-                  g.isPriority
-                    ? groupFilter === String(g.id)
-                      ? "border-amber-500 bg-amber-50"
-                      : "border-amber-300 bg-amber-50/60 hover:border-amber-400"
-                    : groupFilter === String(g.id)
-                      ? "border-indigo-400 bg-indigo-50"
-                      : "border-gray-200 hover:border-gray-300 bg-white"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
-                      {g.label}
-                      {g.isPriority && (
-                        <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
-                          Priority
-                        </span>
-                      )}
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setUngroupedOnly(false)
+                      setGroupFilter(String(g.id))
+                      setPage(1)
+                    }
+                  }}
+                  className={`text-left rounded-xl border p-4 transition-all duration-150 cursor-pointer flex flex-col justify-between border-l-4 ${
+                    g.isPriority
+                      ? isActive
+                        ? "border-[#D97706] bg-[#FEF3C7]/40"
+                        : "border-[#FEF3C7] bg-[#FEF3C7]/15 hover:border-[#D97706]"
+                      : isActive
+                        ? "border-[#0D1E36] bg-slate-50"
+                        : "border-gray-200 hover:border-gray-300 bg-white"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-bold text-[#0D1E36] truncate flex items-center gap-2">
+                        {g.label}
+                        {g.isPriority && (
+                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309]">
+                            Priority
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400 font-medium flex flex-wrap gap-x-2">
+                        <span>{g.memberCount ?? 0} direct leads</span>
+                        <span>· Status: {g.status}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-2">
-                      <span>{g.memberCount ?? 0} leads</span>
-                      <span>· {g.status}</span>
-                    </div>
+                    <button
+                      type="button"
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-[#9A2A1E] hover:bg-rose-50/50 transition-colors"
+                      title="Delete group"
+                      onClick={(e) => deleteGroup(g, e)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
-                    title="Delete group"
-                    onClick={(e) => deleteGroup(g, e)}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {(g.status === "RUNNING" || g.status === "QUEUED") && (
+                    <div className="mt-3">
+                      <ProgressBar pct={g.progressPct || 0} tone="amber" />
+                    </div>
+                  )}
                 </div>
-                {(g.status === "RUNNING" || g.status === "QUEUED") && (
-                  <div className="mt-2">
-                    <ProgressBar pct={g.progressPct || 0} tone="amber" />
-                  </div>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        <div className="flex flex-wrap gap-2 items-end mb-4">
-          <div className="flex-1 min-w-[180px]">
-            <label className="text-xs font-medium text-gray-600">Search leads</label>
+      {/* Lead Discovery Results Grid */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+          <div className="space-y-1.5 md:col-span-1">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Search Leads</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[40px]`}
               value={search}
               onChange={(e) => {
                 setPage(1)
                 setSearch(e.target.value)
               }}
-              placeholder="Name, email, city…"
+              placeholder="Search by name, city..."
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Group</label>
+          
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Leads Directory</label>
             <select
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[40px]`}
               value={ungroupedOnly ? "ungrouped" : groupFilter}
               onChange={(e) => {
                 setPage(1)
@@ -664,7 +722,7 @@ export default function LeadDiscoveryTab() {
               }}
             >
               <option value="">All groups</option>
-              <option value="ungrouped">Ungrouped only</option>
+              <option value="ungrouped">Ungrouped leads</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.isPriority ? "⭐ " : ""}
@@ -673,10 +731,11 @@ export default function LeadDiscoveryTab() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Email status</label>
+          
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Email status</label>
             <select
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[40px]`}
               value={emailSentFilter}
               onChange={(e) => {
                 setPage(1)
@@ -688,24 +747,26 @@ export default function LeadDiscoveryTab() {
               <option value="">All</option>
             </select>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Replies</label>
+          
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Responses</label>
             <select
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[40px]`}
               value={repliedOnly ? "true" : ""}
               onChange={(e) => {
                 setPage(1)
                 setRepliedOnly(e.target.value === "true")
               }}
             >
-              <option value="">All</option>
+              <option value="">All leads</option>
               <option value="true">Replied only</option>
             </select>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Rows</label>
+          
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Rows Display</label>
             <select
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[40px]`}
               value={pageSize}
               onChange={(e) => {
                 setPage(1)
@@ -714,44 +775,55 @@ export default function LeadDiscoveryTab() {
             >
               {PAGE_SIZE_OPTIONS.map((n) => (
                 <option key={n} value={n}>
-                  {n} / page
+                  {n} per page
                 </option>
               ))}
             </select>
           </div>
-          <button type="button" className={btnSecondary} onClick={() => refreshAll()}>
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
         </div>
 
+        {/* Floating Bulk Actions Panel */}
         {selected.length > 0 && (
-          <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 space-y-3">
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-sm font-medium text-indigo-900">{selected.length} selected</span>
-              <button type="button" className={btnPrimary} disabled={analyzing} onClick={runBulkAnalyze}>
-                <Sparkles className="w-4 h-4" /> Analyze
+          <div className="rounded-xl border border-l-4 border-l-[#D97706] border-gray-200 bg-[#F8F9FC] p-4.5 space-y-4 transition-all">
+            <div className="flex flex-wrap gap-3 items-center">
+              <span className="text-sm font-bold text-[#0D1E36]">{selected.length} record(s) selected</span>
+              
+              <button 
+                type="button" 
+                className="inline-flex items-center justify-center gap-1.5 bg-[#0D1E36] hover:bg-[#142944] text-white px-5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
+                disabled={analyzing} 
+                onClick={runBulkAnalyze}
+              >
+                <Sparkles className="w-4 h-4 text-[#D97706]" /> Bulk Analyze
               </button>
+              
               <button
                 type="button"
-                className={btnSecondary}
+                className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
                 onClick={() => setShowAssignPanel((v) => !v)}
               >
-                <FolderInput className="w-4 h-4" /> Assign to group
+                <FolderInput className="w-4 h-4 text-[#0D1E36]" /> Assign to directory
               </button>
-              <button type="button" className={btnSecondary} onClick={deleteSelectedLeads}>
-                <Trash2 className="w-4 h-4" /> Delete
+              
+              <button 
+                type="button" 
+                className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-rose-50/50 text-rose-700 hover:text-rose-800 border border-rose-100 px-5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
+                onClick={deleteSelectedLeads}
+              >
+                <Trash2 className="w-4 h-4" /> Bulk Delete
               </button>
             </div>
+            
             {showAssignPanel && (
-              <div className="flex flex-wrap gap-2 items-end bg-white rounded-lg border border-indigo-100 p-3">
-                <div className="min-w-[160px] flex-1">
-                  <label className="text-xs font-medium text-gray-600">Existing group</label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white rounded-xl border border-gray-100 p-5 shadow-inner">
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Target Existing Group</label>
                   <select
-                    className={inputCls}
+                    className={`${inputCls} focus:border-[#D97706] text-sm h-[40px] bg-slate-50`}
                     value={assignGroupId}
                     onChange={(e) => setAssignGroupId(e.target.value)}
                   >
-                    <option value="">Select group…</option>
+                    <option value="">Select target...</option>
                     {groups.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.label}
@@ -759,28 +831,32 @@ export default function LeadDiscoveryTab() {
                     ))}
                   </select>
                 </div>
-                <div className="min-w-[160px] flex-1">
-                  <label className="text-xs font-medium text-gray-600">Or new group name</label>
+                
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Or Set New Directory Title</label>
                   <input
-                    className={inputCls}
+                    className={`${inputCls} focus:border-[#D97706] text-sm h-[40px] bg-slate-50`}
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
-                    placeholder="Create & assign…"
+                    placeholder="Create segment..."
                   />
                 </div>
-                <button type="button" className={btnPrimary} onClick={() => assignSelected()}>
-                  Add to group
-                </button>
-                <button type="button" className={btnSecondary} onClick={() => assignSelected({ move: true })}>
-                  Move to group
-                </button>
-                <button
-                  type="button"
-                  className={btnSecondary}
-                  onClick={() => assignSelected({ createNew: true })}
-                >
-                  <FolderPlus className="w-4 h-4" /> Create new & assign
-                </button>
+                
+                <div className="flex flex-wrap items-end gap-2 justify-end">
+                  <button type="button" className="inline-flex items-center justify-center bg-[#0D1E36] hover:bg-[#142944] text-white px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]" onClick={() => assignSelected()}>
+                    Add to group
+                  </button>
+                  <button type="button" className="inline-flex items-center justify-center bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]" onClick={() => assignSelected({ move: true })}>
+                    Move to group
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]"
+                    onClick={() => assignSelected({ createNew: true })}
+                  >
+                    <FolderPlus className="w-4 h-4 text-[#D97706]" /> New & Assign
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -789,115 +865,134 @@ export default function LeadDiscoveryTab() {
         {loading ? (
           <LoadingBlock />
         ) : leads.length === 0 ? (
-          <EmptyState title="No leads yet" description="Add countries and click Find Leads." />
+          <EmptyState title="Directories empty" description="Target target zones and query keywords to find potential leads." />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b bg-gray-50">
-                    <th className="p-2 w-10">
-                      <input
-                        type="checkbox"
-                        checked={allVisibleSelected}
-                        onChange={toggleSelectAll}
-                        title="Select all on this page"
-                        aria-label="Select all on this page"
-                      />
-                    </th>
-                    <th className="p-2 font-medium">Company</th>
-                    <th className="p-2 font-medium">Location</th>
-                    <th className="p-2 font-medium">Email</th>
-                    <th className="p-2 font-medium">Score</th>
-                    <th className="p-2 font-medium">Status</th>
-                    <th className="p-2 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {leads.map((l) => (
-                    <tr
-                      key={l.id}
-                      className={`border-b border-gray-100 hover:bg-gray-50/80 ${
-                        hasReplied(l) ? "bg-amber-50/40" : ""
-                      }`}
-                    >
-                      <td className="p-2">
+            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="text-gray-500 text-[10px] font-bold uppercase tracking-wider bg-slate-50 border-b border-gray-200">
+                      <th className="p-3 w-12 text-center">
                         <input
                           type="checkbox"
-                          checked={selected.includes(l.id)}
-                          onChange={() =>
-                            setSelected((prev) =>
-                              prev.includes(l.id) ? prev.filter((x) => x !== l.id) : [...prev, l.id]
-                            )
-                          }
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectAll}
+                          className="accent-[#0D1E36] rounded border-gray-300 w-4 h-4 cursor-pointer"
+                          title="Select all on page"
+                          aria-label="Select all on page"
                         />
-                      </td>
-                      <td className="p-2">
-                        <div className="font-medium text-gray-900 flex flex-wrap items-center gap-1.5">
-                          {l.name}
-                          {hasReplied(l) && (
-                            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-200 text-amber-950">
-                              Replied
-                              {l.replyStatus ? ` · ${l.replyStatus}` : ""}
-                            </span>
-                          )}
-                          {(l.emailSentCount || 0) > 0 && !hasReplied(l) && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-800">
-                              Sent
-                            </span>
-                          )}
-                        </div>
-                        {l.website && (
-                          <div className="text-xs text-gray-400 truncate max-w-[200px]">{l.website}</div>
-                        )}
-                        {l.groupMembers?.length > 0 && (
-                          <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[240px]">
-                            {l.groupMembers.map((m: any) => m.group?.label).filter(Boolean).join(" · ")}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-2 text-gray-600">
-                        {[l.city, l.country].filter(Boolean).join(", ") || "—"}
-                      </td>
-                      <td className="p-2 text-gray-600">{l.email || "—"}</td>
-                      <td className="p-2">{l.leadScore ?? "—"}</td>
-                      <td className="p-2">
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100">{l.status}</span>
-                      </td>
-                      <td className="p-2 whitespace-nowrap">
-                        <button
-                          type="button"
-                          className="text-indigo-600 text-xs font-medium mr-2"
-                          onClick={async () => {
-                            setAnalyzing(true)
-                            await saPost(`/leads/${l.id}`, {})
-                            setMessage({ type: "success", text: `Analysis queued for ${l.name}` })
-                          }}
-                        >
-                          Analyze
-                        </button>
-                        <button
-                          type="button"
-                          className="text-red-600 text-xs font-medium"
-                          onClick={() => deleteLead(l)}
-                        >
-                          Delete
-                        </button>
-                      </td>
+                      </th>
+                      <th className="p-3.5 pl-4">Company Entity</th>
+                      <th className="p-3.5">Geographic Location</th>
+                      <th className="p-3.5">Primary Email Address</th>
+                      <th className="p-3.5 text-center">Lead Score</th>
+                      <th className="p-3.5">Ingest Status</th>
+                      <th className="p-3.5 text-right pr-6">Inline Controls</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {leads.map((l) => {
+                      const replied = hasReplied(l)
+                      return (
+                        <tr
+                          key={l.id}
+                          className={`hover:bg-[#F8F9FC] transition-colors duration-100 ${
+                            replied ? "bg-[#FEF3C7]/15 hover:bg-[#FEF3C7]/25" : ""
+                          }`}
+                        >
+                          <td className="p-3 text-center">
+                            <input
+                              type="checkbox"
+                              className="accent-[#0D1E36] rounded border-gray-300 w-4 h-4 cursor-pointer"
+                              checked={selected.includes(l.id)}
+                              onChange={() =>
+                                setSelected((prev) =>
+                                  prev.includes(l.id) ? prev.filter((x) => x !== l.id) : [...prev, l.id]
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="p-3 pl-4">
+                            <div className="font-bold text-[#0D1E36] flex flex-wrap items-center gap-1.5 text-xs">
+                              {l.name}
+                              {replied && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309] border border-[#FEF3C7]">
+                                  Replied {l.replyStatus ? `· ${l.replyStatus}` : ""}
+                                </span>
+                              )}
+                              {(l.emailSentCount || 0) > 0 && !replied && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-100">
+                                  Outbound sent
+                                </span>
+                              )}
+                            </div>
+                            {l.website && (
+                              <div className="text-[10px] text-gray-400 mt-1 truncate max-w-[200px]">{l.website}</div>
+                            )}
+                            {l.groupMembers?.length > 0 && (
+                              <div className="text-[9px] font-mono text-gray-400 mt-1 truncate max-w-[240px]">
+                                {l.groupMembers.map((m: any) => m.group?.label).filter(Boolean).join(" · ")}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-500 font-semibold text-xs">
+                            {[l.city, l.country].filter(Boolean).join(", ") || "—"}
+                          </td>
+                          <td className="p-3 text-slate-600 font-semibold text-xs">{l.email || "—"}</td>
+                          <td className="p-3 text-center font-mono font-bold text-[#0D1E36] text-xs">{l.leadScore ?? "—"}</td>
+                          <td className="p-3">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-gray-100">
+                              {l.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right pr-6 whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                className="text-[#0D1E36] hover:text-[#D97706] hover:bg-slate-50 border border-transparent hover:border-gray-100 font-semibold text-xs px-3 py-1.5 rounded-md transition-all disabled:opacity-50"
+                                disabled={analyzing}
+                                onClick={async () => {
+                                  setAnalyzing(true)
+                                  try {
+                                    await saPost(`/leads/${l.id}`, {})
+                                    setMessage({ type: "success", text: `AI analysis dispatched for ${l.name}.` })
+                                  } catch (e: any) {
+                                    setMessage({ type: "error", text: e.message })
+                                    setAnalyzing(false)
+                                  }
+                                }}
+                              >
+                                {analyzing ? "..." : "Analyze"}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-[#9A2A1E] hover:text-[#7A1F16] hover:bg-rose-50 border border-transparent hover:border-rose-100 font-semibold text-xs px-3 py-1.5 rounded-md transition-all"
+                                onClick={() => deleteLead(l)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="flex flex-wrap justify-between items-center gap-2 mt-3 text-sm text-gray-600">
-              <span>
-                {total} leads · page {page} of {totalPages}
+            
+            {/* Grid Pagination Footer */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 pt-2">
+              <span className="text-xs">
+                Total records: <strong className="text-[#0D1E36]">{total}</strong> leads · Page <strong className="text-[#0D1E36]">{page}</strong> of {totalPages}
                 {selected.length > 0 ? ` · ${selected.length} selected` : ""}
               </span>
-              <div className="flex gap-2">
+              
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={btnSecondary}
+                  className="inline-flex items-center justify-center bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => p - 1)}
                 >
@@ -905,7 +1000,7 @@ export default function LeadDiscoveryTab() {
                 </button>
                 <button
                   type="button"
-                  className={btnSecondary}
+                  className="inline-flex items-center justify-center bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-lg shadow-sm transition-all"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >

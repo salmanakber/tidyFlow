@@ -48,6 +48,26 @@ export async function POST(request: NextRequest) {
   if (gate instanceof NextResponse) return gate;
 
   const body = await request.json();
+
+  if (body.action === 'sync_inbox') {
+    const { syncRepliesFromInbox } = await import('@/lib/sales-agent/reply-sync');
+    const result = await syncRepliesFromInbox();
+    return jsonOk(result);
+  }
+
+  if (body.action === 'bulk_delete' && Array.isArray(body.ids)) {
+    const ids = body.ids.map(Number).filter(Boolean);
+    if (!ids.length) return jsonError('ids required');
+    const result = await (prisma as any).saReply.deleteMany({ where: { id: { in: ids } } });
+    return jsonOk({ deleted: result.count });
+  }
+
+  if (body.action === 'delete' && body.id) {
+    const id = Number(body.id);
+    await (prisma as any).saReply.delete({ where: { id } });
+    return jsonOk({ deleted: true, id });
+  }
+
   if (!body.fromEmail) return jsonError('fromEmail is required');
 
   const reply = await classifyAndStoreReply({
@@ -82,4 +102,18 @@ export async function PATCH(request: NextRequest) {
     data,
   });
   return jsonOk(reply);
+}
+
+export async function DELETE(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const id = Number(request.nextUrl.searchParams.get('id'));
+  if (!id) return jsonError('id is required');
+
+  const existing = await (prisma as any).saReply.findUnique({ where: { id } });
+  if (!existing) return jsonError('Reply not found', 404);
+
+  await (prisma as any).saReply.delete({ where: { id } });
+  return jsonOk({ deleted: true, id });
 }

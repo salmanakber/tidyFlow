@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useEffect, useState } from "react"
@@ -5,6 +6,7 @@ import {
   saGet,
   saPut,
   saPost,
+  saDelete,
   LoadingBlock,
   MessageBanner,
   EmptyState,
@@ -13,59 +15,84 @@ import {
   inputCls,
   ProgressBar,
 } from "./shared"
-import { Plus, Play, CheckCircle2, XCircle, Mail, Inbox } from "lucide-react"
+import { 
+  Plus, 
+  Play, 
+  CheckCircle2, 
+  XCircle, 
+  Mail, 
+  Inbox, 
+  HelpCircle, 
+  Settings, 
+  Database, 
+  Clock, 
+  FileText, 
+  Info,
+  Check,
+  Trash2,
+  RefreshCw
+} from "lucide-react"
 
 function ResultCard({ result }: { result: any }) {
   if (!result) return null
   const ok = !!result.ok
   return (
     <div
-      className={`rounded-lg border px-3 py-2.5 text-sm ${
-        ok ? "bg-green-50 border-green-200 text-green-900" : "bg-red-50 border-red-200 text-red-900"
+      className={`rounded-xl border px-4 py-3 text-xs transition-all duration-150 ${
+        ok 
+          ? "bg-green-50/50 border-green-200 text-green-900" 
+          : "bg-rose-50/50 border-rose-200 text-rose-900"
       }`}
     >
-      <div className="flex items-start gap-2">
-        {ok ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> : <XCircle className="w-4 h-4 mt-0.5 shrink-0" />}
-        <div className="min-w-0 space-y-1">
-          <p className="font-medium">{result.message || result.error || (ok ? "OK" : "Failed")}</p>
+      <div className="flex items-start gap-3">
+        {ok ? (
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-green-600" />
+        ) : (
+          <XCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-600" />
+        )}
+        <div className="min-w-0 space-y-1 flex-1">
+          <p className="font-bold tracking-wide uppercase text-[10px] opacity-90">
+            {ok ? "System Verified" : "Diagnostic Failure"}
+          </p>
+          <p className="font-medium text-xs leading-relaxed">{result.message || result.error || (ok ? "OK" : "Failed")}</p>
+          
           {result.warning && (
-            <p className="text-xs rounded bg-amber-100/80 text-amber-950 border border-amber-200 px-2 py-1.5">
+            <p className="text-xs rounded-lg bg-amber-50 border border-[#FEF3C7] text-amber-900 px-2.5 py-1.5 mt-1">
               {result.warning}
             </p>
           )}
           {result.fromEmail && (
-            <p className="text-xs">
+            <p className="text-[10px] text-gray-500 font-mono">
               <strong>From:</strong> {result.fromEmail}
               {result.replyToEmail ? (
-                <>
-                  {" "}
-                  · <strong>Reply-To:</strong> {result.replyToEmail}
-                </>
+                <> · <strong>Reply-To:</strong> {result.replyToEmail}</>
               ) : null}
             </p>
           )}
           {result.smtpResponse && (
-            <p className="text-xs font-mono break-all opacity-80">SMTP: {String(result.smtpResponse)}</p>
+            <p className="text-[10px] font-mono break-all opacity-85 bg-white/60 p-1.5 rounded border border-gray-100">
+              SMTP: {String(result.smtpResponse)}
+            </p>
           )}
           {result.messageId && (
-            <p className="text-xs font-mono break-all opacity-80">Message-ID: {result.messageId}</p>
+            <p className="text-[10px] font-mono break-all opacity-85">Message-ID: {result.messageId}</p>
           )}
-          {result.hint && <p className="text-xs opacity-90">{result.hint}</p>}
-          {result.tip && <p className="text-xs opacity-90">{result.tip}</p>}
+          {result.hint && <p className="text-[11px] text-gray-500 italic mt-1">Hint: {result.hint}</p>}
+          {result.tip && <p className="text-[11px] text-[#D97706] italic mt-1">Tip: {result.tip}</p>}
           {Array.isArray(result.nextSteps) && (
-            <ol className="text-xs list-decimal ml-4 space-y-0.5">
+            <ol className="text-[11px] list-decimal ml-4 space-y-1 text-slate-700 pt-1">
               {result.nextSteps.map((s: string, i: number) => (
                 <li key={i}>{s}</li>
               ))}
             </ol>
           )}
           {result.imap?.unseen != null && (
-            <p className="text-xs">
+            <p className="text-[11px] font-mono text-slate-600">
               Inbox: {result.imap.messages} messages · {result.imap.unseen} unread
             </p>
           )}
           {result.imported != null && (
-            <p className="text-xs">
+            <p className="text-[11px] font-mono text-slate-600">
               Checked {result.checked} · imported {result.imported} · skipped {result.skipped}
             </p>
           )}
@@ -126,6 +153,11 @@ export default function SettingsTab() {
         maxResults: settings.discovery.maxResults,
         concurrentWorkers: settings.discovery.concurrentWorkers,
         bookingLink: settings.discovery.bookingLink,
+        defaultContactName: settings.templateDefaults?.defaultContactName || "",
+        defaultPersonalizedIntro: settings.templateDefaults?.defaultPersonalizedIntro || "",
+        defaultServices: settings.templateDefaults?.defaultServices || "",
+        defaultCity: settings.templateDefaults?.defaultCity || "",
+        defaultCompanyName: settings.templateDefaults?.defaultCompanyName || "",
       })
       if (settings.smtp.replyToEmail) setTestTo(settings.smtp.replyToEmail)
     } catch (e: any) {
@@ -149,7 +181,7 @@ export default function SettingsTab() {
       payload.replyImapEnabled = !!payload.replyImapEnabled
       payload.replyImapTls = true
       await saPut("/settings", payload)
-      setMessage({ type: "success", text: "Settings saved" })
+      setMessage({ type: "success", text: "Settings saved successfully" })
       load()
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
@@ -192,7 +224,7 @@ export default function SettingsTab() {
           result.error ||
           (action === "test_all"
             ? `Diagnostics: SMTP ${result.smtp?.ok ? "OK" : "FAIL"} · IMAP ${result.imap?.ok ? "OK" : "FAIL"}`
-            : "Test finished"),
+            : "Verification finished"),
       })
     } catch (e: any) {
       const timedOut =
@@ -200,8 +232,8 @@ export default function SettingsTab() {
         /timeout/i.test(e?.message || "") ||
         e?.message === "Network Error"
       const errText = timedOut
-        ? "Test timed out — SMTP/IMAP did not respond. Check host (smtp-relay.brevo.com), port 587, SMTP key, and that outbound SMTP is not blocked on this server."
-        : e?.response?.data?.message || e.message || "Test failed"
+        ? "Verification timed out — SMTP/IMAP servers did not respond. Verify port rules, host credentials, and that outbound traffic is not restricted."
+        : e?.response?.data?.message || e.message || "Test execution error"
       if (action === "test_smtp") setTestSmtp({ ok: false, error: errText })
       if (action === "test_imap") setTestImap({ ok: false, error: errText })
       if (action === "test_send") setTestSend({ ok: false, error: errText })
@@ -225,7 +257,7 @@ export default function SettingsTab() {
     setTestTo("tidyflaw@gmail.com")
     setMessage({
       type: "success",
-      text: "Filled Gmail defaults for tidyflaw@gmail.com — paste your App Password, then Save.",
+      text: "Gmail server parameters filled for tidyflaw@gmail.com — paste your secure App Password, then save.",
     })
   }
 
@@ -235,224 +267,222 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <MessageBanner message={message} />
 
-      <div className="bg-white rounded-xl border border-sky-200 shadow-sm p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900">How to set up Gmail for reply tracking</h3>
-        <p className="text-sm text-gray-600">
-          Use <strong>tidyflaw@gmail.com</strong> as Reply-To + IMAP. Brevo only <em>sends</em>; when a lead hits
-          Reply, the message lands in your Gmail and we sync it into the Sales Agent.
-        </p>
-        <ol className="text-sm text-gray-700 space-y-2 list-decimal ml-5">
-          <li>
-            Open{" "}
-            <a
-              className="text-indigo-600 underline"
-              href="https://myaccount.google.com/security"
-              target="_blank"
-              rel="noreferrer"
+      {/* Onboarding Box */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-[#0D1E36] text-white px-5 py-4 flex items-center justify-between border-b border-[#1A314F]">
+          <div className="flex items-center gap-2">
+            <HelpCircle className="w-5 h-5 text-[#D97706]" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">Gmail Integration & Reply Loop Setup</h3>
+          </div>
+          <span className="text-[10px] font-bold text-slate-300 font-mono">Documentation</span>
+        </div>
+        
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Configure <strong className="text-[#0D1E36]">tidyflaw@gmail.com</strong> as your central tracking loop. Brevo acts purely as your delivery engine; recipient replies will route automatically into Gmail and sync back inside your Sales Agent thread logs.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {[
+              { step: "1", title: "Access Security", text: "Open Google Account Security under your tidyflaw account." },
+              { step: "2", title: "Secure Account", text: "Turn on 2-Step Verification (mandatory for App Passwords)." },
+              { step: "3", title: "Create Token", text: "Generate a custom App Password; copy the generated 16-character token." },
+              { step: "4", title: "Inject Defaults", text: "Click 'Fill Gmail defaults' below and paste your 16-char token in the password field." },
+              { step: "5", title: "Diagnose Link", text: "Validate setup using the Connection Checks panel below." }
+            ].map((item, idx) => (
+              <div key={idx} className="bg-[#F8F9FC] border border-gray-100 rounded-xl p-3.5 space-y-2 relative">
+                <span className="absolute right-3.5 top-3 text-xs font-mono font-bold text-gray-300">#{item.step}</span>
+                <h4 className="text-xs font-bold text-[#0D1E36]">{item.title}</h4>
+                <p className="text-[11px] text-gray-500 leading-relaxed">{item.text}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-gray-100">
+            <button 
+              type="button" 
+              className="inline-flex items-center px-4 py-2 justify-center gap-1.5 bg-[#D97706] hover:bg-[#C26405] text-white text-xs font-semibold rounded-lg shadow-sm transition-all duration-150" 
+              onClick={fillGmailDefaults}
             >
-              Google Account → Security
-            </a>{" "}
-            while signed in as <code className="bg-gray-100 px-1 rounded text-xs">tidyflaw@gmail.com</code>.
-          </li>
-          <li>
-            Turn on <strong>2-Step Verification</strong> (required for App Passwords).
-          </li>
-          <li>
-            Go to{" "}
-            <a
-              className="text-indigo-600 underline"
-              href="https://myaccount.google.com/apppasswords"
-              target="_blank"
-              rel="noreferrer"
-            >
-              App passwords
-            </a>{" "}
-            → create one named <em>TidyFlow Sales Agent</em> → copy the 16-character password.
-          </li>
-          <li>
-            Click <strong>Fill Gmail defaults</strong> below, paste the App Password into the IMAP field, then{" "}
-            <strong>Save Settings</strong>.
-          </li>
-          <li>
-            Use <strong>Testing tools</strong>: Test SMTP → Test IMAP → Send test email → Reply to it → Test reply
-            sync.
-          </li>
-        </ol>
-        <button type="button" className={btnSecondary} onClick={fillGmailDefaults}>
-          Fill Gmail defaults (tidyflaw@gmail.com)
-        </button>
-        <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-900">
-          Do <strong>not</strong> use your normal Gmail password for IMAP — only the App Password. Host{" "}
-          <code className="bg-white/80 px-1 rounded">imap.gmail.com</code> port{" "}
-          <code className="bg-white/80 px-1 rounded">993</code>.
+              Fill Gmail defaults (tidyflaw@gmail.com)
+            </button>
+            <div className="inline-flex items-start gap-1.5 text-[11px] text-amber-800 bg-[#FEF3C7] border border-amber-200 p-2.5 rounded-lg max-w-xl">
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Do not use normal account passwords. App passwords bypass typical Google IMAP blocks securely. (Port <strong className="font-mono">993</strong>/Host <strong className="font-mono">imap.gmail.com</strong>)
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-indigo-200 shadow-sm p-5 space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">Testing tools</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Save settings first, then verify send + reply tracking end-to-end.
-          </p>
+      {/* Diagnostics Verification Center */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-5">
+        <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0D1E36]">Connection Diagnostics</h3>
+            <p className="text-[11px] text-gray-400">Save active parameters before testing</p>
+          </div>
+          <span className="text-[9px] font-bold text-[#D97706] bg-[#FEF3C7] px-2 py-0.5 rounded-full uppercase">Runtime Checks</span>
         </div>
 
-        {testing && <ProgressBar label={`Running ${testing.replace(/_/g, " ")}…`} indeterminate />}
+        {testing && <ProgressBar label={`Executing system test: ${testing.replace(/_/g, " ")}...`} indeterminate />}
 
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex-1 min-w-[200px]">
-            <label className="text-xs font-medium text-gray-600">Send test email to</label>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="md:col-span-3 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Test Destination Recipient</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={testTo}
               onChange={(e) => setTestTo(e.target.value)}
               placeholder="tidyflaw@gmail.com"
             />
           </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={btnSecondary} disabled={!!testing} onClick={() => runTest("test_smtp")}>
-            <Mail className="w-4 h-4" /> Test SMTP (Brevo)
-          </button>
-          <button type="button" className={btnSecondary} disabled={!!testing} onClick={() => runTest("test_imap")}>
-            <Inbox className="w-4 h-4" /> Test IMAP (Gmail)
-          </button>
-          <button
-            type="button"
-            className={btnPrimary}
-            disabled={!!testing || !testTo}
-            onClick={() => runTest("test_send")}
-          >
-            <Mail className="w-4 h-4" /> Send test email
-          </button>
-          <button
-            type="button"
-            className={btnSecondary}
+          <button 
+            type="button" 
+            className="w-full inline-flex items-center px-4 py-2 justify-center gap-1.5 bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold rounded-lg shadow-sm transition-all h-[38px]"
             disabled={!!testing}
-            onClick={() => runTest("test_reply_sync")}
+            onClick={() => runTest("test_all")}
           >
-            <Inbox className="w-4 h-4" /> Test reply sync
-          </button>
-          <button type="button" className={btnSecondary} disabled={!!testing} onClick={() => runTest("test_all")}>
             Run SMTP + IMAP check
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+          <button type="button" className={`${btnSecondary} text-xs py-2`} disabled={!!testing} onClick={() => runTest("test_smtp")}>
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Test SMTP (Brevo)
+          </button>
+          <button type="button" className={`${btnSecondary} text-xs py-2`} disabled={!!testing} onClick={() => runTest("test_imap")}>
+            <Inbox className="w-3.5 h-3.5 text-[#D97706]" /> Test IMAP (Gmail)
+          </button>
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs py-2`}
+            disabled={!!testing || !testTo}
+            onClick={() => runTest("test_send")}
+          >
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Send test email
+          </button>
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs py-2`}
+            disabled={!!testing}
+            onClick={() => runTest("test_reply_sync")}
+          >
+            <Inbox className="w-3.5 h-3.5 text-[#D97706]" /> Test reply sync
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <ResultCard result={testSmtp} />
           <ResultCard result={testImap} />
           <ResultCard result={testSend} />
           <ResultCard result={testSync} />
         </div>
 
-        <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700 space-y-1">
-          <p className="font-medium text-slate-900">Brevo SMTP checklist (if test hangs or fails)</p>
-          <ul className="list-disc ml-4 space-y-0.5">
-            <li>
-              Host <code className="bg-white px-1 rounded">smtp-relay.brevo.com</code> · Port{" "}
-              <code className="bg-white px-1 rounded">587</code>
+        {/* Debug Help Area */}
+        <div className="rounded-xl bg-slate-50 border border-gray-100 p-4 text-[11px] text-slate-600 space-y-2">
+          <p className="font-bold text-[#0D1E36] uppercase tracking-wider text-[9px]">Brevo Delivery Parameters Checklist</p>
+          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <li className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+              <span>Host: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">smtp-relay.brevo.com</code></span>
             </li>
-            <li>Username = Brevo login email · Password = <strong>SMTP key</strong> (Settings → SMTP &amp; API), not your account password</li>
-            <li>
-              From Email = an address on your <strong>verified domain</strong> (e.g. hello@yourdomain.com), then Save
+            <li className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+              <span>Port: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">587</code></span>
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+              <span>Domain: Must match verified sender record</span>
             </li>
           </ul>
         </div>
-        <p className="text-xs text-gray-500">
-          Full reply test: Send test email → open it → Reply → wait ~1 min → Test reply sync → check Outreach →
-          Replies.
-        </p>
       </div>
 
+      {/* SMTP Sending Configuration */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900">Brevo SMTP (send)</h3>
-        <p className="text-xs text-gray-500">
-          Brevo delivers the email. Set <strong>Reply-To</strong> to your Gmail so when a lead hits Reply, the
-          message goes to you — not Brevo.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium text-gray-600">SMTP Host</label>
+        <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+          <Mail className="w-4 h-4 text-[#D97706]" />
+          <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Brevo SMTP Settings</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">SMTP Host</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.smtpHost}
               onChange={(e) => setForm({ ...form, smtpHost: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">SMTP Port</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">SMTP Port</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.smtpPort}
               onChange={(e) => setForm({ ...form, smtpPort: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Username</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Username</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.smtpUsername}
               onChange={(e) => setForm({ ...form, smtpUsername: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">
-              Password {data?.smtp?.hasPassword ? "(set)" : ""}
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
+              Password {data?.smtp?.hasPassword ? "(Configured)" : ""}
             </label>
             <input
               type="password"
-              className={inputCls}
-              placeholder="Leave blank to keep"
+              className={`${inputCls} focus:border-[#D97706]`}
+              placeholder="•••••••• (leave blank to retain key)"
               value={form.smtpPassword}
               onChange={(e) => setForm({ ...form, smtpPassword: e.target.value })}
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-medium text-gray-600">From Email (Brevo verified sender) *</label>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">From Sender Address (Brevo Verified Only)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.senderEmail}
               onChange={(e) => setForm({ ...form, senderEmail: e.target.value })}
-              placeholder="must be verified in Brevo — e.g. hello@yourdomain.com"
+              placeholder="e.g. hello@yourdomain.com"
             />
-            <p className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-              This must match a <strong>verified sender</strong> in Brevo → Senders &amp; Domains. If it is wrong or
-              unverified, SMTP can say “sent” but Gmail never receives the email. Check Spam too.
-            </p>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Sender Name</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Sender Display Name</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.senderName}
               onChange={(e) => setForm({ ...form, senderName: e.target.value })}
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-medium text-gray-600">Reply-To Email (your Gmail) *</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Reply-To Address (Gmail Target)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.replyToEmail}
               onChange={(e) => setForm({ ...form, replyToEmail: e.target.value })}
               placeholder="tidyflaw@gmail.com"
             />
-            <p className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-              Set this to <strong>tidyflaw@gmail.com</strong>. Customers reply here. Brevo is only used to send.
-            </p>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Daily Sending Limit</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Daily Outbound Cap</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="number"
               value={form.dailyEmailLimit}
               onChange={(e) => setForm({ ...form, dailyEmailLimit: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Hourly Limit</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Hourly Throttle Cap</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="number"
               value={form.hourlyEmailLimit}
               onChange={(e) => setForm({ ...form, hourlyEmailLimit: e.target.value })}
@@ -461,230 +491,304 @@ export default function SettingsTab() {
         </div>
       </div>
 
+      {/* IMAP Receiving Configuration */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900">Track Gmail replies (IMAP)</h3>
-        <p className="text-xs text-gray-500">
-          Enable IMAP sync with a Gmail App Password for <strong>tidyflaw@gmail.com</strong>. The worker checks
-          every 15 minutes; you can also run sync from Testing tools.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={!!form.replyImapEnabled}
-            onChange={(e) => setForm({ ...form, replyImapEnabled: e.target.checked })}
-          />
-          Enable Gmail / IMAP reply sync
-        </label>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium text-gray-600">IMAP Host</label>
+        <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Inbox className="w-4 h-4 text-[#D97706]" />
+            <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Gmail IMAP Synchronization</h3>
+          </div>
+          
+          <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] select-none cursor-pointer">
             <input
-              className={inputCls}
+              type="checkbox"
+              className="accent-[#0D1E36] rounded border-gray-300 w-4 h-4 cursor-pointer"
+              checked={!!form.replyImapEnabled}
+              onChange={(e) => setForm({ ...form, replyImapEnabled: e.target.checked })}
+            />
+            Enable IMAP synchronization
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">IMAP Host</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.replyImapHost}
               onChange={(e) => setForm({ ...form, replyImapHost: e.target.value })}
               placeholder="imap.gmail.com"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">IMAP Port</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">IMAP Connection Port</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.replyImapPort}
               onChange={(e) => setForm({ ...form, replyImapPort: e.target.value })}
               placeholder="993"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">IMAP User</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Username Address</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.replyImapUser}
               onChange={(e) => setForm({ ...form, replyImapUser: e.target.value })}
               placeholder="tidyflaw@gmail.com"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">
-              Gmail App Password {data?.replyInbox?.hasPassword ? "(set)" : ""}
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
+              Secure App Password {data?.replyInbox?.hasPassword ? "(Configured)" : ""}
             </label>
             <input
               type="password"
-              className={inputCls}
-              placeholder="16-char App Password (not your normal password)"
+              className={`${inputCls} focus:border-[#D97706]`}
+              placeholder="16-character secure Google token"
               value={form.replyImapPassword}
               onChange={(e) => setForm({ ...form, replyImapPassword: e.target.value })}
             />
           </div>
         </div>
-        <button
-          type="button"
-          className={btnSecondary}
-          onClick={async () => {
-            try {
-              await saPost("/settings", { action: "sync_replies" })
-              setMessage({ type: "success", text: "Reply sync queued — check Replies tab shortly" })
-            } catch (e: any) {
-              setMessage({ type: "error", text: e.message })
-            }
-          }}
-        >
-          Sync replies now (queue)
-        </button>
-        <p className="text-xs text-gray-400">
-          Webhook alternative: POST JSON to{" "}
-          <code className="bg-gray-100 px-1 rounded">/api/admin/sales-agent/replies/inbound?secret=…</code> (set
-          env <code className="bg-gray-100 px-1 rounded">SALES_AGENT_INBOUND_SECRET</code>).
-        </p>
+
+        <div className="pt-2">
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs inline-flex items-center gap-1.5 hover:bg-slate-50`}
+            onClick={async () => {
+              try {
+                await saPost("/settings", { action: "sync_replies" })
+                setMessage({ type: "success", text: "Gmail poll request dispatched. Reviewing inbound replies..." })
+              } catch (e: any) {
+                setMessage({ type: "error", text: e.message })
+              }
+            }}
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-[#D97706]" /> Synchronize replies now
+          </button>
+        </div>
       </div>
 
+      {/* Default Template Variables */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900">Lead Discovery</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="md:col-span-2">
-            <label className="text-xs font-medium text-gray-600">
-              Google Places API Key {data?.discovery?.hasGooglePlacesKey ? "(configured)" : "(not set)"}
+        <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+          <FileText className="w-4 h-4 text-[#D97706]" />
+          <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Dynamic Variable Fallbacks</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Contact Name Fallback</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.defaultContactName || ""}
+              onChange={(e) => setForm({ ...form, defaultContactName: e.target.value })}
+              placeholder="e.g. Operations Manager"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Business Name Fallback</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.defaultCompanyName || ""}
+              onChange={(e) => setForm({ ...form, defaultCompanyName: e.target.value })}
+              placeholder="Fallback name"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Default Location Context</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.defaultCity || ""}
+              onChange={(e) => setForm({ ...form, defaultCity: e.target.value })}
+              placeholder="Default city"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Default Domain/Service Context</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.defaultServices || ""}
+              onChange={(e) => setForm({ ...form, defaultServices: e.target.value })}
+              placeholder="e.g. commercial sanitation"
+            />
+          </div>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Fallback Personalized Introduction (Pre-Analysis)</label>
+            <textarea
+              className={`${inputCls} focus:border-[#D97706]`}
+              rows={2}
+              value={form.defaultPersonalizedIntro || ""}
+              onChange={(e) => setForm({ ...form, defaultPersonalizedIntro: e.target.value })}
+              placeholder="Default introduction phrasing"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Lead Discovery Engine */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+          <Database className="w-4 h-4 text-[#D97706]" />
+          <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Lead Discovery Parameters</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
+              Google Places API Authorization Key {data?.discovery?.hasGooglePlacesKey ? "(Configured)" : ""}
             </label>
             <input
               type="password"
-              className={inputCls}
-              placeholder="Leave blank to keep"
+              className={`${inputCls} focus:border-[#D97706]`}
+              placeholder="Leave blank to retain active key"
               value={form.googlePlacesApiKey}
               onChange={(e) => setForm({ ...form, googlePlacesApiKey: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Search Engine</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Active Search Engine</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.searchEngine}
               onChange={(e) => setForm({ ...form, searchEngine: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Search Delay (ms)</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Throttle Delay Between Queries (ms)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="number"
               value={form.searchDelayMs}
               onChange={(e) => setForm({ ...form, searchDelayMs: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Max Results</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Max Ingest Results Limit</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="number"
               value={form.maxResults}
               onChange={(e) => setForm({ ...form, maxResults: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Concurrent Workers</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Concurrent Thread Allocation</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="number"
               value={form.concurrentWorkers}
               onChange={(e) => setForm({ ...form, concurrentWorkers: e.target.value })}
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-medium text-gray-600">Booking Link</label>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Company Core Booking URL</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={form.bookingLink}
               onChange={(e) => setForm({ ...form, bookingLink: e.target.value })}
             />
           </div>
         </div>
-        <button type="button" className={btnPrimary} disabled={saving} onClick={save}>
-          {saving ? "Saving…" : "Save Settings"}
-        </button>
+
+        <div className="pt-3 flex items-center gap-3">
+          <button 
+            type="button" 
+            className="inline-flex items-center px-4 py-2 justify-center bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold rounded-lg shadow-sm transition-all duration-150 disabled:opacity-50" 
+            disabled={saving} 
+            onClick={save}
+          >
+            {saving ? "Saving Active Rules..." : "Save Settings Parameters"}
+          </button>
+        </div>
       </div>
 
+      {/* Scheduled Automation Parameters */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900">Schedule (via automation worker)</h3>
-        <p className="text-xs text-gray-500">
-          Jobs run on the existing <code className="bg-gray-100 px-1 rounded">tidyflow-automation</code> queue
-          (same worker as billing cron) — not a separate process.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium text-gray-600">Job Name</label>
+        <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+          <Clock className="w-4 h-4 text-[#D97706]" />
+          <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Scheduled Operations Automation</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Operation Name</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.name}
               onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })}
+              placeholder="e.g. Daily Discovery Task"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Job Type</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Execution Pipeline Type</label>
             <select
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.jobType}
               onChange={(e) => setJobForm({ ...jobForm, jobType: e.target.value })}
             >
               <option value="lead_discovery">Lead Discovery</option>
               <option value="website_analysis">Website Analysis</option>
               <option value="email_sending">Email Sending</option>
-              <option value="follow_up">Follow-ups</option>
+              <option value="follow_up">Outbound Follow-ups</option>
             </select>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Cron (daily/weekly)</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Cron Schedule Formula</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.cronExpression}
               onChange={(e) => setJobForm({ ...jobForm, cronExpression: e.target.value })}
               placeholder="0 9 * * *"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Or specific date/time</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Or Set Single Execution Timestamp</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               type="datetime-local"
               value={jobForm.runAt}
               onChange={(e) => setJobForm({ ...jobForm, runAt: e.target.value })}
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-medium text-gray-600">Keywords (comma-separated)</label>
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Keyword Targets (Comma Separated)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.keyword}
               onChange={(e) => setJobForm({ ...jobForm, keyword: e.target.value })}
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">
-              Countries (your markets — leave blank if set in Find Leads)
-            </label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Country Constraints</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.countries}
               onChange={(e) => setJobForm({ ...jobForm, countries: e.target.value })}
               placeholder="UAE, Germany, USA"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Cities (optional)</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">City Constraints (Optional)</label>
             <input
-              className={inputCls}
+              className={`${inputCls} focus:border-[#D97706]`}
               value={jobForm.cities}
               onChange={(e) => setJobForm({ ...jobForm, cities: e.target.value })}
             />
           </div>
         </div>
+
         <button
           type="button"
-          className={btnPrimary}
+          className="inline-flex items-center justify-center gap-1.5 bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-sm transition-all"
           onClick={async () => {
             try {
               const keywords = jobForm.keyword.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
               const countries = jobForm.countries.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
               const cities = jobForm.cities.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
               await saPost("/scheduler", {
-                name: jobForm.name || `${jobForm.jobType} job`,
+                name: jobForm.name || `${jobForm.jobType} execution`,
                 jobType: jobForm.jobType,
                 cronExpression: jobForm.cronExpression || null,
                 runAt: jobForm.runAt || null,
@@ -695,56 +799,81 @@ export default function SettingsTab() {
                   method: "google_places",
                 },
               })
-              setMessage({ type: "success", text: "Scheduler job created" })
+              setMessage({ type: "success", text: "Scheduler pipeline task created successfully" })
               load()
             } catch (e: any) {
               setMessage({ type: "error", text: e.message })
             }
           }}
         >
-          <Plus className="w-4 h-4" /> Add Schedule
+          <Plus className="w-4 h-4 text-[#D97706]" /> Enqueue Automation Task
         </button>
 
+        {/* Existing Automation List */}
         {jobs.length === 0 ? (
-          <EmptyState title="No scheduled jobs" />
+          <EmptyState title="No scheduled pipelines" />
         ) : (
-          <table className="w-full text-sm mt-2">
-            <thead>
-              <tr className="text-left text-gray-500 border-b">
-                <th className="py-2 font-medium">Name</th>
-                <th className="py-2 font-medium">Type</th>
-                <th className="py-2 font-medium">Schedule</th>
-                <th className="py-2 font-medium">Last Run</th>
-                <th className="py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id} className="border-b border-gray-50">
-                  <td className="py-2">{j.name}</td>
-                  <td className="py-2 text-xs">{j.jobType}</td>
-                  <td className="py-2 text-xs">
-                    {j.cronExpression || (j.runAt ? new Date(j.runAt).toLocaleString() : "—")}
-                  </td>
-                  <td className="py-2 text-xs">
-                    {j.lastRunAt ? new Date(j.lastRunAt).toLocaleString() : "Never"}
-                  </td>
-                  <td className="py-2">
-                    <button
-                      type="button"
-                      className="text-indigo-600 text-xs inline-flex items-center gap-1"
-                      onClick={async () => {
-                        await saPost("/scheduler", { action: "run_now", id: j.id })
-                        setMessage({ type: "success", text: "Job queued" })
-                      }}
-                    >
-                      <Play className="w-3 h-3" /> Run now
-                    </button>
-                  </td>
+          <div className="border border-[#EEF0F5] rounded-xl overflow-hidden mt-4">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="text-gray-500 text-[10px] font-bold uppercase tracking-wider bg-slate-50 border-b border-gray-200">
+                  <th className="p-4 pl-5">Pipeline Name</th>
+                  <th className="p-4">Type</th>
+                  <th className="p-4">Cron / Runtime Spec</th>
+                  <th className="p-4">Last Run Execution</th>
+                  <th className="p-4 text-right pr-5">Execution controls</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {jobs.map((j) => (
+                  <tr key={j.id} className="hover:bg-[#F8F9FC] transition-colors duration-100">
+                    <td className="p-4 pl-5 font-bold text-[#0D1E36]">{j.name}</td>
+                    <td className="p-4">
+                      <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-[#EEF0F5] text-slate-700 font-semibold uppercase tracking-wider">
+                        {j.jobType}
+                      </span>
+                    </td>
+                    <td className="p-4 font-mono text-gray-500">
+                      {j.cronExpression || (j.runAt ? new Date(j.runAt).toLocaleString() : "—")}
+                    </td>
+                    <td className="p-4 text-gray-400">
+                      {j.lastRunAt ? new Date(j.lastRunAt).toLocaleString() : "Never Executed"}
+                    </td>
+                    <td className="p-4 text-right pr-5">
+                      <div className="inline-flex items-center gap-3 justify-end">
+                        <button
+                          type="button"
+                          className="text-[#0D1E36] hover:text-[#D97706] text-xs font-semibold inline-flex items-center gap-1 transition-colors"
+                          onClick={async () => {
+                            await saPost("/scheduler", { action: "run_now", id: j.id })
+                            setMessage({ type: "success", text: "Automation task started." })
+                          }}
+                        >
+                          <Play className="w-3.5 h-3.5 text-[#D97706]" /> Run now
+                        </button>
+                        <button
+                          type="button"
+                          className="text-rose-600 hover:text-rose-800 text-xs font-semibold inline-flex items-center gap-1 transition-colors"
+                          onClick={async () => {
+                            if (!window.confirm(`Delete scheduled job "${j.name}"?`)) return
+                            try {
+                              await saDelete("/scheduler", { id: j.id })
+                              setMessage({ type: "success", text: "Scheduled job deleted" })
+                              load()
+                            } catch (e: any) {
+                              setMessage({ type: "error", text: e.message })
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

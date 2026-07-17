@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
   const discovery = await getDiscoveryConfig();
   const replyInbox = await getReplyInboxConfig();
   const settings = await getAllSettingsMasked();
+  const { getSettingsByCategory } = await import('@/lib/sales-agent/config');
+  const general = await getSettingsByCategory('general');
 
   return jsonOk({
     smtp: {
@@ -41,6 +43,15 @@ export async function GET(request: NextRequest) {
       ...discovery,
       googlePlacesApiKey: discovery.googlePlacesApiKey ? '••••••••' : '',
       hasGooglePlacesKey: !!discovery.googlePlacesApiKey,
+    },
+    templateDefaults: {
+      defaultContactName: general.default_contact_name || '',
+      defaultPersonalizedIntro: general.default_personalized_intro || '',
+      defaultServices: general.default_services || '',
+      defaultCity: general.default_city || '',
+      defaultCompanyName: general.default_company_name || '',
+      senderName: smtp.senderName,
+      bookingLink: discovery.bookingLink,
     },
     settings,
   });
@@ -75,6 +86,11 @@ export async function PUT(request: NextRequest) {
     ['maxResults', 'max_results', 'discovery'],
     ['concurrentWorkers', 'concurrent_workers', 'discovery'],
     ['bookingLink', 'booking_link', 'discovery'],
+    ['defaultContactName', 'default_contact_name', 'general'],
+    ['defaultPersonalizedIntro', 'default_personalized_intro', 'general'],
+    ['defaultServices', 'default_services', 'general'],
+    ['defaultCity', 'default_city', 'general'],
+    ['defaultCompanyName', 'default_company_name', 'general'],
   ];
 
   for (const [bodyKey, dbKey, category, encrypt] of map) {

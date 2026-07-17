@@ -54,6 +54,7 @@ export async function saDelete<T = any>(path: string, params?: Record<string, an
   return res.data.data
 }
 
+/** Metric card. Amber top-edge appears on hover — a quiet "this number moves" cue, not decoration on every card at once. */
 export function StatCard({
   label,
   value,
@@ -64,10 +65,11 @@ export function StatCard({
   sub?: string
 }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
-      {sub ? <p className="mt-0.5 text-xs text-gray-400">{sub}</p> : null}
+    <div className="group relative overflow-hidden bg-white rounded-xl border border-[#E3E7F0] shadow-[0_1px_2px_rgba(11,27,59,0.04)] p-4 transition-shadow hover:shadow-[0_4px_16px_rgba(11,27,59,0.08)]">
+      <span className="absolute top-0 left-0 right-0 h-[2px] bg-[#D98E04] scale-x-0 group-hover:scale-x-100 origin-left transition-transform duration-300" />
+      <p className="text-[11px] font-semibold text-[#8890A0] uppercase tracking-wider">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-[#0B1B3B] tabular-nums tracking-tight">{value}</p>
+      {sub ? <p className="mt-0.5 text-xs text-[#A6ADBD]">{sub}</p> : null}
     </div>
   )
 }
@@ -75,8 +77,8 @@ export function StatCard({
 export function EmptyState({ title, description }: { title: string; description?: string }) {
   return (
     <div className="text-center py-12 px-4">
-      <p className="text-sm font-medium text-gray-900">{title}</p>
-      {description ? <p className="mt-1 text-sm text-gray-500">{description}</p> : null}
+      <p className="text-sm font-medium text-[#0B1B3B]">{title}</p>
+      {description ? <p className="mt-1 text-sm text-[#8890A0]">{description}</p> : null}
     </div>
   )
 }
@@ -84,7 +86,7 @@ export function EmptyState({ title, description }: { title: string; description?
 export function LoadingBlock() {
   return (
     <div className="flex items-center justify-center py-16">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#E3E7F0] border-t-[#D98E04]" />
     </div>
   )
 }
@@ -97,10 +99,10 @@ export function MessageBanner({
   if (!message) return null
   return (
     <div
-      className={`rounded-lg px-4 py-3 text-sm mb-4 ${
+      className={`rounded-lg px-4 py-3 text-sm mb-4 border ${
         message.type === "success"
-          ? "bg-green-50 text-green-800 border border-green-200"
-          : "bg-red-50 text-red-800 border border-red-200"
+          ? "bg-[#EFFAF3] text-[#166534] border-[#CDEBD8]"
+          : "bg-[#FDF0EE] text-[#9A2A1E] border-[#F4D4CE]"
       }`}
     >
       {message.text}
@@ -109,37 +111,40 @@ export function MessageBanner({
 }
 
 export const inputCls =
-  "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-export const btnPrimary =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-export const btnSecondary =
-  "inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+  "w-full rounded-lg border border-[#D8DCE6] px-3 py-2 text-sm text-[#0B1B3B] placeholder:text-[#A6ADBD] focus:outline-none focus:ring-2 focus:ring-[#D98E04]/40 focus:border-[#D98E04] transition-colors"
 
-/** Determinate or indeterminate waiting bar for AI / Redis actions */
+export const btnPrimary =
+  "inline-flex items-center justify-center gap-2 rounded-lg bg-[#0B1B3B] px-4 py-2 text-sm font-medium text-white hover:bg-[#16294F] disabled:opacity-50 transition-colors"
+
+export const btnSecondary =
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-[#D8DCE6] bg-white px-4 py-2 text-sm font-medium text-[#0B1B3B] hover:bg-[#F6F7FB] disabled:opacity-50 transition-colors"
+
+/** Determinate or indeterminate waiting bar for background actions */
 export function ProgressBar({
   label,
   pct,
   indeterminate,
-  tone = "indigo",
+  tone = "navy",
 }: {
   label?: string
   pct?: number
   indeterminate?: boolean
-  tone?: "indigo" | "green" | "amber"
+  tone?: "navy" | "green" | "amber"
 }) {
   const bar =
-    tone === "green" ? "bg-green-500" : tone === "amber" ? "bg-amber-500" : "bg-indigo-500"
+    tone === "green" ? "bg-[#1E9A5A]" : tone === "amber" ? "bg-[#D98E04]" : "bg-[#0B1B3B]"
   const track =
-    tone === "green" ? "bg-green-100" : tone === "amber" ? "bg-amber-100" : "bg-indigo-100"
+    tone === "green" ? "bg-[#E1F5E9]" : tone === "amber" ? "bg-[#FCEACB]" : "bg-[#E3E7F0]"
+  const workingText = tone === "amber" ? "text-[#B57703]" : "text-[#5B6478]"
   const value = Math.max(0, Math.min(100, pct ?? 0))
 
   return (
     <div className="w-full space-y-1.5">
       {label && (
-        <div className="flex justify-between text-xs text-gray-600">
-          <span className="font-medium">{label}</span>
-          {!indeterminate && <span>{value}%</span>}
-          {indeterminate && <span className="text-indigo-600 animate-pulse">Working…</span>}
+        <div className="flex justify-between text-xs text-[#5B6478]">
+          <span className="font-medium text-[#0B1B3B]">{label}</span>
+          {!indeterminate && <span className="tabular-nums">{value}%</span>}
+          {indeterminate && <span className={`${workingText} animate-pulse`}>Working…</span>}
         </div>
       )}
       <div className={`h-2.5 w-full rounded-full overflow-hidden ${track}`}>

@@ -1,8 +1,9 @@
+
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { saGet, LoadingBlock, btnSecondary, ProgressBar } from "./shared"
-import { RefreshCw, ListOrdered } from "lucide-react"
+import { RefreshCw, ListOrdered, CheckCircle2, AlertCircle, Activity, Clock } from "lucide-react"
 
 type QueueData = {
   redis?: boolean
@@ -49,7 +50,6 @@ export default function QueuePanel({
         wasBusy.current = false
         setShowProgress(true)
         onIdleRef.current?.()
-        // Hide progress shortly after idle
         setTimeout(() => setShowProgress(false), 4000)
       }
     } catch {
@@ -83,79 +83,125 @@ export default function QueuePanel({
   ]
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <ListOrdered className="w-4 h-4 text-gray-500" />
-          <h3 className="text-sm font-semibold text-gray-900">Job queue</h3>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
-              data?.redis ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
-            }`}
-          >
-            {data?.redis ? "Redis connected" : "Redis offline (jobs run inline if possible)"}
+    <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-xs p-5 space-y-5">
+      
+      {/* Telemetry Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-gray-100">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-slate-100 text-[#0D1E36]">
+            <ListOrdered className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0D1E36]">Background Job Telemetry</h3>
+            <p className="text-[11px] text-gray-400">Monitor background queues and outbound crawlers in real-time</p>
+          </div>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Redis Status */}
+          <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full ${
+            data?.redis 
+              ? "bg-green-50 text-green-700 border border-green-100" 
+              : "bg-amber-50 text-[#D97706] border border-[#FEF3C7]"
+          }`}>
+            {data?.redis ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5" /> Engine Online
+              </>
+            ) : (
+              <>
+                <AlertCircle className="w-3.5 h-3.5" /> Direct execution mode
+              </>
+            )}
           </span>
+
+          {/* Active Job Counter */}
           {busy > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 animate-pulse">
-              Working… {busy} job(s)
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-[#FEF3C7] text-[#B45309] animate-pulse border border-[#FEF3C7]">
+              <Activity className="w-3.5 h-3.5" /> {busy} Active task(s)
             </span>
           )}
+
+          <button 
+            type="button" 
+            className="inline-flex items-center justify-center gap-1 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[32px]" 
+            onClick={load}
+          >
+            <RefreshCw className="w-3 h-3 text-[#D97706]" /> Refresh
+          </button>
         </div>
-        <button type="button" className={btnSecondary} onClick={load}>
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
-        </button>
       </div>
 
       {showProgress && (
-        <ProgressBar
-          label={busy > 0 ? "Queue progress — UI refreshes automatically when done" : "Queue finished"}
-          pct={busy > 0 ? Math.max(pct, 8) : 100}
-          tone={busy > 0 ? "indigo" : "green"}
-        />
+        <div className="py-1">
+          <ProgressBar
+            label={busy > 0 ? "Working on background queues..." : "Queue idle"}
+            pct={busy > 0 ? Math.max(pct, 8) : 100}
+            tone={busy > 0 ? "navy" : "green"}
+          />
+        </div>
       )}
 
       {!compact && data?.howItWorks && (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-500 leading-relaxed max-w-3xl">
           {data.howItWorks.discovery} {data.howItWorks.emails}
         </p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+      {/* Grid of Metric Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
         {[
-          ["Active", c.active, "text-indigo-700 bg-indigo-50"],
-          ["Waiting", c.waiting, "text-gray-700 bg-gray-50"],
-          ["Delayed", c.delayed, "text-amber-700 bg-amber-50"],
-          ["Done", c.completed, "text-green-700 bg-green-50"],
-          ["Failed", c.failed, "text-red-700 bg-red-50"],
+          ["Active", c.active, "text-[#0D1E36] bg-slate-50 border-slate-200"],
+          ["Waiting", c.waiting, "text-slate-500 bg-slate-50 border-slate-100"],
+          ["Delayed", c.delayed, "text-[#B45309] bg-[#FEF3C7]/40 border-[#FEF3C7]"],
+          ["Completed", c.completed, "text-green-700 bg-green-50/50 border-green-100"],
+          ["Failed", c.failed, "text-rose-700 bg-rose-50/50 border-rose-100"],
         ].map(([label, val, cls]) => (
-          <div key={String(label)} className={`rounded-lg px-2 py-2 ${cls}`}>
-            <div className="text-lg font-semibold">{val ?? 0}</div>
-            <div className="text-xs">{label}</div>
+          <div key={String(label)} className={`rounded-xl border p-3.5 transition-all duration-150 ${cls}`}>
+            <div className="text-xl font-bold font-mono tracking-tight">{val ?? 0}</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-80">{label}</div>
           </div>
         ))}
       </div>
 
+      {/* Job Execution table */}
       {rows.length === 0 ? (
-        <p className="text-sm text-gray-500 py-4 text-center">No sales-agent jobs in the queue right now.</p>
+        <div className="text-center py-6 bg-slate-50 border border-gray-100 rounded-xl">
+          <p className="text-xs text-gray-400">No active background tasks in memory queue.</p>
+        </div>
       ) : (
-        <div className="overflow-x-auto max-h-64 overflow-y-auto">
-          <table className="w-full text-xs">
+        <div className="border border-gray-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+          <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="text-left text-gray-500 border-b">
-                <th className="py-1.5 pr-2">State</th>
-                <th className="py-1.5 pr-2">Job</th>
-                <th className="py-1.5 pr-2">Chunk / data</th>
-                <th className="py-1.5">When</th>
+              <tr className="text-gray-500 text-[10px] font-bold uppercase tracking-wider bg-slate-50 border-b border-gray-100">
+                <th className="p-3 pl-4">Queue State</th>
+                <th className="p-3">Job Type</th>
+                <th className="p-3">Chunk Payload Data</th>
+                <th className="p-3 text-right pr-4">Runtime Timestamp</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {rows.map((j) => (
-                <tr key={`${j.state}-${j.id}`} className="border-b border-gray-50">
-                  <td className="py-1.5 pr-2">
-                    <span className="font-medium">{j.state}</span>
+                <tr key={`${j.state}-${j.id}`} className="hover:bg-[#F8F9FC] transition-colors duration-100">
+                  <td className="p-3 pl-4">
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+                        j.state === "failed"
+                          ? "bg-rose-50 text-rose-700 border border-rose-100"
+                          : j.state === "completed"
+                            ? "bg-green-50 text-green-700 border border-green-100"
+                            : j.state === "active"
+                              ? "bg-[#FEF3C7] text-[#B45309] border border-[#FEF3C7]"
+                              : j.state === "delayed"
+                                ? "bg-amber-50 text-[#D97706] border border-[#FEF3C7]"
+                                : "bg-slate-100 text-slate-600 border border-slate-200"
+                      }`}
+                    >
+                      {j.state}
+                    </span>
                   </td>
-                  <td className="py-1.5 pr-2 font-mono text-gray-600">{j.name}</td>
-                  <td className="py-1.5 pr-2 text-gray-600 max-w-[240px] truncate" title={JSON.stringify(j.data)}>
+                  <td className="p-3 font-mono text-[#0D1E36] font-semibold text-[11px]">{j.name}</td>
+                  <td className="p-3 text-slate-500 font-medium max-w-[240px] truncate text-[11px]" title={JSON.stringify(j.data)}>
                     {j.data?.keyword
                       ? `${j.data.keyword}${j.data.city ? ` · ${j.data.city}` : ""}${j.data.country ? ` · ${j.data.country}` : ""}`
                       : j.data?.keywords
@@ -168,7 +214,7 @@ export default function QueuePanel({
                               ? `group #${j.data.discoveryGroupId}`
                               : "—"}
                   </td>
-                  <td className="py-1.5 text-gray-400">
+                  <td className="p-3 text-right pr-4 font-mono text-[10px] text-gray-400">
                     {j.finishedOn
                       ? new Date(j.finishedOn).toLocaleTimeString()
                       : j.processedOn
@@ -184,17 +230,23 @@ export default function QueuePanel({
         </div>
       )}
 
+      {/* Recent Activity Log list */}
       {!compact && data?.recentLogs?.length ? (
-        <div>
-          <h4 className="text-xs font-medium text-gray-600 mb-1">Recent activity</h4>
-          <ul className="text-xs text-gray-500 space-y-1 max-h-32 overflow-y-auto">
+        <div className="pt-3 border-t border-gray-100 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Live Operation Stream</h4>
+          </div>
+          
+          <ul className="text-xs text-slate-600 space-y-1.5 max-h-32 overflow-y-auto bg-slate-50/50 p-3 rounded-xl border border-gray-100 font-sans">
             {data.recentLogs.slice(0, 12).map((log: any) => (
-              <li key={log.id}>
-                <span className="text-gray-400">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                {" · "}
-                <span className="text-gray-700">{log.action}</span>
-                {" — "}
-                {log.message}
+              <li key={log.id} className="flex items-start gap-2 leading-relaxed">
+                <span className="font-mono text-[10px] text-gray-400 shrink-0 bg-white px-1.5 py-0.5 rounded border border-gray-100">
+                  {new Date(log.createdAt).toLocaleTimeString()}
+                </span>
+                <span className="text-[#0D1E36] font-bold shrink-0">{log.action}</span>
+                <span className="text-slate-400 shrink-0">·</span>
+                <span className="text-gray-500 italic truncate" title={log.message}>{log.message}</span>
               </li>
             ))}
           </ul>

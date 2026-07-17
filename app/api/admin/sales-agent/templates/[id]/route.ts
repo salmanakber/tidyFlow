@@ -122,3 +122,26 @@ export async function POST(
 
   return jsonError('Unknown action');
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const id = parseInt(params.id, 10);
+  const existing = await (prisma as any).saEmailTemplate.findUnique({ where: { id } });
+  if (!existing) return jsonError('Not found', 404);
+
+  await (prisma as any).saCampaign.updateMany({
+    where: { templateId: id },
+    data: { templateId: null },
+  });
+  await (prisma as any).saSentEmail.updateMany({
+    where: { templateId: id },
+    data: { templateId: null },
+  });
+  await (prisma as any).saEmailTemplate.delete({ where: { id } });
+  return jsonOk({ deleted: true, id });
+}

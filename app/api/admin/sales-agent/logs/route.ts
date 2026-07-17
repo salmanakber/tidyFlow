@@ -68,3 +68,41 @@ export async function GET(request: NextRequest) {
 
   return jsonOk({ items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 }
+
+export async function POST(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const body = await request.json();
+
+  if (body.action === 'bulk_delete' && Array.isArray(body.ids)) {
+    const ids = body.ids.map(Number).filter(Boolean);
+    if (!ids.length) return jsonError('ids required');
+    const result = await (prisma as any).saSystemLog.deleteMany({ where: { id: { in: ids } } });
+    return jsonOk({ deleted: result.count });
+  }
+
+  if (body.action === 'clear') {
+    const where: Record<string, any> = {};
+    if (body.category) where.category = body.category;
+    if (body.level) where.level = body.level;
+    const result = await (prisma as any).saSystemLog.deleteMany({ where });
+    return jsonOk({ deleted: result.count });
+  }
+
+  return jsonError('Unknown action');
+}
+
+export async function DELETE(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const id = Number(request.nextUrl.searchParams.get('id'));
+  if (!id) return jsonError('id is required');
+
+  const existing = await (prisma as any).saSystemLog.findUnique({ where: { id } });
+  if (!existing) return jsonError('Log not found', 404);
+
+  await (prisma as any).saSystemLog.delete({ where: { id } });
+  return jsonOk({ deleted: true, id });
+}

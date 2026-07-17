@@ -36,6 +36,9 @@ export async function buildTemplateVars(companyId: number, extras: Record<string
 
   const smtp = await getSalesAgentSmtpConfig();
   const discovery = await getDiscoveryConfig();
+  const { getSettingsByCategory } = await import('./config');
+  const tpl = await getSettingsByCategory('general');
+
   let services = '';
   try {
     services = company.services ? JSON.parse(company.services).join(', ') : '';
@@ -43,15 +46,27 @@ export async function buildTemplateVars(companyId: number, extras: Record<string
     services = company.services || '';
   }
 
+  // company_name / city / website = the LEAD (prospect), not TidyFlow
+  // personalized_intro = AI analysis when available, else default from Setup
+  // sender_name / booking_link = your company settings
   return {
-    company_name: company.name,
-    contact_name: company.contacts[0]?.name || extras.contact_name || company.name,
+    company_name: company.name || tpl.default_company_name || '',
+    contact_name:
+      company.contacts[0]?.name ||
+      extras.contact_name ||
+      tpl.default_contact_name ||
+      company.name ||
+      '',
     website: company.website || '',
-    city: company.city || '',
-    services,
-    personalized_intro: company.analyses[0]?.personalizedIntro || extras.personalized_intro || '',
-    sender_name: smtp.senderName,
-    booking_link: discovery.bookingLink,
+    city: company.city || tpl.default_city || '',
+    services: services || tpl.default_services || '',
+    personalized_intro:
+      company.analyses[0]?.personalizedIntro ||
+      extras.personalized_intro ||
+      tpl.default_personalized_intro ||
+      '',
+    sender_name: smtp.senderName || tpl.default_sender_name || 'TidyFlow',
+    booking_link: discovery.bookingLink || tpl.default_booking_link || '',
     ...extras,
   };
 }

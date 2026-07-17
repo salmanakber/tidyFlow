@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useEffect, useState } from "react"
@@ -14,7 +15,7 @@ import {
   btnSecondary,
   inputCls,
 } from "./shared"
-import { Play, Pause, Plus, Pencil, Trash2 } from "lucide-react"
+import { Play, Pause, Plus, Pencil, Trash2, Loader2, Mail, Settings, Users, CalendarDays } from "lucide-react"
 
 const emptyForm = {
   name: "",
@@ -24,6 +25,12 @@ const emptyForm = {
   maxEmailsPerDay: "50",
   selectedLeadIds: [] as number[],
   leadFilter: "not_sent" as "not_sent" | "sent" | "all",
+}
+
+function statusCls(status: string) {
+  if (status === "RUNNING") return "bg-[#E1F5E9] text-[#166534] ring-1 ring-[#166534]/10"
+  if (status === "PAUSED") return "bg-[#FCEACB] text-[#8A5A00] ring-1 ring-[#8A5A00]/10"
+  return "bg-[#EEF0F5] text-[#5B6478] ring-1 ring-[#5B6478]/10"
 }
 
 export default function CampaignsTab() {
@@ -38,6 +45,7 @@ export default function CampaignsTab() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [actionId, setActionId] = useState<number | null>(null)
   const [leadSearch, setLeadSearch] = useState("")
 
   const load = async () => {
@@ -103,7 +111,6 @@ export default function CampaignsTab() {
     aiPrompt: form.aiPrompt || null,
     delayBetweenEmails: Number(form.delayBetweenEmails),
     maxEmailsPerDay: Number(form.maxEmailsPerDay),
-    // No auto-discovery — you pick leads from Find Leads
     discoveryMethod: null,
     discoveryConfig: {
       audience: "selected_leads",
@@ -143,18 +150,21 @@ export default function CampaignsTab() {
   }
 
   const setStatus = async (id: number, status: string) => {
+    setActionId(id)
     try {
       await saPatch(`/campaigns/${id}`, { status })
       setMessage({
         type: "success",
         text:
           status === "RUNNING"
-            ? "Campaign started — emails queued for your selected leads"
+            ? "Campaign started — emails are sending to your selected leads"
             : `Campaign ${status.toLowerCase()}`,
       })
-      load()
+      await load()
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
+    } finally {
+      setActionId(null)
     }
   }
 
@@ -163,7 +173,7 @@ export default function CampaignsTab() {
       setMessage({ type: "error", text: "Pause the campaign before deleting" })
       return
     }
-    if (!window.confirm(`Delete “${c.name}”? Sent emails & leads are kept.`)) return
+    if (!window.confirm(`Delete "${c.name}"? Sent emails & leads are kept.`)) return
     try {
       await axios.delete(`/api/admin/sales-agent/campaigns/${c.id}?hard=1`, {
         headers: { Authorization: `Bearer ${getToken()}` },
@@ -217,7 +227,6 @@ export default function CampaignsTab() {
       const g = await saGet("/groups", { id: groupFilter })
       const ids: number[] = g.leadIds || []
       const withEmail = allLeads.filter((l) => ids.includes(l.id) && l.email).map((l) => l.id)
-      // Also fetch any group members that might not be in the current page
       const more = await saGet("/leads", {
         page: 1,
         pageSize: 500,
@@ -240,200 +249,276 @@ export default function CampaignsTab() {
   if (loading) return <LoadingBlock />
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <MessageBanner message={message} />
-      <div className="flex justify-between items-center gap-3">
-        <p className="text-sm text-gray-600">
-          Pick leads you already found → choose a template → Start. Each lead is marked <strong>Email sent</strong> after delivery. Repeat later for the rest.
-        </p>
-        <button type="button" className={btnPrimary} onClick={openCreate}>
-          <Plus className="w-4 h-4" /> New Campaign
+      
+      {/* Header Panel */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-[#F6F7FB] rounded-xl border border-[#E3E7F0]">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold text-[#0B1B3B]">Outreach Campaigns</h2>
+          <p className="text-xs text-[#5B6478] max-w-2xl leading-relaxed">
+            Target specific leads, select your template, and activate outreach scheduling. 
+            Leads automatically flag as <span className="font-semibold text-[#0B1B3B]">Email sent</span> upon dispatch.
+          </p>
+        </div>
+        <button 
+          type="button" 
+          className={`${btnPrimary} shrink-0 shadow-sm transition-all duration-150 hover:brightness-95 active:scale-95`} 
+          onClick={openCreate}
+        >
+          <Plus className="w-4 h-4 mr-1.5" /> New Campaign
         </button>
       </div>
 
       {showForm && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-4">
-          <h3 className="text-sm font-semibold text-gray-900">
-            {editingId ? "Edit campaign" : "New campaign"}
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm overflow-hidden transition-all duration-200">
+          {/* Form Header */}
+          <div className="border-b border-[#E3E7F0] bg-[#F6F7FB] px-5 py-4 flex items-center justify-between">
             <div>
-              <label className="text-xs font-medium text-gray-600">Campaign Name</label>
-              <input
-                className={inputCls}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. First outreach — batch 1"
-              />
+              <h3 className="text-sm font-semibold text-[#0B1B3B]">
+                {editingId ? "Modify Existing Campaign" : "Configure New Campaign"}
+              </h3>
+              <p className="text-xs text-[#8890A0]">Define parameters, pacing, and audience scope</p>
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Email Template</label>
-              <select
-                className={inputCls}
-                value={form.templateId}
-                onChange={(e) => setForm({ ...form, templateId: e.target.value })}
-              >
-                <option value="">Select template</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Delay between emails (sec)</label>
-              <input
-                className={inputCls}
-                value={form.delayBetweenEmails}
-                onChange={(e) => setForm({ ...form, delayBetweenEmails: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Max emails this run</label>
-              <input
-                className={inputCls}
-                value={form.maxEmailsPerDay}
-                onChange={(e) => setForm({ ...form, maxEmailsPerDay: e.target.value })}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium text-gray-600">AI Prompt (optional)</label>
-              <textarea
-                className={inputCls}
-                rows={2}
-                value={form.aiPrompt}
-                onChange={(e) => setForm({ ...form, aiPrompt: e.target.value })}
-              />
-            </div>
+            <span className="text-[10px] font-semibold tracking-wider text-[#5B6478] bg-[#EEF0F5] px-2.5 py-1 rounded-full uppercase">
+              Draft Configuration
+            </span>
           </div>
 
-          <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-semibold text-gray-900">Select leads</h4>
-                <p className="text-xs text-gray-500">
-                  {form.selectedLeadIds.length} selected · Prefer a lead group from Find Leads
-                </p>
+          <div className="p-5 space-y-6">
+            {/* Section 1: Campaign Profile & Details */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 pb-1.5 border-b border-[#EEF0F5]">
+                <Settings className="w-4 h-4 text-[#5B6478]" />
+                <h4 className="text-xs font-semibold text-[#0B1B3B] uppercase tracking-wider">Campaign Profile</h4>
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2 items-end">
-              <div>
-                <label className="text-xs font-medium text-gray-600">Lead group</label>
-                <select
-                  className={inputCls}
-                  value={groupFilter}
-                  onChange={(e) => setGroupFilter(e.target.value)}
-                >
-                  <option value="">All leads</option>
-                  {groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.label} ({g.memberCount ?? 0})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-1">
-                {(
-                  [
-                    ["not_sent", "Not emailed yet"],
-                    ["sent", "Already emailed"],
-                    ["all", "All with email"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setForm({ ...form, leadFilter: id })}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium ${
-                      form.leadFilter === id
-                        ? "bg-slate-900 text-white"
-                        : "bg-gray-100 text-gray-700"
-                    }`}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">Campaign Name</label>
+                  <input
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="e.g., First Outreach - Batch 1"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">Email Template</label>
+                  <select
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.templateId}
+                    onChange={(e) => setForm({ ...form, templateId: e.target.value })}
                   >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex-1 min-w-[160px]">
-                <input
-                  className={inputCls}
-                  value={leadSearch}
-                  onChange={(e) => setLeadSearch(e.target.value)}
-                  placeholder="Search leads…"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className={btnSecondary} onClick={selectAllVisible}>
-                Select all visible
-              </button>
-              {groupFilter && (
-                <button type="button" className={btnSecondary} onClick={selectEntireGroup}>
-                  Select entire group
-                </button>
-              )}
-              <button type="button" className={btnSecondary} onClick={clearSelection}>
-                Clear
-              </button>
-            </div>
-
-            <div className="max-h-56 overflow-y-auto border border-gray-100 rounded-lg">
-              {filteredLeads.length === 0 ? (
-                <p className="text-sm text-gray-500 p-4 text-center">
-                  No leads here. Go to Find Leads, discover companies, then come back.
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-gray-50">
-                    <tr className="text-left text-gray-500 text-xs">
-                      <th className="p-2 w-8" />
-                      <th className="p-2">Company</th>
-                      <th className="p-2">Email</th>
-                      <th className="p-2">Location</th>
-                      <th className="p-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredLeads.map((l) => (
-                      <tr key={l.id} className="border-t border-gray-50 hover:bg-gray-50">
-                        <td className="p-2">
-                          <input
-                            type="checkbox"
-                            checked={form.selectedLeadIds.includes(l.id)}
-                            onChange={() => toggleLead(l.id)}
-                          />
-                        </td>
-                        <td className="p-2 font-medium text-gray-900">{l.name}</td>
-                        <td className="p-2 text-gray-600">{l.email}</td>
-                        <td className="p-2 text-gray-500 text-xs">
-                          {[l.city, l.country].filter(Boolean).join(", ") || "—"}
-                        </td>
-                        <td className="p-2">
-                          {(l.emailSentCount || 0) > 0 ? (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">
-                              Email sent ({l.emailSentCount})
-                            </span>
-                          ) : (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                              Not sent
-                            </span>
-                          )}
-                        </td>
-                      </tr>
+                    <option value="">Select template</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
                     ))}
-                  </tbody>
-                </table>
-              )}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Flow Limits & Advanced Prompts */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 pb-1.5 border-b border-[#EEF0F5]">
+                <CalendarDays className="w-4 h-4 text-[#5B6478]" />
+                <h4 className="text-xs font-semibold text-[#0B1B3B] uppercase tracking-wider">Flow Scheduling</h4>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">Delay between emails (seconds)</label>
+                  <input
+                    type="number"
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.delayBetweenEmails}
+                    onChange={(e) => setForm({ ...form, delayBetweenEmails: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">Max emails this run</label>
+                  <input
+                    type="number"
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.maxEmailsPerDay}
+                    onChange={(e) => setForm({ ...form, maxEmailsPerDay: e.target.value })}
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">AI Prompt Enrichment (Optional)</label>
+                  <textarea
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B] resize-y min-h-[70px]`}
+                    rows={2}
+                    value={form.aiPrompt}
+                    onChange={(e) => setForm({ ...form, aiPrompt: e.target.value })}
+                    placeholder="Provide additional tone directives or variable guidelines for this workflow"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Target Audience */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 pb-1.5 border-b border-[#EEF0F5]">
+                <Users className="w-4 h-4 text-[#5B6478]" />
+                <h4 className="text-xs font-semibold text-[#0B1B3B] uppercase tracking-wider">Audience Selector</h4>
+              </div>
+
+              <div className="border border-[#E3E7F0] rounded-xl p-4 bg-[#F8F9FC] space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B1B3B]">Selected Recipients</h5>
+                    <p className="text-[11px] text-[#8890A0]">
+                      <strong className="text-[#0B1B3B]">{form.selectedLeadIds.length}</strong> active selection(s) 
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button type="button" className={`${btnSecondary} text-xs py-1 px-2.5`} onClick={selectAllVisible}>
+                      Select all visible
+                    </button>
+                    {groupFilter && (
+                      <button type="button" className={`${btnSecondary} text-xs py-1 px-2.5`} onClick={selectEntireGroup}>
+                        Select group
+                      </button>
+                    )}
+                    <button type="button" className={`${btnSecondary} text-xs py-1 px-2.5 text-[#9A2A1E] border-red-100 hover:bg-red-50`} onClick={clearSelection}>
+                      Clear selection
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Controls Bar */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-[#8890A0] uppercase">Lead Group</label>
+                    <select
+                      className={`${inputCls} bg-white`}
+                      value={groupFilter}
+                      onChange={(e) => setGroupFilter(e.target.value)}
+                    >
+                      <option value="">All leads</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.label} ({g.memberCount ?? 0})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-[#8890A0] uppercase">Outreach Filter</label>
+                    <div className="flex p-0.5 bg-[#EEF0F5] rounded-lg border border-[#E3E7F0] h-[36px] items-center">
+                      {(
+                        [
+                          ["not_sent", "Pending"],
+                          ["sent", "Emailed"],
+                          ["all", "Show All"],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setForm({ ...form, leadFilter: id })}
+                          className={`flex-1 text-center py-1 rounded-md text-[11px] font-medium transition-all duration-150 ${
+                            form.leadFilter === id
+                              ? "bg-white text-[#0B1B3B] shadow-xs font-semibold"
+                              : "text-[#5B6478] hover:text-[#0B1B3B]"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-[#8890A0] uppercase">Search Context</label>
+                    <input
+                      className={`${inputCls} bg-white`}
+                      value={leadSearch}
+                      onChange={(e) => setLeadSearch(e.target.value)}
+                      placeholder="Name, email, location..."
+                    />
+                  </div>
+                </div>
+
+                {/* Leads Scrollable Area */}
+                <div className="max-h-56 overflow-y-auto border border-[#E3E7F0] rounded-lg bg-white shadow-inner">
+                  {filteredLeads.length === 0 ? (
+                    <div className="text-center py-10 px-4">
+                      <p className="text-xs text-[#8890A0]">
+                        No matching leads identified. Navigate to <span className="font-semibold text-[#5B6478]">Find Leads</span> to ingest contacts.
+                      </p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left border-collapse">
+                      <thead className="sticky top-0 bg-[#F6F7FB] border-b border-[#E3E7F0] z-10">
+                        <tr className="text-[#8890A0] text-[10px] font-bold uppercase tracking-wider">
+                          <th className="p-3 w-10 text-center" />
+                          <th className="p-3">Company Name</th>
+                          <th className="p-3">Email Address</th>
+                          <th className="p-3">Location</th>
+                          <th className="p-3 text-right pr-4">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#EEF0F5]">
+                        {filteredLeads.map((l) => (
+                          <tr key={l.id} className="hover:bg-[#F8F9FC] transition-colors duration-100 text-xs">
+                            <td className="p-3 text-center">
+                              <input
+                                type="checkbox"
+                                className="accent-[#0B1B3B] rounded border-gray-300 w-3.5 h-3.5 cursor-pointer"
+                                checked={form.selectedLeadIds.includes(l.id)}
+                                onChange={() => toggleLead(l.id)}
+                              />
+                            </td>
+                            <td className="p-3 font-semibold text-[#0B1B3B]">{l.name}</td>
+                            <td className="p-3 text-[#5B6478]">{l.email}</td>
+                            <td className="p-3 text-[#8890A0]">
+                              {[l.city, l.country].filter(Boolean).join(", ") || "—"}
+                            </td>
+                            <td className="p-3 text-right pr-4 w-[120px]">
+                              {(l.emailSentCount || 0) > 0 ? (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-[#E1F5E9] text-[#166534] font-medium">
+                                  Sent ({l.emailSentCount})
+                                </span>
+                              ) : (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-[#EEF0F5] text-[#5B6478] font-medium">
+                                  Not sent
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex gap-2">
-            <button type="button" className={btnPrimary} onClick={save} disabled={!form.name || saving}>
-              {saving ? "Saving…" : editingId ? "Save changes" : "Create campaign"}
+          {/* Form Actions Footer */}
+          <div className="bg-[#F6F7FB] border-t border-[#E3E7F0] px-5 py-4 flex items-center gap-3">
+            <button
+              type="button"
+              className={`${btnPrimary} min-w-[120px] transition-all`}
+              onClick={save}
+              disabled={!form.name || saving}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  Saving...
+                </>
+              ) : editingId ? (
+                "Save changes"
+              ) : (
+                "Create campaign"
+              )}
             </button>
             <button
               type="button"
@@ -449,95 +534,105 @@ export default function CampaignsTab() {
         </div>
       )}
 
+      {/* Campaigns Listing Container */}
       {items.length === 0 ? (
         <EmptyState
-          title="No campaigns"
-          description="Create a campaign, select leads from Find Leads, then Start."
+          title="No campaigns configured"
+          description="Build custom campaigns, populate lead lists from Find Leads, then initiate sending operations."
         />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-500 border-b bg-gray-50">
-                <th className="p-3 font-medium">Name</th>
-                <th className="p-3 font-medium">Status</th>
-                <th className="p-3 font-medium">Template</th>
-                <th className="p-3 font-medium">Selected leads</th>
-                <th className="p-3 font-medium">Emails sent</th>
-                <th className="p-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((c) => {
-                let selectedCount = 0
-                try {
-                  const cfg = c.discoveryConfig ? JSON.parse(c.discoveryConfig) : {}
-                  selectedCount = Array.isArray(cfg.selectedLeadIds) ? cfg.selectedLeadIds.length : 0
-                } catch {
-                  /* ignore */
-                }
-                return (
-                  <tr key={c.id} className="border-b border-gray-100">
-                    <td className="p-3 font-medium text-gray-900">{c.name}</td>
-                    <td className="p-3">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          c.status === "RUNNING"
-                            ? "bg-green-100 text-green-800"
-                            : c.status === "PAUSED"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-gray-600">{c.template?.name || "—"}</td>
-                    <td className="p-3">{selectedCount}</td>
-                    <td className="p-3">{c.emailsSent ?? c._count?.sentEmails ?? 0}</td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="text-indigo-600 text-xs font-medium inline-flex items-center gap-1"
-                          onClick={() => openEdit(c)}
-                        >
-                          <Pencil className="w-3 h-3" /> Edit
-                        </button>
-                        {(c.status === "DRAFT" || c.status === "PAUSED" || c.status === "COMPLETED") && (
+        <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="text-[#8890A0] text-[10px] font-semibold uppercase tracking-wider bg-[#F6F7FB] border-b border-[#E3E7F0]">
+                  <th className="p-4 pl-5">Campaign Name</th>
+                  <th className="p-4">Status</th>
+                  <th className="p-4">Associated Template</th>
+                  <th className="p-4 text-center">Selected Leads</th>
+                  <th className="p-4 text-center">Delivered</th>
+                  <th className="p-4 text-right pr-5">Execution Controls</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#EEF0F5]">
+                {items.map((c) => {
+                  let selectedCount = 0
+                  try {
+                    const cfg = c.discoveryConfig ? JSON.parse(c.discoveryConfig) : {}
+                    selectedCount = Array.isArray(cfg.selectedLeadIds) ? cfg.selectedLeadIds.length : 0
+                  } catch {
+                    /* ignore */
+                  }
+                  return (
+                    <tr key={c.id} className="hover:bg-[#F8F9FC] transition-colors duration-100">
+                      <td className="p-4 pl-5 font-semibold text-[#0B1B3B]">{c.name}</td>
+                      <td className="p-4">
+                        <span className={`inline-block text-[10px] px-2.5 py-0.5 rounded-full font-semibold ${statusCls(c.status)}`}>
+                          {c.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-[#5B6478]">{c.template?.name || "—"}</td>
+                      <td className="p-4 text-center text-[#0B1B3B] tabular-nums font-medium">{selectedCount}</td>
+                      <td className="p-4 text-center text-[#0B1B3B] tabular-nums font-medium">{c.emailsSent ?? c._count?.sentEmails ?? 0}</td>
+                      <td className="p-4 text-right pr-5">
+                        <div className="flex items-center justify-end gap-4">
                           <button
                             type="button"
-                            className="text-green-600 text-xs font-medium inline-flex items-center gap-1"
-                            onClick={() => setStatus(c.id, "RUNNING")}
+                            className="text-[#0B1B3B] text-[11px] font-semibold inline-flex items-center gap-1 hover:text-[#D98E04] transition-colors"
+                            onClick={() => openEdit(c)}
                           >
-                            <Play className="w-3 h-3" /> Start
+                            <Pencil className="w-3.5 h-3.5" /> Edit
                           </button>
-                        )}
-                        {c.status === "RUNNING" && (
-                          <button
-                            type="button"
-                            className="text-amber-600 text-xs font-medium inline-flex items-center gap-1"
-                            onClick={() => setStatus(c.id, "PAUSED")}
-                          >
-                            <Pause className="w-3 h-3" /> Pause
-                          </button>
-                        )}
-                        {c.status !== "RUNNING" && (
-                          <button
-                            type="button"
-                            className="text-red-600 text-xs font-medium inline-flex items-center gap-1"
-                            onClick={() => remove(c)}
-                          >
-                            <Trash2 className="w-3 h-3" /> Delete
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                          
+                          {(c.status === "DRAFT" || c.status === "PAUSED" || c.status === "COMPLETED") && (
+                            <button
+                              type="button"
+                              className="text-[#166534] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
+                              disabled={actionId === c.id}
+                              onClick={() => setStatus(c.id, "RUNNING")}
+                            >
+                              {actionId === c.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Play className="w-3.5 h-3.5" />
+                              )}
+                              Start
+                            </button>
+                          )}
+                          
+                          {c.status === "RUNNING" && (
+                            <button
+                              type="button"
+                              className="text-[#8A5A00] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
+                              disabled={actionId === c.id}
+                              onClick={() => setStatus(c.id, "PAUSED")}
+                            >
+                              {actionId === c.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Pause className="w-3.5 h-3.5" />
+                              )}
+                              Pause
+                            </button>
+                          )}
+                          
+                          {c.status !== "RUNNING" && (
+                            <button
+                              type="button"
+                              className="text-[#9A2A1E] text-[11px] font-semibold inline-flex items-center gap-1 hover:text-[#7A1F16] transition-colors"
+                              onClick={() => remove(c)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
