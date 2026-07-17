@@ -10,8 +10,8 @@ import { getTrialDays } from '@/lib/trial-settings';
 import { getAppOrigin } from '@/lib/domains';
 
 /**
- * Creates a Stripe Checkout Session (hosted in Safari / default browser).
- * Used by the iOS app so subscriptions are not purchased via in-app Stripe CardField (Guideline 3.1.1).
+ * Creates a Stripe Checkout Session (hosted in the system browser).
+ * Used by the mobile apps so subscriptions are not purchased via in-app card entry (Guideline 3.1.1).
  */
 export async function POST(request: NextRequest) {
   const auth = requireAuth(request);
@@ -37,11 +37,13 @@ export async function POST(request: NextRequest) {
     email,
     planTier,
     useTrial,
+    source,
   } = body as {
     companyName?: string;
     email?: string;
     planTier?: string;
     useTrial?: boolean;
+    source?: string;
   };
 
   if (!planTier) {
@@ -142,6 +144,11 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const checkoutSource =
+    typeof source === 'string' && source.trim()
+      ? source.trim().slice(0, 64)
+      : 'mobile_external_checkout';
+
   const appOrigin = getAppOrigin();
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
@@ -154,14 +161,14 @@ export async function POST(request: NextRequest) {
     metadata: {
       companyId: String(companyId),
       planTier: tier,
-      source: 'ios_external_checkout',
+      source: checkoutSource,
     },
     subscription_data: {
       ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
       metadata: {
         companyId: String(companyId),
         planTier: tier,
-        source: 'ios_external_checkout',
+        source: checkoutSource,
       },
     },
   });
