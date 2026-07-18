@@ -423,10 +423,27 @@ export default function RepliesTab() {
                     <div className="flex items-center justify-between">
                       <p className="font-bold text-[#0D1E36] text-xs">Inbound Response Received</p>
                     </div>
-                    
-                    <div className="border border-[#E3E7F0] rounded-xl p-4 bg-white shadow-xs text-xs text-slate-700 leading-relaxed whitespace-pre-wrap font-sans">
-                      {selected.bodyText || selected.bodyHtml?.replace(/<[^>]+>/g, " ") || "(empty conversation content)"}
-                    </div>
+
+                    {selected.bodyHtml ? (
+                      <div className="border border-[#E3E7F0] rounded-xl overflow-hidden bg-white shadow-xs">
+                        <iframe
+                          title={`reply-${selected.id}`}
+                          sandbox=""
+                          srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;color:#1e293b;margin:16px;word-break:break-word;}img{max-width:100%;height:auto;}a{color:#0B1B3B;}</style></head><body>${selected.bodyHtml}</body></html>`}
+                          className="w-full min-h-[280px] bg-white"
+                        />
+                        {selected.bodyText && (
+                          <details className="border-t border-[#EEF0F5] px-3 py-2 text-[11px] text-slate-500">
+                            <summary className="cursor-pointer font-medium text-[#0D1E36]">Plain text version</summary>
+                            <pre className="mt-2 whitespace-pre-wrap font-sans text-slate-600">{selected.bodyText}</pre>
+                          </details>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="border border-[#E3E7F0] rounded-xl p-4 bg-white shadow-xs text-xs text-slate-700 leading-relaxed whitespace-pre-wrap font-sans">
+                        {selected.bodyText || "(empty conversation content)"}
+                      </div>
+                    )}
                   </div>
                 </div>
 

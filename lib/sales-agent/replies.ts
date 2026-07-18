@@ -40,10 +40,19 @@ export async function classifyAndStoreReply(input: {
   }
 
   if (!companyId && input.fromEmail) {
+    const email = input.fromEmail.toLowerCase();
     const lead = await (prisma as any).saLeadCompany.findFirst({
-      where: { email: input.fromEmail.toLowerCase() },
+      where: { email: { equals: email, mode: 'insensitive' } },
     });
-    if (lead) companyId = lead.id;
+    if (lead) {
+      companyId = lead.id;
+    } else {
+      const contact = await (prisma as any).saContact.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { companyId: true },
+      });
+      if (contact?.companyId) companyId = contact.companyId;
+    }
   }
 
   let intent: string = 'OTHER';
