@@ -40,10 +40,13 @@ export async function POST(request: NextRequest) {
   const billing = await prisma.billingRecord.findFirst({
     where: { companyId, stripeCustomerId: { not: null } },
     orderBy: { createdAt: 'desc' },
-    select: { stripeCustomerId: true },
+    select: { id: true, stripeCustomerId: true },
   });
 
-  if (!billing?.stripeCustomerId) {
+  let customerId = billing?.stripeCustomerId?.trim() || null;
+  const looksLikeStripeCustomer = !!customerId && /^cus_[A-Za-z0-9]+$/.test(customerId);
+
+  if (!looksLikeStripeCustomer) {
     return NextResponse.json(
       {
         success: false,
@@ -55,8 +58,42 @@ export async function POST(request: NextRequest) {
   }
 
   const stripe = createStripeInstance(secretKey);
+
+  try {
+    const existing = await stripe.customers.retrieve(customerId!);
+    if ((existing as { deleted?: boolean }).deleted) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'No billing account found. Start a subscription first.',
+          code: 'NO_CUSTOMER',
+        },
+        { status: 400 }
+      );
+    }
+  } catch (err: any) {
+    if (err?.code === 'resource_missing' || err?.statusCode === 404) {
+      // Clear bad ID so the next checkout creates a fresh Stripe customer
+      if (billing?.id) {
+        await prisma.billingRecord.update({
+          where: { id: billing.id },
+          data: { stripeCustomerId: null },
+        });
+      }
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'No billing account found. Start a subscription first.',
+          code: 'NO_CUSTOMER',
+        },
+        { status: 400 }
+      );
+    }
+    throw err;
+  }
+
   const session = await stripe.billingPortal.sessions.create({
-    customer: billing.stripeCustomerId,
+    customer: customerId!,
     return_url: `${getAppOrigin()}/subscribe/success`,
   });
 

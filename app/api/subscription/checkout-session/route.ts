@@ -100,15 +100,35 @@ export async function POST(request: NextRequest) {
     orderBy: { createdAt: 'desc' },
   });
 
-  let customerId = billing?.stripeCustomerId ?? null;
+  let customerId = billing?.stripeCustomerId?.trim() || null;
+
+  // Stored IDs can be stale/invalid (e.g. test junk). Only reuse real Stripe customers.
+  const looksLikeStripeCustomer = !!customerId && /^cus_[A-Za-z0-9]+$/.test(customerId);
+  if (customerId && looksLikeStripeCustomer) {
+    try {
+      const existing = await stripe.customers.retrieve(customerId);
+      if ((existing as { deleted?: boolean }).deleted) {
+        customerId = null;
+      } else {
+        await stripe.customers.update(customerId, {
+          email: checkoutEmail,
+          name: displayName || undefined,
+        });
+      }
+    } catch (err: any) {
+      if (err?.code === 'resource_missing' || err?.statusCode === 404) {
+        customerId = null;
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    customerId = null;
+  }
+
   if (!customerId) {
     const customer = await createCustomer(checkoutEmail, displayName, companyId, stripe);
     customerId = customer.id;
-  } else {
-    await stripe.customers.update(customerId, {
-      email: checkoutEmail,
-      name: displayName || undefined,
-    });
   }
 
   if (billing) {

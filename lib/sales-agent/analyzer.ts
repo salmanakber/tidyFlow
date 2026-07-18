@@ -43,12 +43,32 @@ export async function analyzeLeadCompany(companyId: number): Promise<any> {
   const crawl = await crawlWebsite(company.website);
   const primaryEmail = crawl.emails[0] || company.email || null;
 
+  // No usable email after crawl → remove lead (we only keep contactable companies)
+  if (!primaryEmail) {
+    await saLog({
+      level: 'info',
+      category: 'ai',
+      action: 'analyze_deleted_no_email',
+      message: `Deleted ${company.name} — no visible email on site/contact/footer`,
+      entityType: 'SaLeadCompany',
+      entityId: companyId,
+      details: { website: company.website, crawlOk: crawl.success },
+    });
+    await (prisma as any).saLeadCompany.delete({ where: { id: companyId } });
+    return {
+      companyId,
+      deleted: true,
+      reason: 'no_email',
+      message: 'No email found on website (contact page / footer). Lead removed.',
+    };
+  }
+
   await (prisma as any).saLeadCompany.update({
     where: { id: companyId },
     data: {
-      email: primaryEmail || company.email,
+      email: primaryEmail,
       phone: crawl.phones[0] || company.phone,
-      hasEmail: !!(primaryEmail || company.email),
+      hasEmail: true,
       hasPhone: !!(crawl.phones[0] || company.phone),
       socialLinks: JSON.stringify(crawl.socialLinks),
       services: JSON.stringify(crawl.services),
@@ -62,20 +82,18 @@ export async function analyzeLeadCompany(companyId: number): Promise<any> {
     },
   });
 
-  if (primaryEmail) {
-    const existingContact = await (prisma as any).saContact.findFirst({
-      where: { companyId, email: primaryEmail },
+  const existingContact = await (prisma as any).saContact.findFirst({
+    where: { companyId, email: primaryEmail },
+  });
+  if (!existingContact) {
+    await (prisma as any).saContact.create({
+      data: {
+        companyId,
+        email: primaryEmail,
+        phone: crawl.phones[0] || null,
+        isPrimary: true,
+      },
     });
-    if (!existingContact) {
-      await (prisma as any).saContact.create({
-        data: {
-          companyId,
-          email: primaryEmail,
-          phone: crawl.phones[0] || null,
-          isPrimary: true,
-        },
-      });
-    }
   }
 
   if (!crawl.success && !crawl.textSample) {
@@ -83,12 +101,12 @@ export async function analyzeLeadCompany(companyId: number): Promise<any> {
       level: 'warn',
       category: 'ai',
       action: 'analyze_skipped_crawl_fail',
-      message: `Crawl failed for company ${companyId}`,
+      message: `Crawl failed for company ${companyId} (email kept from prior data)`,
       entityType: 'SaLeadCompany',
       entityId: companyId,
       success: false,
     });
-    return { companyId, crawlFailed: true };
+    return { companyId, crawlFailed: true, email: primaryEmail };
   }
 
   const userContent = JSON.stringify({
@@ -153,7 +171,7 @@ export async function analyzeLeadCompany(companyId: number): Promise<any> {
     message: `Analyzed ${company.name} score=${leadScore}`,
     entityType: 'SaLeadCompany',
     entityId: companyId,
-    details: { provider: result.provider, leadScore },
+    details: { provider: result.provider, leadScore, email: primaryEmail },
   });
 
   return analysis;

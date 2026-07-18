@@ -65,13 +65,16 @@ export async function createManualGroup(input: {
     status: 'COMPLETED',
   });
   if (input.leadIds?.length) {
-    const added = await addLeadsToDiscoveryGroup(group.id, input.leadIds);
-    if (added) {
-      await (prisma as any).saDiscoveryGroup.update({
-        where: { id: group.id },
-        data: { createdCount: { increment: added } },
-      });
-    }
+    // Assign moves leads out of any previous groups
+    await assignLeadsToGroup({
+      groupId: group.id,
+      leadIds: input.leadIds,
+      move: true,
+    });
+    await (prisma as any).saDiscoveryGroup.update({
+      where: { id: group.id },
+      data: { createdCount: input.leadIds.length },
+    });
   }
   return group;
 }
@@ -103,30 +106,32 @@ export async function removeLeadsFromDiscoveryGroup(groupId: number, leadIds: nu
   return result.count as number;
 }
 
-/** Assign leads to a group; optionally remove from other groups first (move). */
+/** Assign leads to a group. Always removes them from other groups (move). */
 export async function assignLeadsToGroup(input: {
   groupId: number;
   leadIds: number[];
+  /** @deprecated Always moves now — kept for API compat */
   move?: boolean;
   removeFromGroupIds?: number[];
 }) {
   const leadIds = Array.from(new Set(input.leadIds.map(Number).filter(Boolean)));
   if (!leadIds.length) return { added: 0, removed: 0 };
 
+  // Always leave previous groups so a lead isn't duplicated across segments
   let removed = 0;
-  if (input.move) {
-    const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
-      where: {
-        companyId: { in: leadIds },
-        groupId: { not: input.groupId },
-      },
-    });
-    removed = result.count;
-  } else if (input.removeFromGroupIds?.length) {
+  if (input.removeFromGroupIds?.length) {
     const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
       where: {
         companyId: { in: leadIds },
         groupId: { in: input.removeFromGroupIds },
+      },
+    });
+    removed = result.count;
+  } else {
+    const result = await (prisma as any).saDiscoveryGroupMember.deleteMany({
+      where: {
+        companyId: { in: leadIds },
+        groupId: { not: input.groupId },
       },
     });
     removed = result.count;
@@ -223,9 +228,14 @@ export async function recordDiscoveryChunkResult(
 }
 
 function mapGroup(g: any) {
+  const emailedCount = g.emailedCount ?? 0;
+  const memberCount = g._count?.members ?? 0;
+  const alreadySent = emailedCount > 0;
   return {
     ...g,
-    memberCount: g._count?.members ?? 0,
+    memberCount,
+    emailedCount,
+    alreadySent,
     countries: safeJson(g.countries, []),
     cities: safeJson(g.cities, []),
     keywords: safeJson(g.keywords, []),
@@ -242,9 +252,20 @@ export async function listDiscoveryGroups(limit = 50) {
     take: limit,
     include: {
       _count: { select: { members: true } },
+      members: {
+        select: {
+          company: { select: { emailSentCount: true } },
+        },
+      },
     },
   });
-  const mapped = groups.map(mapGroup);
+  const mapped = groups.map((g: any) => {
+    const emailedCount = (g.members || []).filter(
+      (m: any) => (m.company?.emailSentCount || 0) > 0
+    ).length;
+    const { members, ...rest } = g;
+    return mapGroup({ ...rest, emailedCount });
+  });
   // Priority group always first
   mapped.sort((a: any, b: any) => {
     if (a.isPriority && !b.isPriority) return -1;
@@ -252,6 +273,53 @@ export async function listDiscoveryGroups(limit = 50) {
     return 0;
   });
   return mapped;
+}
+
+const ALREADY_SENT_MARKER = ' · Already sent';
+
+/**
+ * After a campaign emails leads, mark every discovery group that contains them
+ * so the UI shows an "Already sent" label (and bump if emailed again).
+ */
+export async function markDiscoveryGroupsEmailed(companyIds: number[]) {
+  const ids = Array.from(new Set(companyIds.map(Number).filter(Boolean)));
+  if (!ids.length) return { groupsMarked: 0 };
+
+  const memberships = await (prisma as any).saDiscoveryGroupMember.findMany({
+    where: { companyId: { in: ids } },
+    select: { groupId: true },
+  });
+  const groupIds = Array.from(new Set(memberships.map((m: any) => m.groupId)));
+  if (!groupIds.length) return { groupsMarked: 0 };
+
+  const groups = await (prisma as any).saDiscoveryGroup.findMany({
+    where: { id: { in: groupIds } },
+    select: { id: true, label: true, method: true },
+  });
+
+  let groupsMarked = 0;
+  for (const g of groups) {
+    if (g.method === HIGH_PRIORITY_METHOD) continue;
+    let label = String(g.label || '');
+    // Second (or later) campaign wave: make the label explicit
+    if (label.includes(ALREADY_SENT_MARKER)) {
+      if (!label.includes(' · Sent again')) {
+        label = `${label.replace(ALREADY_SENT_MARKER, '')}${ALREADY_SENT_MARKER} · Sent again`;
+        await (prisma as any).saDiscoveryGroup.update({
+          where: { id: g.id },
+          data: { label },
+        });
+        groupsMarked++;
+      }
+    } else {
+      await (prisma as any).saDiscoveryGroup.update({
+        where: { id: g.id },
+        data: { label: `${label}${ALREADY_SENT_MARKER}` },
+      });
+      groupsMarked++;
+    }
+  }
+  return { groupsMarked, groupIds };
 }
 
 function safeJson(raw: unknown, fallback: any) {

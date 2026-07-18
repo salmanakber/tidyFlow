@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     const leadIds = Array.isArray(body.leadIds) ? body.leadIds.map(Number) : [];
     if (!leadIds.length) return jsonError('leadIds required');
 
-    // Create new group + assign in one step
+    // Create new group + assign in one step (always moves out of old groups)
     if (!groupId && body.newGroupLabel) {
       const group = await createManualGroup({
         label: String(body.newGroupLabel),
@@ -90,19 +90,19 @@ export async function POST(request: NextRequest) {
       await saLog({
         category: 'user',
         action: 'group_create_assign',
-        message: `Created “${body.newGroupLabel}” and assigned ${leadIds.length} leads`,
+        message: `Created “${body.newGroupLabel}” and moved ${leadIds.length} leads into it`,
         userId: gate.userId,
         entityType: 'SaDiscoveryGroup',
         entityId: group.id,
       });
-      return jsonOk({ group, added: leadIds.length, removed: 0 });
+      return jsonOk({ group, added: leadIds.length, removed: leadIds.length, moved: true });
     }
 
     if (!groupId) return jsonError('groupId or newGroupLabel required');
     const result = await assignLeadsToGroup({
       groupId,
       leadIds,
-      move: !!body.move,
+      move: true,
       removeFromGroupIds: Array.isArray(body.removeFromGroupIds)
         ? body.removeFromGroupIds.map(Number)
         : undefined,
@@ -110,12 +110,12 @@ export async function POST(request: NextRequest) {
     await saLog({
       category: 'user',
       action: 'group_assign',
-      message: `Assigned ${result.added} leads to group #${groupId}`,
+      message: `Moved ${result.added} leads to group #${groupId} (removed from ${result.removed} prior memberships)`,
       userId: gate.userId,
       entityType: 'SaDiscoveryGroup',
       entityId: groupId,
     });
-    return jsonOk(result);
+    return jsonOk({ ...result, moved: true });
   }
 
   if (action === 'remove_members') {

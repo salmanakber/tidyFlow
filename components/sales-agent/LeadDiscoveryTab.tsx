@@ -305,7 +305,7 @@ export default function LeadDiscoveryTab() {
       await saPost("/leads", { action: "bulk_analyze", ids: selected })
       setMessage({
         type: "success",
-        text: `Analyzing ${selected.length} leads… results update when each finishes.`,
+        text: `Analyzing ${selected.length} leads… companies with no visible email are removed automatically.`,
       })
       setSelected([])
     } catch (e: any) {
@@ -331,7 +331,7 @@ export default function LeadDiscoveryTab() {
     }
   }
 
-  const assignSelected = async (opts?: { createNew?: boolean; move?: boolean }) => {
+  const assignSelected = async (opts?: { createNew?: boolean }) => {
     if (!selected.length) {
       setMessage({ type: "error", text: "Select leads first" })
       return
@@ -343,9 +343,12 @@ export default function LeadDiscoveryTab() {
           action: "assign",
           newGroupLabel: label,
           leadIds: selected,
-          move: !!opts.move,
+          move: true,
         })
-        setMessage({ type: "success", text: `Created group and assigned ${selected.length} leads` })
+        setMessage({
+          type: "success",
+          text: `Moved ${selected.length} lead(s) into new group (removed from previous groups)`,
+        })
         setNewGroupName("")
         setSelected([])
         setShowAssignPanel(false)
@@ -362,13 +365,11 @@ export default function LeadDiscoveryTab() {
         action: "assign",
         groupId: Number(assignGroupId),
         leadIds: selected,
-        move: !!opts?.move,
+        move: true,
       })
       setMessage({
         type: "success",
-        text: opts?.move
-          ? `Moved ${selected.length} leads to group`
-          : `Added ${selected.length} leads to group`,
+        text: `Moved ${selected.length} lead(s) to the selected group (removed from previous groups)`,
       })
       setSelected([])
       setShowAssignPanel(false)
@@ -655,11 +656,19 @@ export default function LeadDiscoveryTab() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 space-y-1">
-                      <div className="text-sm font-bold text-[#0D1E36] truncate flex items-center gap-2">
+                      <div className="text-sm font-bold text-[#0D1E36] truncate flex items-center gap-2 flex-wrap">
                         {g.label}
                         {g.isPriority && (
                           <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309]">
                             Priority
+                          </span>
+                        )}
+                        {(g.alreadySent || (g.emailedCount || 0) > 0) && (
+                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E1F5E9] text-[#166534]">
+                            Already sent
+                            {g.emailedCount != null && g.memberCount
+                              ? ` (${g.emailedCount}/${g.memberCount})`
+                              : ""}
                           </span>
                         )}
                       </div>
@@ -726,6 +735,7 @@ export default function LeadDiscoveryTab() {
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.isPriority ? "⭐ " : ""}
+                  {g.alreadySent || (g.emailedCount || 0) > 0 ? "✓ " : ""}
                   {g.label} ({g.memberCount ?? 0})
                 </option>
               ))}
@@ -844,9 +854,6 @@ export default function LeadDiscoveryTab() {
                 
                 <div className="flex flex-wrap items-end gap-2 justify-end">
                   <button type="button" className="inline-flex items-center justify-center bg-[#0D1E36] hover:bg-[#142944] text-white px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]" onClick={() => assignSelected()}>
-                    Add to group
-                  </button>
-                  <button type="button" className="inline-flex items-center justify-center bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]" onClick={() => assignSelected({ move: true })}>
                     Move to group
                   </button>
                   <button
@@ -854,7 +861,7 @@ export default function LeadDiscoveryTab() {
                     className="inline-flex items-center justify-center gap-1.5 bg-white hover:bg-slate-50 text-[#0D1E36] border border-gray-200 px-5 py-2.5 text-xs font-semibold rounded-lg shadow-sm transition-all h-[40px]"
                     onClick={() => assignSelected({ createNew: true })}
                   >
-                    <FolderPlus className="w-4 h-4 text-[#D97706]" /> New & Assign
+                    <FolderPlus className="w-4 h-4 text-[#D97706]" /> New group & move
                   </button>
                 </div>
               </div>

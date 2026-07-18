@@ -402,6 +402,7 @@ export default function CampaignsTab() {
                       <option value="">All leads</option>
                       {groups.map((g) => (
                         <option key={g.id} value={g.id}>
+                          {g.alreadySent || (g.emailedCount || 0) > 0 ? "✓ Already sent · " : ""}
                           {g.label} ({g.memberCount ?? 0})
                         </option>
                       ))}

@@ -4,6 +4,7 @@ import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/aut
 import { enqueueAnalyzeLead, enqueueSendEmail } from '@/lib/sales-agent/queue';
 import { buildTemplateVars, renderTemplate, sendSalesEmail } from '@/lib/sales-agent/email';
 import { saLog } from '@/lib/sales-agent/logger';
+import { markDiscoveryGroupsEmailed } from '@/lib/sales-agent/groups';
 
 export async function GET(
   _request: NextRequest,
@@ -250,6 +251,19 @@ async function startCampaign(campaignId: number, userId: number) {
     userId,
     details: { queued, skipped, selected: selectedIds.length },
   });
+
+  // Mark lead groups as emailed / "Already sent" (or "Sent again" on a later wave)
+  if (queued > 0) {
+    const marked = await markDiscoveryGroupsEmailed(toSend.map((l: any) => l.id));
+    await saLog({
+      category: 'campaign',
+      action: 'groups_marked_emailed',
+      message: `Marked ${marked.groupsMarked} lead group(s) as already sent`,
+      entityType: 'SaCampaign',
+      entityId: campaignId,
+      details: marked,
+    });
+  }
 
   await saLog({
     category: 'campaign',
