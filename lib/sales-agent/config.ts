@@ -174,6 +174,35 @@ export async function getSalesAgentSmtpConfig(): Promise<SalesAgentSmtpConfig> {
   };
 }
 
+/** Resend SMTP fallback — https://resend.com/docs/send-with-smtp */
+export interface ResendSmtpConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  apiKey: string;
+  senderEmail: string;
+  senderName: string;
+}
+
+export async function getResendSmtpConfig(): Promise<ResendSmtpConfig> {
+  const smtp = await getSettingsByCategory('smtp');
+  const primary = await getSalesAgentSmtpConfig();
+  return {
+    enabled: (smtp.resend_enabled || 'true') === 'true',
+    host: smtp.resend_host || process.env.RESEND_SMTP_HOST || 'smtp.resend.com',
+    port: parseInt(smtp.resend_port || process.env.RESEND_SMTP_PORT || '587', 10),
+    username: smtp.resend_username || 'resend',
+    apiKey: smtp.resend_api_key || process.env.RESEND_API_KEY || '',
+    senderEmail:
+      smtp.resend_sender_email ||
+      primary.senderEmail ||
+      process.env.EMAIL_FROM ||
+      '',
+    senderName: smtp.resend_sender_name || primary.senderName || 'TidyFlow',
+  };
+}
+
 export async function getDiscoveryConfig() {
   const d = await getSettingsByCategory('discovery');
   return {

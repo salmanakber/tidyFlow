@@ -10,7 +10,6 @@ import {
   LoadingBlock,
   MessageBanner,
   EmptyState,
-  btnPrimary,
   btnSecondary,
   inputCls,
   ProgressBar,
@@ -53,6 +52,8 @@ function ResultCard({ result }: { result: any }) {
         <div className="min-w-0 space-y-1 flex-1">
           <p className="font-bold tracking-wide uppercase text-[10px] opacity-90">
             {ok ? "System Verified" : "Diagnostic Failure"}
+            {result.provider ? ` · ${String(result.provider)}` : ""}
+            {result.step && !result.provider ? ` · ${String(result.step).replace(/_/g, " ")}` : ""}
           </p>
           <p className="font-medium text-xs leading-relaxed">{result.message || result.error || (ok ? "OK" : "Failed")}</p>
           
@@ -66,6 +67,9 @@ function ResultCard({ result }: { result: any }) {
               <strong>From:</strong> {result.fromEmail}
               {result.replyToEmail ? (
                 <> · <strong>Reply-To:</strong> {result.replyToEmail}</>
+              ) : null}
+              {result.provider ? (
+                <> · <strong>Provider:</strong> {result.provider}</>
               ) : null}
             </p>
           )}
@@ -102,19 +106,128 @@ function ResultCard({ result }: { result: any }) {
   )
 }
 
+/** Secret field: when already saved, show badge + disabled input until user clicks Change. */
+function SavedSecretField({
+  label,
+  hasSaved,
+  editing,
+  onEdit,
+  onCancel,
+  value,
+  onChange,
+  placeholder = "Enter new value",
+}: {
+  label: string
+  hasSaved: boolean
+  editing: boolean
+  onEdit: () => void
+  onCancel: () => void
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  const locked = hasSaved && !editing
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">{label}</label>
+        {hasSaved && (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-green-800 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-full">
+            <Check className="w-2.5 h-2.5" /> Already saved
+          </span>
+        )}
+      </div>
+      {locked ? (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="password"
+            disabled
+            readOnly
+            className={`${inputCls} opacity-60 cursor-not-allowed bg-slate-50`}
+            value="••••••••••••••••"
+          />
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs py-2 shrink-0 whitespace-nowrap`}
+            onClick={onEdit}
+          >
+            Change
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {hasSaved && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+              Password already saved — enter a new value to replace it, then save this card.
+            </p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="password"
+              className={`${inputCls} focus:border-[#D97706]`}
+              placeholder={placeholder}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              autoComplete="new-password"
+            />
+            {hasSaved && (
+              <button
+                type="button"
+                className={`${btnSecondary} text-xs py-2 shrink-0`}
+                onClick={onCancel}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardSaveButton({
+  saving,
+  section,
+  onClick,
+  label = "Save this card",
+}: {
+  saving: string | null
+  section: string
+  onClick: () => void
+  label?: string
+}) {
+  const busy = saving === section
+  return (
+    <div className="pt-3 border-t border-gray-100 flex justify-end">
+      <button
+        type="button"
+        className="inline-flex items-center px-4 py-2 justify-center bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold rounded-lg shadow-sm transition-all duration-150 disabled:opacity-50"
+        disabled={!!saving}
+        onClick={onClick}
+      >
+        {busy ? "Saving…" : label}
+      </button>
+    </div>
+  )
+}
+
 export default function SettingsTab() {
   const [data, setData] = useState<any>(null)
   const [form, setForm] = useState<any>({})
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [jobs, setJobs] = useState<any[]>([])
   const [testTo, setTestTo] = useState("tidyflaw@gmail.com")
   const [testing, setTesting] = useState<string | null>(null)
   const [testSmtp, setTestSmtp] = useState<any>(null)
+  const [testResendSmtp, setTestResendSmtp] = useState<any>(null)
   const [testImap, setTestImap] = useState<any>(null)
   const [testSend, setTestSend] = useState<any>(null)
+  const [testResendSend, setTestResendSend] = useState<any>(null)
   const [testSync, setTestSync] = useState<any>(null)
+  const [editSecrets, setEditSecrets] = useState<Record<string, boolean>>({})
   const [jobForm, setJobForm] = useState({
     name: "",
     jobType: "lead_discovery",
@@ -139,6 +252,13 @@ export default function SettingsTab() {
         senderEmail: settings.smtp.senderEmail,
         senderName: settings.smtp.senderName,
         replyToEmail: settings.smtp.replyToEmail || "tidyflaw@gmail.com",
+        resendEnabled: settings.resend?.enabled !== false,
+        resendHost: settings.resend?.host || "smtp.resend.com",
+        resendPort: settings.resend?.port || 587,
+        resendUsername: settings.resend?.username || "resend",
+        resendApiKey: "",
+        resendSenderEmail: settings.resend?.senderEmail || settings.smtp.senderEmail || "",
+        resendSenderName: settings.resend?.senderName || settings.smtp.senderName || "TidyFlow",
         replyImapEnabled: settings.replyInbox?.enabled || false,
         replyImapHost: settings.replyInbox?.host || "imap.gmail.com",
         replyImapPort: settings.replyInbox?.port || 993,
@@ -160,6 +280,7 @@ export default function SettingsTab() {
         defaultCompanyName: settings.templateDefaults?.defaultCompanyName || "",
       })
       if (settings.smtp.replyToEmail) setTestTo(settings.smtp.replyToEmail)
+      setEditSecrets({})
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
@@ -171,23 +292,60 @@ export default function SettingsTab() {
     load()
   }, [])
 
-  const save = async () => {
-    setSaving(true)
+  const SECRET_KEYS = ["smtpPassword", "resendApiKey", "replyImapPassword", "googlePlacesApiKey"] as const
+
+  const saveSection = async (section: string, keys: string[], successLabel: string) => {
+    setSaving(section)
+    setMessage(null)
     try {
-      const payload = { ...form }
-      if (!payload.smtpPassword || payload.smtpPassword.startsWith("••")) delete payload.smtpPassword
-      if (!payload.replyImapPassword || payload.replyImapPassword.startsWith("••")) delete payload.replyImapPassword
-      if (!payload.googlePlacesApiKey || payload.googlePlacesApiKey.startsWith("••")) delete payload.googlePlacesApiKey
-      payload.replyImapEnabled = !!payload.replyImapEnabled
-      payload.replyImapTls = true
+      const payload: Record<string, any> = {}
+      for (const key of keys) {
+        if (form[key] !== undefined && form[key] !== null) {
+          payload[key] = form[key]
+        }
+      }
+
+      const secretAlreadySaved: Record<string, boolean> = {
+        smtpPassword: !!data?.smtp?.hasPassword,
+        resendApiKey: !!data?.resend?.hasApiKey,
+        replyImapPassword: !!data?.replyInbox?.hasPassword,
+        googlePlacesApiKey: !!data?.discovery?.hasGooglePlacesKey,
+      }
+
+      for (const key of SECRET_KEYS) {
+        if (!(key in payload)) continue
+        const val = String(payload[key] || "")
+        if (!val || val.startsWith("••")) {
+          delete payload[key]
+          continue
+        }
+        // Already saved secrets only update when user clicked Change
+        if (secretAlreadySaved[key] && !editSecrets[key]) {
+          delete payload[key]
+        }
+      }
+
+      if ("replyImapEnabled" in payload) payload.replyImapEnabled = !!payload.replyImapEnabled
+      if ("resendEnabled" in payload) payload.resendEnabled = payload.resendEnabled ? "true" : "false"
+      if ("replyImapTls" in payload) payload.replyImapTls = true
       await saPut("/settings", payload)
-      setMessage({ type: "success", text: "Settings saved successfully" })
-      load()
+      setMessage({ type: "success", text: successLabel })
+      await load()
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
-      setSaving(false)
+      setSaving(null)
     }
+  }
+
+  const startEditSecret = (key: string) => {
+    setEditSecrets((prev) => ({ ...prev, [key]: true }))
+    setForm((prev: any) => ({ ...prev, [key]: "" }))
+  }
+
+  const cancelEditSecret = (key: string) => {
+    setEditSecrets((prev) => ({ ...prev, [key]: false }))
+    setForm((prev: any) => ({ ...prev, [key]: "" }))
   }
 
   const runTest = async (action: string) => {
@@ -195,8 +353,10 @@ export default function SettingsTab() {
     setMessage(null)
     const timeouts: Record<string, number> = {
       test_smtp: 20000,
+      test_resend_smtp: 20000,
       test_imap: 25000,
       test_send: 45000,
+      test_resend_send: 45000,
       test_reply_sync: 60000,
       test_all: 90000,
     }
@@ -207,23 +367,29 @@ export default function SettingsTab() {
         { timeout: timeouts[action] ?? 30000 }
       )
       if (action === "test_smtp") setTestSmtp(result)
+      if (action === "test_resend_smtp") setTestResendSmtp(result)
       if (action === "test_imap") setTestImap(result)
       if (action === "test_send") setTestSend(result)
+      if (action === "test_resend_send") setTestResendSend(result)
       if (action === "test_reply_sync") setTestSync(result)
       if (action === "test_all") {
         setTestSmtp(result.smtp)
+        setTestResendSmtp(result.resendSmtp)
         setTestImap(result.imap)
         if (result.send) setTestSend(result.send)
       }
       const failed =
-        result.ok === false || result.smtp?.ok === false || result.imap?.ok === false
+        result.ok === false ||
+        (action === "test_all"
+          ? result.smtp?.ok === false || result.imap?.ok === false
+          : false)
       setMessage({
         type: failed ? "error" : "success",
         text:
           result.message ||
           result.error ||
           (action === "test_all"
-            ? `Diagnostics: SMTP ${result.smtp?.ok ? "OK" : "FAIL"} · IMAP ${result.imap?.ok ? "OK" : "FAIL"}`
+            ? `Diagnostics: Brevo ${result.smtp?.ok ? "OK" : "FAIL"} · Resend ${result.resendSmtp?.ok ? "OK" : "FAIL"} · IMAP ${result.imap?.ok ? "OK" : "FAIL"}`
             : "Verification finished"),
       })
     } catch (e: any) {
@@ -235,8 +401,10 @@ export default function SettingsTab() {
         ? "Verification timed out — SMTP/IMAP servers did not respond. Verify port rules, host credentials, and that outbound traffic is not restricted."
         : e?.response?.data?.message || e.message || "Test execution error"
       if (action === "test_smtp") setTestSmtp({ ok: false, error: errText })
+      if (action === "test_resend_smtp") setTestResendSmtp({ ok: false, error: errText })
       if (action === "test_imap") setTestImap({ ok: false, error: errText })
       if (action === "test_send") setTestSend({ ok: false, error: errText })
+      if (action === "test_resend_send") setTestResendSend({ ok: false, error: errText })
       if (action === "test_reply_sync") setTestSync({ ok: false, error: errText })
       setMessage({ type: "error", text: errText })
     } finally {
@@ -279,7 +447,9 @@ export default function SettingsTab() {
         
         <div className="p-5 space-y-4">
           <p className="text-xs text-slate-600 leading-relaxed">
-            Configure <strong className="text-[#0D1E36]">tidyflaw@gmail.com</strong> as your central tracking loop. Brevo acts purely as your delivery engine; recipient replies will route automatically into Gmail and sync back inside your Sales Agent thread logs.
+            Configure <strong className="text-[#0D1E36]">tidyflaw@gmail.com</strong> as your central tracking loop.
+            Brevo is the primary delivery engine; <strong className="text-[#0D1E36]">Resend</strong> is the automatic
+            fallback when Brevo hits limits or errors. Recipient replies still route to Gmail via Reply-To.
           </p>
           
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -344,13 +514,16 @@ export default function SettingsTab() {
             disabled={!!testing}
             onClick={() => runTest("test_all")}
           >
-            Run SMTP + IMAP check
+            Run Brevo + Resend + IMAP
           </button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-1">
           <button type="button" className={`${btnSecondary} text-xs py-2`} disabled={!!testing} onClick={() => runTest("test_smtp")}>
-            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Test SMTP (Brevo)
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Test Brevo SMTP
+          </button>
+          <button type="button" className={`${btnSecondary} text-xs py-2`} disabled={!!testing} onClick={() => runTest("test_resend_smtp")}>
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Test Resend SMTP
           </button>
           <button type="button" className={`${btnSecondary} text-xs py-2`} disabled={!!testing} onClick={() => runTest("test_imap")}>
             <Inbox className="w-3.5 h-3.5 text-[#D97706]" /> Test IMAP (Gmail)
@@ -361,7 +534,15 @@ export default function SettingsTab() {
             disabled={!!testing || !testTo}
             onClick={() => runTest("test_send")}
           >
-            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Send test email
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Send via Brevo
+          </button>
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs py-2`}
+            disabled={!!testing || !testTo}
+            onClick={() => runTest("test_resend_send")}
+          >
+            <Mail className="w-3.5 h-3.5 text-[#D97706]" /> Send via Resend
           </button>
           <button
             type="button"
@@ -375,28 +556,49 @@ export default function SettingsTab() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <ResultCard result={testSmtp} />
-          <ResultCard result={testImap} />
+          <ResultCard result={testResendSmtp} />
           <ResultCard result={testSend} />
+          <ResultCard result={testResendSend} />
+          <ResultCard result={testImap} />
           <ResultCard result={testSync} />
         </div>
 
         {/* Debug Help Area */}
-        <div className="rounded-xl bg-slate-50 border border-gray-100 p-4 text-[11px] text-slate-600 space-y-2">
-          <p className="font-bold text-[#0D1E36] uppercase tracking-wider text-[9px]">Brevo Delivery Parameters Checklist</p>
-          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <li className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
-              <span>Host: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">smtp-relay.brevo.com</code></span>
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
-              <span>Port: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">587</code></span>
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
-              <span>Domain: Must match verified sender record</span>
-            </li>
-          </ul>
+        <div className="rounded-xl bg-slate-50 border border-gray-100 p-4 text-[11px] text-slate-600 space-y-3">
+          <div>
+            <p className="font-bold text-[#0D1E36] uppercase tracking-wider text-[9px] mb-2">Brevo (primary)</p>
+            <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>Host: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">smtp-relay.brevo.com</code></span>
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>Port: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">587</code></span>
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>Domain: Must match verified sender</span>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <p className="font-bold text-[#0D1E36] uppercase tracking-wider text-[9px] mb-2">Resend (fallback)</p>
+            <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>Host: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">smtp.resend.com</code></span>
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>User: <code className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono">resend</code> · Pass: API key</span>
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                <span>Logs: <a className="underline text-[#0D1E36]" href="https://resend.com/emails" target="_blank" rel="noreferrer">resend.com/emails</a></span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -432,18 +634,16 @@ export default function SettingsTab() {
               onChange={(e) => setForm({ ...form, smtpUsername: e.target.value })}
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
-              Password {data?.smtp?.hasPassword ? "(Configured)" : ""}
-            </label>
-            <input
-              type="password"
-              className={`${inputCls} focus:border-[#D97706]`}
-              placeholder="•••••••• (leave blank to retain key)"
-              value={form.smtpPassword}
-              onChange={(e) => setForm({ ...form, smtpPassword: e.target.value })}
-            />
-          </div>
+          <SavedSecretField
+            label="Password"
+            hasSaved={!!data?.smtp?.hasPassword}
+            editing={!!editSecrets.smtpPassword}
+            onEdit={() => startEditSecret("smtpPassword")}
+            onCancel={() => cancelEditSecret("smtpPassword")}
+            value={form.smtpPassword || ""}
+            onChange={(v) => setForm({ ...form, smtpPassword: v })}
+            placeholder="Brevo SMTP key"
+          />
           <div className="md:col-span-2 space-y-1.5">
             <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">From Sender Address (Brevo Verified Only)</label>
             <input
@@ -489,6 +689,157 @@ export default function SettingsTab() {
             />
           </div>
         </div>
+        <CardSaveButton
+          saving={saving}
+          section="brevo"
+          label="Save Brevo settings"
+          onClick={() =>
+            saveSection(
+              "brevo",
+              [
+                "smtpHost",
+                "smtpPort",
+                "smtpUsername",
+                "smtpPassword",
+                "senderEmail",
+                "senderName",
+                "replyToEmail",
+                "dailyEmailLimit",
+                "hourlyEmailLimit",
+              ],
+              "Brevo SMTP settings saved"
+            )
+          }
+        />
+      </div>
+
+      {/* Resend SMTP Fallback */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-[#D97706]" />
+            <h3 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">Resend SMTP Fallback</h3>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] select-none cursor-pointer">
+            <input
+              type="checkbox"
+              className="accent-[#0D1E36] rounded border-gray-300 w-4 h-4 cursor-pointer"
+              checked={!!form.resendEnabled}
+              onChange={(e) => setForm({ ...form, resendEnabled: e.target.checked })}
+            />
+            Use Resend when Brevo fails
+          </label>
+        </div>
+
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          Primary sends use Brevo. If Brevo returns an error or rate/limit failure, delivery automatically retries via{" "}
+          <a className="underline text-[#0D1E36]" href="https://resend.com/docs/send-with-smtp" target="_blank" rel="noreferrer">
+            Resend SMTP
+          </a>
+          . Your domain must already be verified in Resend. View sends in the{" "}
+          <a className="underline text-[#0D1E36]" href="https://resend.com/emails" target="_blank" rel="noreferrer">
+            Resend emails dashboard
+          </a>
+          .
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">SMTP Host</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.resendHost || ""}
+              onChange={(e) => setForm({ ...form, resendHost: e.target.value })}
+              placeholder="smtp.resend.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">SMTP Port</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.resendPort || ""}
+              onChange={(e) => setForm({ ...form, resendPort: e.target.value })}
+              placeholder="587"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Username</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.resendUsername || "resend"}
+              onChange={(e) => setForm({ ...form, resendUsername: e.target.value })}
+              placeholder="resend"
+            />
+          </div>
+          <SavedSecretField
+            label="API Key (SMTP password)"
+            hasSaved={!!data?.resend?.hasApiKey}
+            editing={!!editSecrets.resendApiKey}
+            onEdit={() => startEditSecret("resendApiKey")}
+            onCancel={() => cancelEditSecret("resendApiKey")}
+            value={form.resendApiKey || ""}
+            onChange={(v) => setForm({ ...form, resendApiKey: v })}
+            placeholder="Resend API key"
+          />
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
+              From Address (Resend verified domain)
+            </label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.resendSenderEmail || ""}
+              onChange={(e) => setForm({ ...form, resendSenderEmail: e.target.value })}
+              placeholder="e.g. hello@yourdomain.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Sender Display Name</label>
+            <input
+              className={`${inputCls} focus:border-[#D97706]`}
+              value={form.resendSenderName || ""}
+              onChange={(e) => setForm({ ...form, resendSenderName: e.target.value })}
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className={`${btnSecondary} text-xs py-2 w-full`}
+              onClick={() =>
+                setForm((prev: any) => ({
+                  ...prev,
+                  resendEnabled: true,
+                  resendHost: "smtp.resend.com",
+                  resendPort: 587,
+                  resendUsername: "resend",
+                  resendSenderEmail: prev.resendSenderEmail || prev.senderEmail || "",
+                  resendSenderName: prev.resendSenderName || prev.senderName || "TidyFlow",
+                }))
+              }
+            >
+              Fill Resend defaults
+            </button>
+          </div>
+        </div>
+        <CardSaveButton
+          saving={saving}
+          section="resend"
+          label="Save Resend settings"
+          onClick={() =>
+            saveSection(
+              "resend",
+              [
+                "resendEnabled",
+                "resendHost",
+                "resendPort",
+                "resendUsername",
+                "resendApiKey",
+                "resendSenderEmail",
+                "resendSenderName",
+              ],
+              "Resend SMTP settings saved"
+            )
+          }
+        />
       </div>
 
       {/* IMAP Receiving Configuration */}
@@ -538,21 +889,19 @@ export default function SettingsTab() {
               placeholder="tidyflaw@gmail.com"
             />
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
-              Secure App Password {data?.replyInbox?.hasPassword ? "(Configured)" : ""}
-            </label>
-            <input
-              type="password"
-              className={`${inputCls} focus:border-[#D97706]`}
-              placeholder="16-character secure Google token"
-              value={form.replyImapPassword}
-              onChange={(e) => setForm({ ...form, replyImapPassword: e.target.value })}
-            />
-          </div>
+          <SavedSecretField
+            label="Secure App Password"
+            hasSaved={!!data?.replyInbox?.hasPassword}
+            editing={!!editSecrets.replyImapPassword}
+            onEdit={() => startEditSecret("replyImapPassword")}
+            onCancel={() => cancelEditSecret("replyImapPassword")}
+            value={form.replyImapPassword || ""}
+            onChange={(v) => setForm({ ...form, replyImapPassword: v })}
+            placeholder="16-character Google App Password"
+          />
         </div>
 
-        <div className="pt-2">
+        <div className="pt-3 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
             className={`${btnSecondary} text-xs inline-flex items-center gap-1.5 hover:bg-slate-50`}
@@ -566,6 +915,28 @@ export default function SettingsTab() {
             }}
           >
             <RefreshCw className="w-3.5 h-3.5 text-[#D97706]" /> Synchronize replies now
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center px-4 py-2 justify-center bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold rounded-lg shadow-sm transition-all duration-150 disabled:opacity-50"
+            disabled={!!saving}
+            onClick={() =>
+              saveSection(
+                "imap",
+                [
+                  "replyToEmail",
+                  "replyImapEnabled",
+                  "replyImapHost",
+                  "replyImapPort",
+                  "replyImapUser",
+                  "replyImapPassword",
+                  "replyImapTls",
+                ],
+                "Gmail IMAP settings saved"
+              )
+            }
+          >
+            {saving === "imap" ? "Saving…" : "Save IMAP settings"}
           </button>
         </div>
       </div>
@@ -625,6 +996,24 @@ export default function SettingsTab() {
             />
           </div>
         </div>
+        <CardSaveButton
+          saving={saving}
+          section="templates"
+          label="Save template defaults"
+          onClick={() =>
+            saveSection(
+              "templates",
+              [
+                "defaultContactName",
+                "defaultCompanyName",
+                "defaultCity",
+                "defaultServices",
+                "defaultPersonalizedIntro",
+              ],
+              "Template defaults saved"
+            )
+          }
+        />
       </div>
 
       {/* Lead Discovery Engine */}
@@ -635,16 +1024,16 @@ export default function SettingsTab() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">
-              Google Places API Authorization Key {data?.discovery?.hasGooglePlacesKey ? "(Configured)" : ""}
-            </label>
-            <input
-              type="password"
-              className={`${inputCls} focus:border-[#D97706]`}
-              placeholder="Leave blank to retain active key"
-              value={form.googlePlacesApiKey}
-              onChange={(e) => setForm({ ...form, googlePlacesApiKey: e.target.value })}
+          <div className="md:col-span-2">
+            <SavedSecretField
+              label="Google Places API Authorization Key"
+              hasSaved={!!data?.discovery?.hasGooglePlacesKey}
+              editing={!!editSecrets.googlePlacesApiKey}
+              onEdit={() => startEditSecret("googlePlacesApiKey")}
+              onCancel={() => cancelEditSecret("googlePlacesApiKey")}
+              value={form.googlePlacesApiKey || ""}
+              onChange={(v) => setForm({ ...form, googlePlacesApiKey: v })}
+              placeholder="Google Places API key"
             />
           </div>
           <div className="space-y-1.5">
@@ -692,16 +1081,25 @@ export default function SettingsTab() {
           </div>
         </div>
 
-        <div className="pt-3 flex items-center gap-3">
-          <button 
-            type="button" 
-            className="inline-flex items-center px-4 py-2 justify-center bg-[#0D1E36] hover:bg-[#142944] text-white text-xs font-semibold rounded-lg shadow-sm transition-all duration-150 disabled:opacity-50" 
-            disabled={saving} 
-            onClick={save}
-          >
-            {saving ? "Saving Active Rules..." : "Save Settings Parameters"}
-          </button>
-        </div>
+        <CardSaveButton
+          saving={saving}
+          section="discovery"
+          label="Save discovery settings"
+          onClick={() =>
+            saveSection(
+              "discovery",
+              [
+                "googlePlacesApiKey",
+                "searchEngine",
+                "searchDelayMs",
+                "maxResults",
+                "concurrentWorkers",
+                "bookingLink",
+              ],
+              "Lead discovery settings saved"
+            )
+          }
+        />
       </div>
 
       {/* Scheduled Automation Parameters */}

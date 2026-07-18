@@ -3,6 +3,7 @@ import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/aut
 import {
   getAllSettingsMasked,
   getDiscoveryConfig,
+  getResendSmtpConfig,
   getSalesAgentSmtpConfig,
   upsertSettings,
 } from '@/lib/sales-agent/config';
@@ -15,6 +16,8 @@ import {
   sendTestSalesEmail,
   testReplySync,
   runEmailDiagnostics,
+  testResendSmtpConnection,
+  sendTestResendEmail,
 } from '@/lib/sales-agent/connection-test';
 
 export async function GET(request: NextRequest) {
@@ -22,6 +25,7 @@ export async function GET(request: NextRequest) {
   if (gate instanceof NextResponse) return gate;
 
   const smtp = await getSalesAgentSmtpConfig();
+  const resend = await getResendSmtpConfig();
   const discovery = await getDiscoveryConfig();
   const replyInbox = await getReplyInboxConfig();
   const settings = await getAllSettingsMasked();
@@ -33,6 +37,11 @@ export async function GET(request: NextRequest) {
       ...smtp,
       password: smtp.password ? '••••••••' : '',
       hasPassword: !!smtp.password,
+    },
+    resend: {
+      ...resend,
+      apiKey: resend.apiKey ? '••••••••' : '',
+      hasApiKey: !!resend.apiKey,
     },
     replyInbox: {
       ...replyInbox,
@@ -72,6 +81,13 @@ export async function PUT(request: NextRequest) {
     ['senderEmail', 'sender_email', 'smtp'],
     ['senderName', 'sender_name', 'smtp'],
     ['replyToEmail', 'reply_to_email', 'smtp'],
+    ['resendEnabled', 'resend_enabled', 'smtp'],
+    ['resendHost', 'resend_host', 'smtp'],
+    ['resendPort', 'resend_port', 'smtp'],
+    ['resendUsername', 'resend_username', 'smtp'],
+    ['resendApiKey', 'resend_api_key', 'smtp', true],
+    ['resendSenderEmail', 'resend_sender_email', 'smtp'],
+    ['resendSenderName', 'resend_sender_name', 'smtp'],
     ['replyImapEnabled', 'reply_imap_enabled', 'smtp'],
     ['replyImapHost', 'reply_imap_host', 'smtp'],
     ['replyImapPort', 'reply_imap_port', 'smtp'],
@@ -126,6 +142,10 @@ export async function POST(request: NextRequest) {
     return jsonOk(await testSmtpConnection());
   }
 
+  if (action === 'test_resend_smtp') {
+    return jsonOk(await testResendSmtpConnection());
+  }
+
   if (action === 'test_imap') {
     return jsonOk(await testImapConnection());
   }
@@ -134,6 +154,12 @@ export async function POST(request: NextRequest) {
     const toEmail = body.toEmail || body.to || gate.email;
     if (!toEmail) return jsonError('toEmail is required (e.g. tidyflaw@gmail.com)');
     return jsonOk(await sendTestSalesEmail({ toEmail, userId: gate.userId }));
+  }
+
+  if (action === 'test_resend_send') {
+    const toEmail = body.toEmail || body.to || gate.email;
+    if (!toEmail) return jsonError('toEmail is required (e.g. tidyflaw@gmail.com)');
+    return jsonOk(await sendTestResendEmail({ toEmail, userId: gate.userId }));
   }
 
   if (action === 'test_reply_sync') {

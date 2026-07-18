@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import prisma from '@/lib/prisma';
-import { getSalesAgentSmtpConfig } from './config';
+import { getResendSmtpConfig, getSalesAgentSmtpConfig } from './config';
 import { getReplyInboxConfig, syncRepliesFromInbox } from './reply-sync';
 import { saLog } from './logger';
 
@@ -40,8 +40,8 @@ function createSmtpTransport(smtp: {
   return nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,
-    secure: smtp.port === 465,
-    requireTLS: smtp.port === 587,
+    secure: smtp.port === 465 || smtp.port === 2465,
+    requireTLS: smtp.port === 587 || smtp.port === 2587 || smtp.port === 25,
     auth: { user: smtp.username, pass: smtp.password },
     connectionTimeout: SMTP_TIMEOUT_MS,
     greetingTimeout: SMTP_TIMEOUT_MS,
@@ -428,6 +428,318 @@ Sent at: ${new Date().toISOString()}
   }
 }
 
+/** Verify Resend SMTP credentials (no email sent). https://resend.com/docs/send-with-smtp */
+export async function testResendSmtpConnection() {
+  const resend = await getResendSmtpConfig();
+  if (!resend.enabled) {
+    return {
+      ok: false,
+      step: 'resend_smtp',
+      provider: 'resend',
+      error: 'Resend fallback is disabled — enable it in Setup → Resend SMTP',
+    };
+  }
+  if (!resend.apiKey) {
+    return {
+      ok: false,
+      step: 'resend_smtp',
+      provider: 'resend',
+      error: 'Resend API key not configured',
+      hint: 'Add your Resend API key (used as SMTP password). Username is always "resend". Host: smtp.resend.com',
+      smtp: { host: resend.host, port: resend.port, senderEmail: resend.senderEmail },
+    };
+  }
+
+  const transporter = createSmtpTransport({
+    host: resend.host,
+    port: resend.port,
+    username: resend.username || 'resend',
+    password: resend.apiKey,
+  });
+  try {
+    await withTimeout(transporter.verify(), SMTP_TIMEOUT_MS, 'Resend SMTP verify');
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: true,
+      step: 'resend_smtp',
+      provider: 'resend',
+      message: `Resend SMTP OK — connected to ${resend.host}:${resend.port}`,
+      smtp: {
+        host: resend.host,
+        port: resend.port,
+        senderEmail: resend.senderEmail,
+        senderName: resend.senderName,
+        username: resend.username || 'resend',
+      },
+    };
+  } catch (err: any) {
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+    return {
+      ok: false,
+      step: 'resend_smtp',
+      provider: 'resend',
+      error: err.message || 'Resend SMTP verification failed',
+      hint:
+        'Resend SMTP: host smtp.resend.com, port 587 (or 465), username = resend, password = your API key. From must be on a verified Resend domain.',
+      smtp: { host: resend.host, port: resend.port, senderEmail: resend.senderEmail },
+    };
+  }
+}
+
+/**
+ * Send a real test email via Resend SMTP (bypasses Brevo).
+ * Uses the same Reply-To Gmail loop for reply tracking.
+ */
+export async function sendTestResendEmail(input: { toEmail: string; userId?: number }) {
+  const to = String(input.toEmail || '').trim().toLowerCase();
+  if (!to || !to.includes('@')) {
+    return { ok: false, step: 'resend_send', provider: 'resend', error: 'Valid toEmail is required' };
+  }
+
+  const resend = await getResendSmtpConfig();
+  const smtp = await getSalesAgentSmtpConfig();
+
+  if (!resend.enabled) {
+    return {
+      ok: false,
+      step: 'resend_send',
+      provider: 'resend',
+      error: 'Resend fallback is disabled — enable it and save settings first',
+    };
+  }
+  if (!resend.apiKey) {
+    return {
+      ok: false,
+      step: 'resend_send',
+      provider: 'resend',
+      error: 'Resend API key not configured',
+    };
+  }
+  if (!resend.senderEmail) {
+    return {
+      ok: false,
+      step: 'resend_send',
+      provider: 'resend',
+      error: 'Set Resend From email (must be on your verified Resend domain)',
+    };
+  }
+  if (!smtp.replyToEmail) {
+    return {
+      ok: false,
+      step: 'resend_send',
+      provider: 'resend',
+      error: 'Set Reply-To Email to your Gmail and save before testing',
+    };
+  }
+
+  let lead = await (prisma as any).saLeadCompany.findFirst({ where: { email: to } });
+  if (!lead) {
+    lead = await (prisma as any).saLeadCompany.create({
+      data: {
+        name: `Test lead (${to})`,
+        email: to,
+        hasEmail: true,
+        source: 'MANUAL',
+        status: 'NEW',
+        industry: 'cleaning',
+        discoveryKeyword: 'sales-agent-test-resend',
+      },
+    });
+  }
+
+  const subject = `[TidyFlow Sales Agent Resend Test] ${new Date().toISOString().slice(0, 19)}`;
+  const textBody = `This is a Resend SMTP fallback test from the TidyFlow AI Sales Agent.
+
+From (Resend): ${resend.senderEmail}
+Reply-To (your Gmail): ${smtp.replyToEmail}
+
+Provider: Resend (smtp.resend.com)
+Dashboard: https://resend.com/emails
+
+Sent at: ${new Date().toISOString()}
+`;
+
+  const htmlBody = `<div style="font-family:sans-serif;line-height:1.5;color:#111">
+  <p><strong>TidyFlow Sales Agent — Resend fallback test</strong></p>
+  <p>This message was sent via <strong>Resend SMTP</strong> (not Brevo).</p>
+  <ul>
+    <li><strong>From:</strong> ${resend.senderEmail}</li>
+    <li><strong>Reply-To:</strong> ${smtp.replyToEmail}</li>
+  </ul>
+  <p>Check delivery in the <a href="https://resend.com/emails">Resend emails dashboard</a>.</p>
+  <p style="color:#666;font-size:12px">Sent at ${new Date().toISOString()}</p>
+</div>`;
+
+  const record = await (prisma as any).saSentEmail.create({
+    data: {
+      companyId: lead.id,
+      recipientEmail: to,
+      recipientName: lead.name,
+      subject,
+      htmlBody,
+      textBody,
+      deliveryStatus: 'PENDING',
+    },
+  });
+
+  const transporter = createSmtpTransport({
+    host: resend.host,
+    port: resend.port,
+    username: resend.username || 'resend',
+    password: resend.apiKey,
+  });
+
+  try {
+    type SmtpSendInfo = {
+      accepted?: (string | object)[];
+      rejected?: (string | object)[];
+      messageId?: string;
+      response?: string;
+      envelope?: unknown;
+    };
+
+    const info: SmtpSendInfo = await withTimeout<SmtpSendInfo>(
+      transporter.sendMail({
+        from: `"${resend.senderName}" <${resend.senderEmail}>`,
+        to,
+        replyTo: smtp.replyToEmail,
+        subject,
+        html: htmlBody,
+        text: textBody,
+        headers: {
+          'X-TidyFlow-Sales-Agent': String(record.id),
+          'X-TidyFlow-Smtp-Provider': 'resend',
+          'X-TidyFlow-Test': 'resend',
+          'Resend-Idempotency-Key': `sa-test-resend-${record.id}`,
+        },
+      }) as Promise<SmtpSendInfo>,
+      SEND_TIMEOUT_MS,
+      'Resend SMTP send'
+    );
+
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+
+    const accepted = (info.accepted || []).map(String);
+    const rejected = (info.rejected || []).map(String);
+    const messageId = info.messageId || null;
+    const smtpPayload = {
+      provider: 'resend',
+      accepted,
+      rejected,
+      response: info.response,
+      envelope: info.envelope,
+      messageId,
+      from: resend.senderEmail,
+      replyTo: smtp.replyToEmail,
+      test: true,
+    };
+
+    if (rejected.length > 0 || (accepted.length === 0 && !messageId)) {
+      await (prisma as any).saSentEmail.update({
+        where: { id: record.id },
+        data: {
+          deliveryStatus: 'FAILED',
+          errorMessage: `Resend SMTP rejected: ${rejected.join(', ') || 'no accepted recipients'}`,
+          smtpResponse: JSON.stringify(smtpPayload),
+        },
+      });
+      return {
+        ok: false,
+        step: 'resend_send',
+        provider: 'resend',
+        error: `Resend rejected recipient: ${rejected.join(', ') || 'none accepted'}`,
+        smtpResponse: info.response,
+        fromEmail: resend.senderEmail,
+        hint: 'Verify the From address is on your Resend-verified domain. Check https://resend.com/emails',
+        sentEmailId: record.id,
+      };
+    }
+
+    await (prisma as any).saSentEmail.update({
+      where: { id: record.id },
+      data: {
+        deliveryStatus: 'SENT',
+        sentAt: new Date(),
+        messageId,
+        threadId: messageId,
+        smtpResponse: JSON.stringify(smtpPayload),
+      },
+    });
+
+    await (prisma as any).saLeadCompany.update({
+      where: { id: lead.id },
+      data: {
+        lastContactedAt: new Date(),
+        emailSentCount: { increment: 1 },
+        status: 'CONTACTED',
+      },
+    });
+
+    await saLog({
+      category: 'smtp',
+      action: 'test_resend_email_sent',
+      message: `Resend test email sent to ${to} from ${resend.senderEmail}`,
+      userId: input.userId,
+      entityType: 'SaSentEmail',
+      entityId: record.id,
+      details: smtpPayload,
+    });
+
+    return {
+      ok: true,
+      step: 'resend_send',
+      provider: 'resend',
+      message: `Resend SMTP accepted mail to ${to}. From: ${resend.senderEmail} · Reply-To: ${smtp.replyToEmail}`,
+      sentEmailId: record.id,
+      companyId: lead.id,
+      messageId,
+      fromEmail: resend.senderEmail,
+      replyToEmail: smtp.replyToEmail,
+      smtpResponse: info.response,
+      accepted,
+      rejected,
+      nextSteps: [
+        `Look in Inbox/Spam for mail From: ${resend.senderEmail}`,
+        'Confirm in Resend → Emails dashboard: https://resend.com/emails',
+        `Reply-To is ${smtp.replyToEmail}`,
+        'Campaign sends still try Brevo first; Resend is used automatically on Brevo errors/limits',
+      ],
+    };
+  } catch (err: any) {
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+    await (prisma as any).saSentEmail.update({
+      where: { id: record.id },
+      data: { deliveryStatus: 'FAILED', errorMessage: err.message },
+    });
+    return {
+      ok: false,
+      step: 'resend_send',
+      provider: 'resend',
+      error: err.message || 'Failed to send Resend test email',
+      sentEmailId: record.id,
+      fromEmail: resend.senderEmail,
+      hint:
+        'Confirm smtp.resend.com:587, username "resend", API key as password, and verified domain From address.',
+    };
+  }
+}
+
 /** Run IMAP sync immediately and return counts (for testing). */
 export async function testReplySync() {
   const imap = await testImapConnection();
@@ -467,17 +779,25 @@ export async function testReplySync() {
   }
 }
 
-/** Full diagnostics: SMTP + IMAP (+ optional send). Each step has its own timeout. */
+/** Full diagnostics: Brevo SMTP + Resend SMTP + IMAP (+ optional Brevo send). */
 export async function runEmailDiagnostics(input?: { sendTo?: string; userId?: number }) {
   const smtp = await testSmtpConnection();
+  const resendSmtp = await testResendSmtpConnection();
   const imap = await testImapConnection();
   let send: any = null;
   if (input?.sendTo) {
     send = await sendTestSalesEmail({ toEmail: input.sendTo, userId: input.userId });
   }
+  const resend = await getResendSmtpConfig();
+  const resendRequired = resend.enabled && !!resend.apiKey;
   return {
-    ok: smtp.ok && imap.ok && (send ? send.ok : true),
+    ok:
+      smtp.ok &&
+      imap.ok &&
+      (send ? send.ok : true) &&
+      (!resendRequired || resendSmtp.ok),
     smtp,
+    resendSmtp,
     imap,
     send,
   };

@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import prisma from '@/lib/prisma';
-import { getDiscoveryConfig, getSalesAgentSmtpConfig } from './config';
+import { getDiscoveryConfig, getResendSmtpConfig, getSalesAgentSmtpConfig } from './config';
 import { saLog } from './logger';
 
 export const TEMPLATE_VARIABLES = [
@@ -110,7 +110,78 @@ export interface SendSalesEmailInput {
   scheduledFor?: Date | null;
 }
 
-/** Send via Brevo SMTP (nodemailer). Permanent history — never auto-deleted. */
+type SmtpProvider = 'brevo' | 'resend';
+
+function createSalesTransport(opts: {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}) {
+  return nodemailer.createTransport({
+    host: opts.host,
+    port: opts.port,
+    secure: opts.port === 465 || opts.port === 2465,
+    requireTLS: opts.port === 587 || opts.port === 2587 || opts.port === 25,
+    auth: { user: opts.username, pass: opts.password },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 25_000,
+  });
+}
+
+async function sendWithProvider(input: {
+  provider: SmtpProvider;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  fromEmail: string;
+  fromName: string;
+  replyToEmail?: string;
+  to: string;
+  subject: string;
+  html?: string;
+  text?: string;
+  sentEmailId: number;
+}) {
+  const transporter = createSalesTransport({
+    host: input.host,
+    port: input.port,
+    username: input.username,
+    password: input.password,
+  });
+  try {
+    return await transporter.sendMail({
+      from: `"${input.fromName}" <${input.fromEmail}>`,
+      to: input.to,
+      replyTo: input.replyToEmail
+        ? `"${input.fromName}" <${input.replyToEmail}>`
+        : undefined,
+      subject: input.subject,
+      html: input.html || undefined,
+      text: input.text || undefined,
+      headers: {
+        'X-TidyFlow-Sales-Agent': String(input.sentEmailId),
+        'X-TidyFlow-Smtp-Provider': input.provider,
+        ...(input.provider === 'resend'
+          ? { 'Resend-Idempotency-Key': `sa-sent-${input.sentEmailId}` }
+          : {}),
+        ...(input.replyToEmail
+          ? { 'Reply-To': `"${input.fromName}" <${input.replyToEmail}>` }
+          : {}),
+      },
+    });
+  } finally {
+    try {
+      transporter.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Send via Brevo SMTP by default; fall back to Resend on limit/error. */
 export async function sendSalesEmail(input: SendSalesEmailInput) {
   const limits = await checkSendLimits();
   if (!limits.ok && !input.scheduledFor) {
@@ -228,53 +299,25 @@ export async function deliverSalesEmail(sentEmailId: number) {
   if (!record) throw new Error('Sent email record not found');
 
   const smtp = await getSalesAgentSmtpConfig();
-  if (!smtp.host || !smtp.username || !smtp.password) {
+  const resend = await getResendSmtpConfig();
+  const brevoReady = !!(smtp.host && smtp.username && smtp.password && smtp.senderEmail);
+  const resendReady = !!(resend.enabled && resend.apiKey && resend.senderEmail);
+
+  if (!brevoReady && !resendReady) {
     await (prisma as any).saSentEmail.update({
       where: { id: sentEmailId },
       data: {
         deliveryStatus: 'FAILED',
-        errorMessage: 'SMTP not configured (Brevo SMTP host/username/password required)',
+        errorMessage: 'No SMTP configured — set Brevo and/or Resend in Setup',
       },
     });
-    throw new Error('Brevo SMTP not configured');
+    throw new Error('No SMTP configured (Brevo or Resend)');
   }
 
-  try {
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.port === 465,
-      auth: { user: smtp.username, pass: smtp.password },
-    });
+  let lastError: any = null;
+  const attempts: Array<{ provider: SmtpProvider; ok: boolean; error?: string }> = [];
 
-    const info = await transporter.sendMail({
-      from: `"${smtp.senderName}" <${smtp.senderEmail}>`,
-      to: record.recipientEmail,
-      // Customers hit Reply → goes to YOUR inbox (Gmail), not Brevo
-      replyTo: smtp.replyToEmail
-        ? `"${smtp.senderName}" <${smtp.replyToEmail}>`
-        : undefined,
-      subject: record.subject,
-      html: record.htmlBody || undefined,
-      text: record.textBody || undefined,
-      headers: {
-        'X-TidyFlow-Sales-Agent': String(sentEmailId),
-        ...(smtp.replyToEmail ? { 'Reply-To': `"${smtp.senderName}" <${smtp.replyToEmail}>` } : {}),
-      },
-    });
-
-    if (!smtp.replyToEmail) {
-      await saLog({
-        level: 'warn',
-        category: 'email',
-        action: 'missing_reply_to',
-        message: 'Sent without Reply-To — set your Gmail in Setup so customers reply to you',
-        entityType: 'SaSentEmail',
-        entityId: sentEmailId,
-        success: true,
-      });
-    }
-
+  const markSent = async (info: any, provider: SmtpProvider) => {
     const messageId = info.messageId || null;
     const updated = await (prisma as any).saSentEmail.update({
       where: { id: sentEmailId },
@@ -283,7 +326,13 @@ export async function deliverSalesEmail(sentEmailId: number) {
         sentAt: new Date(),
         messageId,
         threadId: messageId,
-        smtpResponse: JSON.stringify({ accepted: info.accepted, rejected: info.rejected, response: info.response }),
+        smtpResponse: JSON.stringify({
+          provider,
+          accepted: info.accepted,
+          rejected: info.rejected,
+          response: info.response,
+          attempts,
+        }),
         errorMessage: null,
       },
     });
@@ -308,34 +357,108 @@ export async function deliverSalesEmail(sentEmailId: number) {
     await saLog({
       category: 'email',
       action: 'email_sent',
-      message: `Sent to ${record.recipientEmail}`,
+      message: `Sent to ${record.recipientEmail} via ${provider}`,
       entityType: 'SaSentEmail',
       entityId: sentEmailId,
-      details: { messageId },
+      details: { messageId, provider, attempts },
     });
 
     return updated;
-  } catch (err: any) {
-    await (prisma as any).saSentEmail.update({
-      where: { id: sentEmailId },
-      data: {
-        deliveryStatus: 'FAILED',
-        retryCount: { increment: 1 },
-        errorMessage: err.message,
-        smtpResponse: err.response || null,
-      },
-    });
-    await saLog({
-      level: 'error',
-      category: 'smtp',
-      action: 'email_failed',
-      message: err.message,
-      entityType: 'SaSentEmail',
-      entityId: sentEmailId,
-      success: false,
-    });
-    throw err;
+  };
+
+  // 1) Primary: Brevo
+  if (brevoReady) {
+    try {
+      const info = await sendWithProvider({
+        provider: 'brevo',
+        host: smtp.host,
+        port: smtp.port,
+        username: smtp.username,
+        password: smtp.password,
+        fromEmail: smtp.senderEmail,
+        fromName: smtp.senderName,
+        replyToEmail: smtp.replyToEmail || undefined,
+        to: record.recipientEmail,
+        subject: record.subject,
+        html: record.htmlBody || undefined,
+        text: record.textBody || undefined,
+        sentEmailId,
+      });
+      attempts.push({ provider: 'brevo', ok: true });
+      if (!smtp.replyToEmail) {
+        await saLog({
+          level: 'warn',
+          category: 'email',
+          action: 'missing_reply_to',
+          message: 'Sent without Reply-To — set your Gmail in Setup so customers reply to you',
+          entityType: 'SaSentEmail',
+          entityId: sentEmailId,
+          success: true,
+        });
+      }
+      return await markSent(info, 'brevo');
+    } catch (err: any) {
+      lastError = err;
+      attempts.push({ provider: 'brevo', ok: false, error: err.message });
+      await saLog({
+        level: 'warn',
+        category: 'smtp',
+        action: 'brevo_failed_try_resend',
+        message: `Brevo failed: ${err.message}${resendReady ? ' — trying Resend fallback' : ''}`,
+        entityType: 'SaSentEmail',
+        entityId: sentEmailId,
+        success: false,
+      });
+    }
   }
+
+  // 2) Fallback: Resend (https://resend.com/docs/send-with-smtp)
+  if (resendReady && (lastError || !brevoReady)) {
+    try {
+      const info = await sendWithProvider({
+        provider: 'resend',
+        host: resend.host,
+        port: resend.port,
+        username: resend.username || 'resend',
+        password: resend.apiKey,
+        fromEmail: resend.senderEmail,
+        fromName: resend.senderName,
+        replyToEmail: smtp.replyToEmail || undefined,
+        to: record.recipientEmail,
+        subject: record.subject,
+        html: record.htmlBody || undefined,
+        text: record.textBody || undefined,
+        sentEmailId,
+      });
+      attempts.push({ provider: 'resend', ok: true });
+      return await markSent(info, 'resend');
+    } catch (err: any) {
+      lastError = err;
+      attempts.push({ provider: 'resend', ok: false, error: err.message });
+    }
+  }
+
+  const failMsg = lastError?.message || 'Email send failed';
+  await (prisma as any).saSentEmail.update({
+    where: { id: sentEmailId },
+    data: {
+      deliveryStatus: 'FAILED',
+      retryCount: { increment: 1 },
+      errorMessage: failMsg,
+      smtpResponse: JSON.stringify({ attempts, error: failMsg }),
+    },
+  });
+  await saLog({
+    level: 'error',
+    category: 'smtp',
+    action: 'email_failed',
+    message: failMsg,
+    entityType: 'SaSentEmail',
+    entityId: sentEmailId,
+    success: false,
+    details: { attempts },
+  });
+  throw lastError || new Error(failMsg);
 }
 
 export async function retryFailedEmail(sentEmailId: number) {
