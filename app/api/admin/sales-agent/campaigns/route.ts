@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/auth';
 import { saLog } from '@/lib/sales-agent/logger';
+import { buildFollowUpSchedule } from '@/lib/sales-agent/campaign-sequence';
 
 export async function GET(request: NextRequest) {
   const gate = await requireSalesAgentAdmin(request);
@@ -33,6 +34,27 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   if (!body.name) return jsonError('Campaign name is required');
 
+  const followUpSchedule =
+    body.followUpSchedule != null
+      ? typeof body.followUpSchedule === 'string'
+        ? body.followUpSchedule
+        : JSON.stringify(body.followUpSchedule)
+      : buildFollowUpSchedule({
+          steps: body.steps,
+          fallbackTemplateId: body.templateId,
+          skipIfReplied: body.skipIfReplied !== false,
+        });
+
+  let primaryTemplateId = body.templateId ? Number(body.templateId) : null;
+  try {
+    const parsed = JSON.parse(followUpSchedule);
+    if (Array.isArray(parsed.steps) && parsed.steps[0]?.templateId) {
+      primaryTemplateId = Number(parsed.steps[0].templateId);
+    }
+  } catch {
+    /* ignore */
+  }
+
   const campaign = await (prisma as any).saCampaign.create({
     data: {
       name: body.name,
@@ -40,16 +62,12 @@ export async function POST(request: NextRequest) {
       country: body.country || null,
       cities: Array.isArray(body.cities) ? JSON.stringify(body.cities) : body.cities || null,
       keywords: Array.isArray(body.keywords) ? JSON.stringify(body.keywords) : body.keywords || null,
-      templateId: body.templateId ? Number(body.templateId) : null,
+      templateId: primaryTemplateId,
       aiPrompt: body.aiPrompt || null,
       sendingLimit: body.sendingLimit != null ? Number(body.sendingLimit) : null,
       delayBetweenEmails: body.delayBetweenEmails != null ? Number(body.delayBetweenEmails) : 60,
       maxEmailsPerDay: body.maxEmailsPerDay != null ? Number(body.maxEmailsPerDay) : 50,
-      followUpSchedule: body.followUpSchedule
-        ? typeof body.followUpSchedule === 'string'
-          ? body.followUpSchedule
-          : JSON.stringify(body.followUpSchedule)
-        : null,
+      followUpSchedule,
       discoveryMethod: body.discoveryMethod || null,
       discoveryConfig: body.discoveryConfig
         ? typeof body.discoveryConfig === 'string'

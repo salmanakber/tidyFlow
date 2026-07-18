@@ -13,7 +13,11 @@ export async function GET(
 
   const template = await (prisma as any).saEmailTemplate.findUnique({
     where: { id: parseInt(params.id, 10) },
-    include: { versions: { orderBy: { version: 'desc' } } },
+    include: {
+      versions: { orderBy: { version: 'desc' } },
+      children: { orderBy: [{ delayDays: 'asc' }, { id: 'asc' }] },
+      parent: { select: { id: true, name: true } },
+    },
   });
   if (!template) return jsonError('Not found', 404);
   return jsonOk(template);
@@ -40,6 +44,11 @@ export async function PATCH(
   if (body.status !== undefined) data.status = body.status;
   if (body.language !== undefined) data.language = body.language || null;
   if (body.country !== undefined) data.country = body.country || null;
+  if (body.delayDays !== undefined) data.delayDays = Math.max(0, Number(body.delayDays) || 0);
+  if (body.stepLabel !== undefined) data.stepLabel = body.stepLabel || null;
+  if (body.parentId !== undefined) {
+    data.parentId = body.parentId ? Number(body.parentId) : null;
+  }
 
   const contentChanged =
     (body.subject !== undefined && body.subject !== existing.subject) ||

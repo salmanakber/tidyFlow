@@ -100,6 +100,85 @@ async function callGemini(
   }
 }
 
+/** Quick connectivity test for a single provider (does not use fallback). */
+export async function testSalesAgentProvider(
+  provider: AIProviderName
+): Promise<{ ok: boolean; provider: AIProviderName; model?: string; latencyMs?: number; message?: string; error?: string }> {
+  const config = await getSalesAgentAIConfig();
+  const started = Date.now();
+  const messages: SalesAgentChatMessage[] = [
+    { role: 'system', content: 'You are a connectivity test. Reply with exactly: OK' },
+    { role: 'user', content: 'ping' },
+  ];
+
+  try {
+    if (provider === 'groq') {
+      if (!config.groqApiKey) {
+        return { ok: false, provider, error: 'Groq API key not configured' };
+      }
+      const text = await callGroq(messages, {
+        apiKey: config.groqApiKey,
+        model: config.groqModel,
+        temperature: 0,
+        maxTokens: 16,
+        timeoutMs: Math.min(config.aiTimeoutMs || 20000, 20000),
+      });
+      const latencyMs = Date.now() - started;
+      await logAiUsage({
+        provider: 'groq',
+        model: config.groqModel,
+        action: 'connection_test',
+        success: true,
+        latencyMs,
+      });
+      return {
+        ok: true,
+        provider,
+        model: config.groqModel,
+        latencyMs,
+        message: `Groq OK (${latencyMs}ms) — ${String(text).slice(0, 80)}`,
+      };
+    }
+
+    if (!config.geminiApiKey) {
+      return { ok: false, provider, error: 'Gemini API key not configured' };
+    }
+    const text = await callGemini(messages, {
+      apiKey: config.geminiApiKey,
+      model: config.geminiModel,
+      temperature: 0,
+      maxTokens: 16,
+      timeoutMs: Math.min(config.aiTimeoutMs || 20000, 20000),
+    });
+    const latencyMs = Date.now() - started;
+    await logAiUsage({
+      provider: 'gemini',
+      model: config.geminiModel,
+      action: 'connection_test',
+      success: true,
+      latencyMs,
+    });
+    return {
+      ok: true,
+      provider,
+      model: config.geminiModel,
+      latencyMs,
+      message: `Gemini OK (${latencyMs}ms) — ${String(text).slice(0, 80)}`,
+    };
+  } catch (err: any) {
+    const latencyMs = Date.now() - started;
+    await logAiUsage({
+      provider,
+      model: provider === 'groq' ? config.groqModel : config.geminiModel,
+      action: 'connection_test',
+      success: false,
+      error: err.message,
+      latencyMs,
+    });
+    return { ok: false, provider, latencyMs, error: err.message || 'Provider test failed' };
+  }
+}
+
 /** Provider abstraction: Groq primary → Gemini fallback. Extensible for future providers. */
 export async function salesAgentChat(
   messages: SalesAgentChatMessage[],

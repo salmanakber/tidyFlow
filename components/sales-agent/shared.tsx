@@ -131,6 +131,84 @@ export const btnPrimary =
 export const btnSecondary =
   "inline-flex items-center justify-center gap-2 rounded-lg border border-[#D8DCE6] bg-white px-4 py-2 text-sm font-medium text-[#0B1B3B] hover:bg-[#F6F7FB] disabled:opacity-50 transition-colors"
 
+/** Secret field: when already saved, show badge + disabled until Change. */
+export function SavedSecretField({
+  label,
+  hasSaved,
+  editing,
+  onEdit,
+  onCancel,
+  value,
+  onChange,
+  placeholder = "Enter new value",
+  hintReplace = "Key already saved — enter a new value to replace it, then save.",
+}: {
+  label: string
+  hasSaved: boolean
+  editing: boolean
+  onEdit: () => void
+  onCancel: () => void
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  hintReplace?: string
+}) {
+  const locked = hasSaved && !editing
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">{label}</label>
+        {hasSaved && (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-green-800 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-full">
+            Already saved
+          </span>
+        )}
+      </div>
+      {locked ? (
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="password"
+            disabled
+            readOnly
+            className={`${inputCls} opacity-60 cursor-not-allowed bg-slate-50`}
+            value="••••••••••••••••"
+          />
+          <button
+            type="button"
+            className={`${btnSecondary} text-xs py-2 shrink-0 whitespace-nowrap`}
+            onClick={onEdit}
+          >
+            Change
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {hasSaved && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+              {hintReplace}
+            </p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="password"
+              className={`${inputCls} focus:border-[#D97706]`}
+              placeholder={placeholder}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              autoComplete="new-password"
+            />
+            {hasSaved && (
+              <button type="button" className={`${btnSecondary} text-xs py-2 shrink-0`} onClick={onCancel}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Determinate or indeterminate waiting bar for background actions */
 export function ProgressBar({
   label,

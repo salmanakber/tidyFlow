@@ -100,6 +100,8 @@ export interface SendSalesEmailInput {
   companyId?: number;
   campaignId?: number;
   templateId?: number;
+  /** Segment index within a campaign sequence (1 = first email). */
+  sequenceStep?: number;
   to: string;
   toName?: string;
   subject: string;
@@ -189,12 +191,14 @@ export async function sendSalesEmail(input: SendSalesEmailInput) {
   }
 
   const email = input.to.toLowerCase();
+  const sequenceStep = Math.max(1, Number(input.sequenceStep) || 1);
 
-  // Hard rule: never send the same campaign twice to the same company / recipient
+  // One send per campaign + lead + sequence step (allows multi-template drip)
   if (input.campaignId) {
     const alreadyInCampaign = await (prisma as any).saSentEmail.findFirst({
       where: {
         campaignId: input.campaignId,
+        sequenceStep,
         deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING', 'RETRYING'] },
         OR: [
           input.companyId ? { companyId: input.companyId } : undefined,
@@ -204,7 +208,7 @@ export async function sendSalesEmail(input: SendSalesEmailInput) {
     });
     if (alreadyInCampaign) {
       throw new Error(
-        'Already emailed in this campaign — use a new follow-up campaign for a second email'
+        `Already queued/sent step ${sequenceStep} in this campaign for this lead`
       );
     }
   }
@@ -228,6 +232,7 @@ export async function sendSalesEmail(input: SendSalesEmailInput) {
       companyId: input.companyId || null,
       campaignId: input.campaignId || null,
       templateId: input.templateId || null,
+      sequenceStep,
       recipientEmail: email,
       recipientName: input.toName || null,
       subject: input.subject,
@@ -297,6 +302,93 @@ export function buildAudienceWhere(opts: {
 export async function deliverSalesEmail(sentEmailId: number) {
   const record = await (prisma as any).saSentEmail.findUnique({ where: { id: sentEmailId } });
   if (!record) throw new Error('Sent email record not found');
+
+  if (['SENT', 'DELIVERED', 'OPENED', 'CANCELED'].includes(record.deliveryStatus)) {
+    return record;
+  }
+
+  // Honor scheduledFor (e.g. email_sending sweeper picked up early)
+  if (record.scheduledFor && new Date(record.scheduledFor).getTime() > Date.now() + 2000) {
+    return record;
+  }
+
+  // Respect campaign pause / cancel for delayed sequence steps
+  if (record.campaignId) {
+    const campaign = await (prisma as any).saCampaign.findUnique({
+      where: { id: record.campaignId },
+      select: { status: true, followUpSchedule: true },
+    });
+    if (campaign && (campaign.status === 'PAUSED' || campaign.status === 'FAILED')) {
+      await (prisma as any).saSentEmail.update({
+        where: { id: sentEmailId },
+        data: {
+          deliveryStatus: 'CANCELED',
+          errorMessage: `Skipped — campaign is ${campaign.status}`,
+        },
+      });
+      await saLog({
+        level: 'warn',
+        category: 'campaign',
+        action: 'sequence_step_canceled',
+        message: `Step ${record.sequenceStep || 1} canceled — campaign ${campaign.status}`,
+        entityType: 'SaSentEmail',
+        entityId: sentEmailId,
+        success: false,
+      });
+      return { ...record, deliveryStatus: 'CANCELED' };
+    }
+
+    const step = Math.max(1, Number(record.sequenceStep) || 1);
+    if (step > 1 && record.companyId) {
+      const { parseCampaignSequence } = await import('./campaign-sequence');
+      const seq = parseCampaignSequence(campaign?.followUpSchedule);
+      const skipIfReplied = seq.skipIfReplied !== false;
+      if (skipIfReplied) {
+        const replied =
+          (await (prisma as any).saReply.count({
+            where: {
+              OR: [
+                { companyId: record.companyId },
+                {
+                  sentEmail: {
+                    campaignId: record.campaignId,
+                    companyId: record.companyId,
+                  },
+                },
+              ],
+            },
+          })) > 0 ||
+          !!(await (prisma as any).saLeadCompany.findFirst({
+            where: {
+              id: record.companyId,
+              OR: [
+                { replyStatus: { not: null } },
+                { status: 'REPLIED' },
+              ],
+            },
+            select: { id: true },
+          }));
+
+        if (replied) {
+          await (prisma as any).saSentEmail.update({
+            where: { id: sentEmailId },
+            data: {
+              deliveryStatus: 'CANCELED',
+              errorMessage: 'Skipped — lead already replied (follow-up suppressed)',
+            },
+          });
+          await saLog({
+            category: 'campaign',
+            action: 'sequence_step_skipped_reply',
+            message: `Step ${step} skipped — lead replied`,
+            entityType: 'SaSentEmail',
+            entityId: sentEmailId,
+          });
+          return { ...record, deliveryStatus: 'CANCELED' };
+        }
+      }
+    }
+  }
 
   const smtp = await getSalesAgentSmtpConfig();
   const resend = await getResendSmtpConfig();

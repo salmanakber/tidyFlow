@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSalesAgentAdmin, jsonOk } from '@/lib/sales-agent/auth';
+import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/auth';
 import {
   getAllSettingsMasked,
   getSalesAgentAIConfig,
@@ -7,6 +7,7 @@ import {
 } from '@/lib/sales-agent/config';
 import prisma from '@/lib/prisma';
 import { saLog } from '@/lib/sales-agent/logger';
+import { testSalesAgentProvider } from '@/lib/sales-agent/ai-provider';
 
 export async function GET(request: NextRequest) {
   const gate = await requireSalesAgentAdmin(request);
@@ -92,4 +93,20 @@ export async function PUT(request: NextRequest) {
   });
 
   return jsonOk({ saved: true });
+}
+
+export async function POST(request: NextRequest) {
+  const gate = await requireSalesAgentAdmin(request);
+  if (gate instanceof NextResponse) return gate;
+
+  const body = await request.json().catch(() => ({}));
+  const action = body.action;
+
+  if (action === 'test_groq' || action === 'test_gemini') {
+    const provider = action === 'test_groq' ? 'groq' : 'gemini';
+    const result = await testSalesAgentProvider(provider as 'groq' | 'gemini');
+    return jsonOk(result);
+  }
+
+  return jsonError('Unknown action');
 }

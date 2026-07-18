@@ -1637,6 +1637,7 @@ enum SaEmailDeliveryStatus {
   BOUNCED
   FAILED
   RETRYING
+  CANCELED
 }
 
 enum SaReplyIntent {
@@ -1850,10 +1851,17 @@ model SaEmailTemplate {
   textBody    String?          @map("text_body") @db.Text
   status      SaTemplateStatus @default(DRAFT)
   version     Int              @default(1)
+  /// Parent pack template — children are day-2 / day-3 follow-ups for campaigns
+  parentId    Int?             @map("parent_id")
+  /// Days after campaign start when this child should send (parent = 0)
+  delayDays   Int              @default(0) @map("delay_days")
+  stepLabel   String?          @map("step_label")
   createdById Int?             @map("created_by_id")
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
 
+  parent     SaEmailTemplate?        @relation("TemplateChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children   SaEmailTemplate[]       @relation("TemplateChildren")
   versions   SaEmailTemplateVersion[]
   campaigns  SaCampaign[]
   sentEmails SaSentEmail[]
@@ -1861,6 +1869,7 @@ model SaEmailTemplate {
   @@index([status])
   @@index([language])
   @@index([country])
+  @@index([parentId])
   @@map("sa_email_templates")
 }
 
@@ -1886,6 +1895,7 @@ model SaSentEmail {
   companyId       Int?                  @map("company_id")
   campaignId      Int?                  @map("campaign_id")
   templateId      Int?                  @map("template_id")
+  sequenceStep    Int                   @default(1) @map("sequence_step")
   recipientEmail  String                @map("recipient_email")
   recipientName   String?               @map("recipient_name")
   subject         String
@@ -1913,9 +1923,11 @@ model SaSentEmail {
 
   @@index([companyId])
   @@index([campaignId])
+  @@index([campaignId, sequenceStep])
   @@index([deliveryStatus])
   @@index([recipientEmail])
   @@index([sentAt])
+  @@index([scheduledFor])
   @@index([messageId])
   @@index([createdAt])
   @@map("sa_sent_emails")

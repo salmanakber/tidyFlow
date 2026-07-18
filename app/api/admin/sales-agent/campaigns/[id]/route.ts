@@ -5,6 +5,12 @@ import { enqueueAnalyzeLead, enqueueSendEmail } from '@/lib/sales-agent/queue';
 import { buildTemplateVars, renderTemplate, sendSalesEmail } from '@/lib/sales-agent/email';
 import { saLog } from '@/lib/sales-agent/logger';
 import { markDiscoveryGroupsEmailed } from '@/lib/sales-agent/groups';
+import {
+  buildFollowUpSchedule,
+  parseCampaignSequence,
+  resolveStepSendAt,
+  type CampaignStep,
+} from '@/lib/sales-agent/campaign-sequence';
 
 export async function GET(
   _request: NextRequest,
@@ -62,6 +68,20 @@ export async function PATCH(
       typeof body.followUpSchedule === 'string'
         ? body.followUpSchedule
         : JSON.stringify(body.followUpSchedule);
+  } else if (body.steps !== undefined) {
+    data.followUpSchedule = buildFollowUpSchedule({
+      steps: body.steps,
+      fallbackTemplateId: body.templateId,
+      skipIfReplied: body.skipIfReplied !== false,
+    });
+    try {
+      const parsed = JSON.parse(String(data.followUpSchedule));
+      if (parsed.steps?.[0]?.templateId) {
+        data.templateId = Number(parsed.steps[0].templateId);
+      }
+    } catch {
+      /* ignore */
+    }
   }
   if (body.discoveryConfig !== undefined) {
     data.discoveryConfig =
@@ -116,17 +136,63 @@ async function startCampaign(campaignId: number, userId: number) {
   });
   if (!campaign) return;
 
-  if (!campaign.template) {
+  const sequence = parseCampaignSequence(campaign.followUpSchedule);
+  let steps: CampaignStep[] = sequence.steps;
+
+  // Backward compatible: single template campaigns with no steps configured
+  if (!steps.length && campaign.templateId) {
+    steps = [
+      {
+        step: 1,
+        templateId: campaign.templateId,
+        delayDays: 0,
+        label: 'Initial outreach',
+      },
+    ];
+  }
+
+  if (!steps.length) {
     await (prisma as any).saCampaign.update({
       where: { id: campaignId },
-      data: { status: 'FAILED', lastError: 'No email template selected' },
+      data: { status: 'FAILED', lastError: 'No email template / sequence steps selected' },
     });
     return;
   }
 
+  // Ensure followUpSchedule is persisted for deliver-time skip-if-replied checks
+  if (!campaign.followUpSchedule || !parseCampaignSequence(campaign.followUpSchedule).steps.length) {
+    await (prisma as any).saCampaign.update({
+      where: { id: campaignId },
+      data: {
+        followUpSchedule: buildFollowUpSchedule({
+          steps,
+          skipIfReplied: sequence.skipIfReplied,
+        }),
+        templateId: steps[0].templateId,
+      },
+    });
+  }
+
+  const templates = await (prisma as any).saEmailTemplate.findMany({
+    where: { id: { in: steps.map((s) => s.templateId) } },
+  });
+  const templateById = new Map<number, any>(templates.map((t: any) => [t.id, t]));
+  const missing = steps.filter((s) => !templateById.has(s.templateId));
+  if (missing.length) {
+    await (prisma as any).saCampaign.update({
+      where: { id: campaignId },
+      data: {
+        status: 'FAILED',
+        lastError: `Missing template(s) for step(s): ${missing.map((m) => m.step).join(', ')}`,
+      },
+    });
+    return;
+  }
+
+  const startedAt = new Date();
   await (prisma as any).saCampaign.update({
     where: { id: campaignId },
-    data: { status: 'RUNNING', startedAt: new Date(), lastError: null },
+    data: { status: 'RUNNING', startedAt, lastError: null },
   });
 
   const cfg = parseDiscoveryConfig(campaign.discoveryConfig);
@@ -153,7 +219,6 @@ async function startCampaign(campaignId: number, userId: number) {
     return;
   }
 
-  // Only the leads you picked — no auto discovery
   const ready = await (prisma as any).saLeadCompany.findMany({
     where: {
       id: { in: selectedIds },
@@ -163,7 +228,6 @@ async function startCampaign(campaignId: number, userId: number) {
     include: { analyses: { orderBy: { createdAt: 'desc' }, take: 1 } },
   });
 
-  // Link selected leads to this campaign for reporting
   await (prisma as any).saLeadCompany.updateMany({
     where: { id: { in: selectedIds } },
     data: { campaignId },
@@ -171,8 +235,9 @@ async function startCampaign(campaignId: number, userId: number) {
 
   const limit = campaign.maxEmailsPerDay || 50;
   const toSend = ready.slice(0, limit);
+  const staggerSeconds = campaign.delayBetweenEmails || 60;
 
-  let delay = 0;
+  let leadStagger = 0;
   let queued = 0;
   let skipped = 0;
 
@@ -182,55 +247,60 @@ async function startCampaign(campaignId: number, userId: number) {
       continue;
     }
 
-    // Skip if this campaign already emailed them
-    const already = await (prisma as any).saSentEmail.findFirst({
-      where: {
-        campaignId,
-        companyId: lead.id,
-        deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING', 'RETRYING'] },
-      },
-    });
-    if (already) {
-      skipped++;
-      continue;
-    }
-
     if (lead.hasWebsite && lead.leadScore == null) {
       await enqueueAnalyzeLead(lead.id);
     }
 
-    const vars = await buildTemplateVars(lead.id);
-    const subject = renderTemplate(campaign.template.subject, vars);
-    const htmlBody = campaign.template.htmlBody
-      ? renderTemplate(campaign.template.htmlBody, vars)
-      : undefined;
-    const textBody = campaign.template.textBody
-      ? renderTemplate(campaign.template.textBody, vars)
-      : undefined;
-
     try {
-      // Mark as queued/contacted intent on the lead so UI shows progress
       await (prisma as any).saLeadCompany.update({
         where: { id: lead.id },
         data: { status: 'QUEUED', campaignId },
       });
 
-      const record = await sendSalesEmail({
-        companyId: lead.id,
-        campaignId,
-        templateId: campaign.templateId,
-        to: lead.email,
-        toName: lead.name,
-        subject,
-        htmlBody,
-        textBody,
-        aiPrompt: campaign.aiPrompt,
-        aiProvider: lead.analyses[0]?.provider,
-        scheduledFor: new Date(Date.now() + delay * 1000),
-      });
-      await enqueueSendEmail(record.id, delay * 1000);
-      delay += campaign.delayBetweenEmails || 60;
-      queued++;
+      const vars = await buildTemplateVars(lead.id);
+
+      for (const step of steps) {
+        const already = await (prisma as any).saSentEmail.findFirst({
+          where: {
+            campaignId,
+            companyId: lead.id,
+            sequenceStep: step.step,
+            deliveryStatus: {
+              in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING', 'RETRYING'],
+            },
+          },
+        });
+        if (already) {
+          skipped++;
+          continue;
+        }
+
+        const tpl = templateById.get(step.templateId);
+        const subject = renderTemplate(tpl.subject, vars);
+        const htmlBody = tpl.htmlBody ? renderTemplate(tpl.htmlBody, vars) : undefined;
+        const textBody = tpl.textBody ? renderTemplate(tpl.textBody, vars) : undefined;
+        const scheduledFor = resolveStepSendAt(step, startedAt, leadStagger);
+        const delayMs = Math.max(0, scheduledFor.getTime() - Date.now());
+
+        const record = await sendSalesEmail({
+          companyId: lead.id,
+          campaignId,
+          templateId: step.templateId,
+          sequenceStep: step.step,
+          to: lead.email,
+          toName: lead.name,
+          subject,
+          htmlBody,
+          textBody,
+          aiPrompt: campaign.aiPrompt,
+          aiProvider: lead.analyses[0]?.provider,
+          scheduledFor,
+        });
+        await enqueueSendEmail(record.id, delayMs);
+        queued++;
+      }
+
+      leadStagger += staggerSeconds;
     } catch (err: any) {
       skipped++;
       await saLog({
@@ -248,14 +318,24 @@ async function startCampaign(campaignId: number, userId: number) {
   await saLog({
     category: 'campaign',
     action: 'campaign_emails_queued',
-    message: `Campaign ${campaign.name}: queued=${queued} skipped=${skipped} selected=${selectedIds.length}`,
+    message: `Campaign ${campaign.name}: steps=${steps.length} queued=${queued} skipped=${skipped} selected=${selectedIds.length}`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,
-    details: { queued, skipped, selected: selectedIds.length },
+    details: {
+      queued,
+      skipped,
+      selected: selectedIds.length,
+      steps: steps.map((s) => ({
+        step: s.step,
+        templateId: s.templateId,
+        delayDays: s.delayDays,
+        sendAt: s.sendAt,
+        label: s.label,
+      })),
+    },
   });
 
-  // Mark lead groups as emailed / "Already sent" (or "Sent again" on a later wave)
   if (queued > 0) {
     const marked = await markDiscoveryGroupsEmailed(toSend.map((l: any) => l.id));
     await saLog({
@@ -271,7 +351,7 @@ async function startCampaign(campaignId: number, userId: number) {
   await saLog({
     category: 'campaign',
     action: 'campaign_started',
-    message: `Started campaign ${campaign.name} for ${queued} selected leads`,
+    message: `Started campaign ${campaign.name} — ${steps.length} segment(s) for ${toSend.length} leads`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,

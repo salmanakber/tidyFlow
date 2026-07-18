@@ -65,26 +65,91 @@ export default function TemplatesTab() {
   const startNew = () => {
     setEditing({
       id: null,
-      name: "Outreach v1",
+      name: "Outreach pack",
       language: "",
       country: "",
       subject: "Quick idea for {{company_name}}",
       htmlBody: DEFAULT_HTML,
       textBody: "Hi {{contact_name}},\n\n{{personalized_intro}}\n\nBook a demo: {{booking_link}}\n\n{{sender_name}}",
       status: "DRAFT",
+      delayDays: 0,
+      stepLabel: "Day 0 · Initial",
+      parentId: null,
+      children: [],
     })
     setPreview(null)
+  }
+
+  const addChildDraft = () => {
+    if (!editing) return
+    const day = Math.max(1, (editing.children?.length || 0) + 1)
+    setEditing({
+      ...editing,
+      children: [
+        ...(editing.children || []),
+        {
+          id: null,
+          _draft: true,
+          name: `${editing.name || "Pack"} · Day ${day}`,
+          subject: `Following up — {{company_name}}`,
+          htmlBody: DEFAULT_HTML,
+          textBody: `Hi {{contact_name}},\n\nJust following up on my previous note.\n\n{{sender_name}}`,
+          delayDays: day === 1 ? 1 : day === 2 ? 3 : day * 2,
+          stepLabel: `Day ${day === 1 ? 1 : day === 2 ? 3 : day * 2} follow-up`,
+          status: "DRAFT",
+          language: editing.language || "",
+          country: editing.country || "",
+        },
+      ],
+    })
   }
 
   const save = async () => {
     setSaving(true)
     try {
-      if (editing.id) {
-        await saPatch(`/templates/${editing.id}`, editing)
-      } else {
-        await saPost("/templates", editing)
+      let parentId = editing.id
+      const parentPayload = {
+        name: editing.name,
+        subject: editing.subject,
+        htmlBody: editing.htmlBody,
+        textBody: editing.textBody,
+        language: editing.language || null,
+        country: editing.country || null,
+        status: editing.status,
+        delayDays: 0,
+        stepLabel: editing.stepLabel || "Initial outreach",
+        parentId: null,
       }
-      setMessage({ type: "success", text: "Template saved successfully" })
+
+      if (editing.id) {
+        await saPatch(`/templates/${editing.id}`, parentPayload)
+      } else {
+        const created = await saPost("/templates", parentPayload)
+        parentId = created.id
+      }
+
+      // Persist child drafts / updates
+      for (const child of editing.children || []) {
+        const childPayload = {
+          name: child.name,
+          subject: child.subject,
+          htmlBody: child.htmlBody,
+          textBody: child.textBody,
+          language: child.language || editing.language || null,
+          country: child.country || editing.country || null,
+          status: child.status || "DRAFT",
+          delayDays: Number(child.delayDays) || 1,
+          stepLabel: child.stepLabel || null,
+          parentId,
+        }
+        if (child.id && !child._draft) {
+          await saPatch(`/templates/${child.id}`, childPayload)
+        } else {
+          await saPost("/templates", childPayload)
+        }
+      }
+
+      setMessage({ type: "success", text: "Template pack saved" })
       setEditing(null)
       load()
     } catch (e: any) {
@@ -231,7 +296,7 @@ export default function TemplatesTab() {
               </div>
               <div className="space-y-1.5 flex items-end">
                 <p className="text-[10px] text-gray-400 leading-relaxed pb-2">
-                  Tags who this template is written for (app languages + market). Does not change sending logic.
+                  Tags who this template is written for. Add follow-up children below for day 1 / day 3 campaign packs.
                 </p>
               </div>
               <div className="md:col-span-3 space-y-1.5">
@@ -268,6 +333,126 @@ export default function TemplatesTab() {
               </div>
             </div>
 
+            {/* Follow-up children (template pack) */}
+            {!editing.parentId && (
+              <div className="space-y-3 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">
+                      Follow-up children (campaign pack)
+                    </h4>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Day 1 / day 3 (or custom) emails for the same leads. Campaigns can apply this pack in one click.
+                    </p>
+                  </div>
+                  <button type="button" className={`${btnSecondary} text-xs py-1.5`} onClick={addChildDraft}>
+                    <Plus className="w-3.5 h-3.5" /> Add follow-up
+                  </button>
+                </div>
+
+                {(editing.children || []).length === 0 ? (
+                  <p className="text-[11px] text-gray-400 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center">
+                    No follow-ups yet — add Day 1, Day 3, etc. for drip campaigns.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {(editing.children || []).map((child: any, idx: number) => (
+                      <div key={child.id || `draft-${idx}`} className="rounded-xl border border-[#E3E7F0] bg-[#F8F9FC] p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[#0D1E36] bg-white border px-2 py-0.5 rounded-full">
+                            Child {idx + 1}
+                            {child.delayDays != null ? ` · Day ${child.delayDays}` : ""}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-[11px] font-semibold text-rose-600"
+                            onClick={async () => {
+                              if (child.id && !child._draft) {
+                                if (!window.confirm(`Delete follow-up "${child.name}"?`)) return
+                                await saDelete(`/templates/${child.id}`)
+                              }
+                              setEditing({
+                                ...editing,
+                                children: (editing.children || []).filter((_: any, i: number) => i !== idx),
+                              })
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="md:col-span-2 space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-gray-500">Name</label>
+                            <input
+                              className={`${inputCls} bg-white text-xs`}
+                              value={child.name || ""}
+                              onChange={(e) => {
+                                const children = [...(editing.children || [])]
+                                children[idx] = { ...children[idx], name: e.target.value }
+                                setEditing({ ...editing, children })
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-gray-500">Send after (days)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              className={`${inputCls} bg-white text-xs`}
+                              value={child.delayDays ?? 1}
+                              onChange={(e) => {
+                                const children = [...(editing.children || [])]
+                                children[idx] = { ...children[idx], delayDays: e.target.value }
+                                setEditing({ ...editing, children })
+                              }}
+                            />
+                          </div>
+                          <div className="md:col-span-3 space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-gray-500">Step label</label>
+                            <input
+                              className={`${inputCls} bg-white text-xs`}
+                              value={child.stepLabel || ""}
+                              onChange={(e) => {
+                                const children = [...(editing.children || [])]
+                                children[idx] = { ...children[idx], stepLabel: e.target.value }
+                                setEditing({ ...editing, children })
+                              }}
+                              placeholder="e.g. Day 3 follow-up"
+                            />
+                          </div>
+                          <div className="md:col-span-3 space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-gray-500">Subject</label>
+                            <input
+                              className={`${inputCls} bg-white text-xs`}
+                              value={child.subject || ""}
+                              onChange={(e) => {
+                                const children = [...(editing.children || [])]
+                                children[idx] = { ...children[idx], subject: e.target.value }
+                                setEditing({ ...editing, children })
+                              }}
+                            />
+                          </div>
+                          <div className="md:col-span-3 space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-gray-500">HTML body</label>
+                            <textarea
+                              className={`${inputCls} bg-white font-mono text-xs`}
+                              rows={4}
+                              value={child.htmlBody || ""}
+                              onChange={(e) => {
+                                const children = [...(editing.children || [])]
+                                children[idx] = { ...children[idx], htmlBody: e.target.value }
+                                setEditing({ ...editing, children })
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Action Bar */}
             <div className="flex items-center gap-3 pt-3 border-t border-gray-100">
               <button 
@@ -277,7 +462,7 @@ export default function TemplatesTab() {
                 disabled={saving}
               >
                 {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D97706]" />}
-                {saving ? "Saving Changes..." : "Save Template"}
+                {saving ? "Saving Changes..." : "Save Template Pack"}
               </button>
               <button 
                 type="button" 
@@ -373,7 +558,16 @@ export default function TemplatesTab() {
                   })
                   .map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50 transition-colors duration-100">
-                    <td className="p-4 pl-5 font-semibold text-[#0D1E36]">{t.name}</td>
+                    <td className="p-4 pl-5 font-semibold text-[#0D1E36]">
+                      <div className="space-y-1">
+                        <span>{t.name}</span>
+                        {(t._count?.children > 0 || (t.children || []).length > 0) && (
+                          <span className="block text-[10px] font-medium text-[#D97706]">
+                            Pack · {(t._count?.children ?? t.children?.length ?? 0) + 1} emails
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-4">
                       {t.language || t.country ? (
                         <span className="inline-flex flex-wrap gap-1">
@@ -415,7 +609,10 @@ export default function TemplatesTab() {
                             setBusyId(t.id)
                             try {
                               const full = await saGet(`/templates/${t.id}`)
-                              setEditing(full)
+                              setEditing({
+                                ...full,
+                                children: full.children || [],
+                              })
                               setPreview(null)
                             } catch (e: any) {
                               setMessage({ type: "error", text: e.message })

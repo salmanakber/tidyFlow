@@ -17,15 +17,33 @@ import {
 } from "./shared"
 import { Play, Pause, Plus, Pencil, Trash2, Loader2, Settings, Users, CalendarDays } from "lucide-react"
 import { SA_COUNTRIES, SA_LANGUAGES, formatAudienceTag, languageLabel } from "@/lib/sales-agent/taxonomy"
+import { formatStepSchedule, parseCampaignSequence } from "@/lib/sales-agent/campaign-sequence"
+
+type FormStep = {
+  templateId: string
+  delayDays: string
+  sendAt: string
+  label: string
+  scheduleMode: "delay" | "date"
+}
+
+const emptyStep = (): FormStep => ({
+  templateId: "",
+  delayDays: "0",
+  sendAt: "",
+  label: "",
+  scheduleMode: "delay",
+})
 
 const emptyForm = {
   name: "",
-  templateId: "",
   language: "",
   country: "",
   aiPrompt: "",
   delayBetweenEmails: "60",
   maxEmailsPerDay: "50",
+  skipIfReplied: true,
+  steps: [{ ...emptyStep(), delayDays: "0", label: "Initial outreach" }] as FormStep[],
   selectedLeadIds: [] as number[],
   leadFilter: "not_sent" as "not_sent" | "sent" | "all",
 }
@@ -119,15 +137,37 @@ export default function CampaignsTab() {
     } catch {
       /* ignore */
     }
+
+    const seq = parseCampaignSequence(c.followUpSchedule)
+    let steps: FormStep[] =
+      seq.steps.length > 0
+        ? seq.steps.map((s) => ({
+            templateId: String(s.templateId),
+            delayDays: String(s.delayDays ?? 0),
+            sendAt: s.sendAt
+              ? new Date(s.sendAt).toISOString().slice(0, 16)
+              : "",
+            label: s.label || "",
+            scheduleMode: s.sendAt ? "date" : "delay",
+          }))
+        : [
+            {
+              ...emptyStep(),
+              templateId: c.templateId ? String(c.templateId) : "",
+              label: "Initial outreach",
+            },
+          ]
+
     setEditingId(c.id)
     setForm({
       name: c.name || "",
-      templateId: c.templateId ? String(c.templateId) : "",
       language: c.language || "",
       country: c.country || "",
       aiPrompt: c.aiPrompt || "",
       delayBetweenEmails: String(c.delayBetweenEmails ?? 60),
       maxEmailsPerDay: String(c.maxEmailsPerDay ?? 50),
+      skipIfReplied: seq.skipIfReplied !== false,
+      steps,
       selectedLeadIds,
       leadFilter: "not_sent",
     })
@@ -136,12 +176,25 @@ export default function CampaignsTab() {
 
   const payload = () => ({
     name: form.name,
-    templateId: form.templateId || null,
     language: form.language || null,
     country: form.country || null,
     aiPrompt: form.aiPrompt || null,
     delayBetweenEmails: Number(form.delayBetweenEmails),
     maxEmailsPerDay: Number(form.maxEmailsPerDay),
+    skipIfReplied: !!form.skipIfReplied,
+    templateId: form.steps[0]?.templateId ? Number(form.steps[0].templateId) : null,
+    steps: form.steps
+      .filter((s) => s.templateId)
+      .map((s, idx) => ({
+        step: idx + 1,
+        templateId: Number(s.templateId),
+        delayDays: s.scheduleMode === "date" ? 0 : Number(s.delayDays) || 0,
+        sendAt:
+          s.scheduleMode === "date" && s.sendAt
+            ? new Date(s.sendAt).toISOString()
+            : null,
+        label: s.label || `Email ${idx + 1}`,
+      })),
     discoveryMethod: null,
     discoveryConfig: {
       audience: "selected_leads",
@@ -152,8 +205,9 @@ export default function CampaignsTab() {
 
   const save = async () => {
     if (!form.name.trim()) return
-    if (!form.templateId) {
-      setMessage({ type: "error", text: "Pick an email template" })
+    const validSteps = form.steps.filter((s) => s.templateId)
+    if (!validSteps.length) {
+      setMessage({ type: "error", text: "Add at least one segment with an email template" })
       return
     }
     if (!form.selectedLeadIds.length) {
@@ -188,7 +242,7 @@ export default function CampaignsTab() {
         type: "success",
         text:
           status === "RUNNING"
-            ? "Campaign started — emails are sending to your selected leads"
+            ? "Campaign started — segment emails queued on the automation worker"
             : `Campaign ${status.toLowerCase()}`,
       })
       await loadCore()
@@ -325,32 +379,14 @@ export default function CampaignsTab() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
+                <div className="md:col-span-2 space-y-1.5">
                   <label className="text-xs font-medium text-[#5B6478]">Campaign Name</label>
                   <input
                     className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="e.g., First Outreach - Batch 1"
+                    placeholder="e.g., UAE drip — intro + follow-ups"
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[#5B6478]">Email Template</label>
-                  <select
-                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
-                    value={form.templateId}
-                    onChange={(e) => setForm({ ...form, templateId: e.target.value })}
-                  >
-                    <option value="">Select template</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                        {formatAudienceTag({ language: t.language, country: t.country })
-                          ? ` · ${formatAudienceTag({ language: t.language, country: t.country })}`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-[#5B6478]">
@@ -392,40 +428,250 @@ export default function CampaignsTab() {
               </div>
             </div>
 
-            {/* Section 2: Flow Limits & Advanced Prompts */}
+            {/* Section 2: Email segments / sequence */}
             <div className="space-y-4">
-              <div className="flex items-center gap-2 pb-1.5 border-b border-[#EEF0F5]">
-                <CalendarDays className="w-4 h-4 text-[#5B6478]" />
-                <h4 className="text-xs font-semibold text-[#0B1B3B] uppercase tracking-wider">Flow Scheduling</h4>
+              <div className="flex items-center justify-between pb-1.5 border-b border-[#EEF0F5]">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-[#5B6478]" />
+                  <h4 className="text-xs font-semibold text-[#0B1B3B] uppercase tracking-wider">
+                    Email segments &amp; schedule
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  className={`${btnSecondary} text-xs py-1.5`}
+                  onClick={() =>
+                    setForm((prev) => ({
+                      ...prev,
+                      steps: [
+                        ...prev.steps,
+                        {
+                          ...emptyStep(),
+                          delayDays: String(Math.max(1, prev.steps.length)),
+                          label: `Follow-up ${prev.steps.length}`,
+                        },
+                      ],
+                    }))
+                  }
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add segment
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <p className="text-[11px] text-[#8890A0] leading-relaxed">
+                Same leads get each segment in order. Step 1 sends now (with stagger). Later steps use
+                days-after-start or a custom date via the automation worker.
+              </p>
+
+              <div className="space-y-3">
+                {form.steps.map((step, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-[#E3E7F0] bg-[#F8F9FC] p-4 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#0B1B3B] bg-white border border-[#E3E7F0] px-2 py-0.5 rounded-full">
+                        Segment {idx + 1}
+                        {idx === 0 ? " · First email" : " · Follow-up"}
+                      </span>
+                      {form.steps.length > 1 && (
+                        <button
+                          type="button"
+                          className="text-[11px] font-semibold text-[#9A2A1E] hover:underline"
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              steps: prev.steps.filter((_, i) => i !== idx),
+                            }))
+                          }
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="md:col-span-2 space-y-1.5">
+                        <label className="text-xs font-medium text-[#5B6478]">Email template</label>
+                        <select
+                          className={`${inputCls} bg-white`}
+                          value={step.templateId}
+                          onChange={(e) => {
+                            const steps = [...form.steps]
+                            steps[idx] = { ...steps[idx], templateId: e.target.value }
+                            setForm({ ...form, steps })
+                          }}
+                        >
+                          <option value="">Select template</option>
+                          {templates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                              {(t._count?.children > 0 || (t.children || []).length > 0)
+                                ? ` · Pack (${(t._count?.children ?? t.children.length) + 1})`
+                                : ""}
+                              {formatAudienceTag({ language: t.language, country: t.country })
+                                ? ` · ${formatAudienceTag({ language: t.language, country: t.country })}`
+                                : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {idx === 0 &&
+                          step.templateId &&
+                          (() => {
+                            const pack = templates.find((t) => String(t.id) === String(step.templateId))
+                            const childCount = pack?._count?.children ?? pack?.children?.length ?? 0
+                            if (!childCount) return null
+                            return (
+                              <button
+                                type="button"
+                                className={`${btnSecondary} text-[11px] py-1.5 mt-1`}
+                                onClick={async () => {
+                                  try {
+                                    const res = await saPost("/templates", {
+                                      action: "expand_pack",
+                                      id: Number(step.templateId),
+                                    })
+                                    const nextSteps = (res.steps || []).map((s: any) => ({
+                                      templateId: String(s.templateId),
+                                      delayDays: String(s.delayDays ?? 0),
+                                      sendAt: "",
+                                      label: s.label || "",
+                                      scheduleMode: "delay" as const,
+                                    }))
+                                    if (!nextSteps.length) {
+                                      setMessage({ type: "error", text: "Pack has no steps" })
+                                      return
+                                    }
+                                    setForm((prev) => ({ ...prev, steps: nextSteps }))
+                                    setMessage({
+                                      type: "success",
+                                      text: `Applied pack — ${nextSteps.length} segments (day 0 + follow-ups)`,
+                                    })
+                                  } catch (e: any) {
+                                    setMessage({ type: "error", text: e.message })
+                                  }
+                                }}
+                              >
+                                Apply pack schedule ({childCount + 1} emails)
+                              </button>
+                            )
+                          })()}
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-[#5B6478]">Label (optional)</label>
+                        <input
+                          className={`${inputCls} bg-white`}
+                          value={step.label}
+                          onChange={(e) => {
+                            const steps = [...form.steps]
+                            steps[idx] = { ...steps[idx], label: e.target.value }
+                            setForm({ ...form, steps })
+                          }}
+                          placeholder={idx === 0 ? "Initial outreach" : `Follow-up ${idx}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-[#5B6478]">When to send</label>
+                        <select
+                          className={`${inputCls} bg-white`}
+                          value={step.scheduleMode}
+                          onChange={(e) => {
+                            const mode = e.target.value as "delay" | "date"
+                            const steps = [...form.steps]
+                            steps[idx] = {
+                              ...steps[idx],
+                              scheduleMode: mode,
+                              delayDays: mode === "delay" && idx > 0 && !steps[idx].delayDays ? String(idx) : steps[idx].delayDays,
+                            }
+                            setForm({ ...form, steps })
+                          }}
+                          disabled={idx === 0}
+                        >
+                          <option value="delay">{idx === 0 ? "At campaign start" : "Days after start"}</option>
+                          <option value="date">Custom date &amp; time</option>
+                        </select>
+                      </div>
+                      {step.scheduleMode === "delay" ? (
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-medium text-[#5B6478]">
+                            Days after campaign start
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            className={`${inputCls} bg-white max-w-[160px]`}
+                            value={idx === 0 ? "0" : step.delayDays}
+                            disabled={idx === 0}
+                            onChange={(e) => {
+                              const steps = [...form.steps]
+                              steps[idx] = { ...steps[idx], delayDays: e.target.value }
+                              setForm({ ...form, steps })
+                            }}
+                          />
+                          <p className="text-[10px] text-[#8890A0]">
+                            {idx === 0
+                              ? "First email sends when you click Start (staggered per lead)."
+                              : `Sends ${Number(step.delayDays) || 0} day(s) after Start for each selected lead.`}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-medium text-[#5B6478]">Send at</label>
+                          <input
+                            type="datetime-local"
+                            className={`${inputCls} bg-white max-w-xs`}
+                            value={step.sendAt}
+                            onChange={(e) => {
+                              const steps = [...form.steps]
+                              steps[idx] = { ...steps[idx], sendAt: e.target.value }
+                              setForm({ ...form, steps })
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[#5B6478]">Delay between emails (seconds)</label>
+                  <label className="text-xs font-medium text-[#5B6478]">Stagger between leads (seconds)</label>
                   <input
                     type="number"
-                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    className={`${inputCls}`}
                     value={form.delayBetweenEmails}
                     onChange={(e) => setForm({ ...form, delayBetweenEmails: e.target.value })}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[#5B6478]">Max emails this run</label>
+                  <label className="text-xs font-medium text-[#5B6478]">Max leads this run</label>
                   <input
                     type="number"
-                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    className={`${inputCls}`}
                     value={form.maxEmailsPerDay}
                     onChange={(e) => setForm({ ...form, maxEmailsPerDay: e.target.value })}
                   />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#0B1B3B] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="accent-[#0B1B3B] rounded border-gray-300 w-4 h-4"
+                      checked={!!form.skipIfReplied}
+                      onChange={(e) => setForm({ ...form, skipIfReplied: e.target.checked })}
+                    />
+                    Skip later segments if the lead already replied
+                  </label>
+                </div>
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="text-xs font-medium text-[#5B6478]">AI Prompt Enrichment (Optional)</label>
                   <textarea
-                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B] resize-y min-h-[70px]`}
+                    className={`${inputCls} resize-y min-h-[70px]`}
                     rows={2}
                     value={form.aiPrompt}
                     onChange={(e) => setForm({ ...form, aiPrompt: e.target.value })}
-                    placeholder="Provide additional tone directives or variable guidelines for this workflow"
+                    placeholder="Tone directives for this campaign"
                   />
                 </div>
               </div>
@@ -654,6 +900,7 @@ export default function CampaignsTab() {
                 <tr className="text-[#8890A0] text-[10px] font-semibold uppercase tracking-wider bg-[#F6F7FB] border-b border-[#E3E7F0]">
                   <th className="p-4 pl-5">Campaign Name</th>
                   <th className="p-4">Audience</th>
+                  <th className="p-4">Segments</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Associated Template</th>
                   <th className="p-4 text-center">Selected Leads</th>
@@ -677,6 +924,8 @@ export default function CampaignsTab() {
                     /* ignore */
                   }
                   const audience = formatAudienceTag({ language: c.language, country: c.country })
+                  const seq = parseCampaignSequence(c.followUpSchedule)
+                  const stepCount = seq.steps.length || (c.templateId ? 1 : 0)
                   return (
                     <tr key={c.id} className="hover:bg-[#F8F9FC] transition-colors duration-100">
                       <td className="p-4 pl-5 font-semibold text-[#0B1B3B]">{c.name}</td>
@@ -694,6 +943,24 @@ export default function CampaignsTab() {
                               </span>
                             ) : null}
                           </span>
+                        ) : (
+                          <span className="text-[#8890A0]">—</span>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        {stepCount > 0 ? (
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-semibold text-[#0B1B3B]">
+                              {stepCount} step{stepCount === 1 ? "" : "s"}
+                            </span>
+                            {seq.steps.length > 0 && (
+                              <p className="text-[10px] text-[#8890A0] leading-snug max-w-[180px]">
+                                {seq.steps
+                                  .map((s) => `E${s.step} ${formatStepSchedule(s)}`)
+                                  .join(" · ")}
+                              </p>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-[#8890A0]">—</span>
                         )}

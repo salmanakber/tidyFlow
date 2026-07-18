@@ -122,9 +122,18 @@ export async function enqueueSendEmail(sentEmailId: number, delayMs = 0) {
   const queued = await addJob(
     'sa-send-email',
     { sentEmailId },
-    { jobId: `sa-send-email-${sentEmailId}`, delay: delayMs }
+    { jobId: `sa-send-email-${sentEmailId}`, delay: Math.max(0, delayMs) }
   );
-  if (!queued) await deliverSalesEmail(sentEmailId);
+  if (!queued) {
+    // Redis down: never fire multi-minute delays immediately — leave QUEUED for sweeper
+    if (delayMs > 60_000) {
+      console.warn(
+        `[SalesAgent] Redis unavailable — email ${sentEmailId} stays QUEUED for ${Math.round(delayMs / 1000)}s`
+      );
+      return false;
+    }
+    await deliverSalesEmail(sentEmailId);
+  }
   return queued;
 }
 
