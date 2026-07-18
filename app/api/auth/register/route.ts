@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { hashPassword, generateToken, isValidEmail, isValidPassword } from '@/lib/auth';
 import { UserRole } from '@prisma/client';
+import { sendSubscribeWelcomeEmail } from '@/lib/email';
 
 /**
  * POST /api/auth/register
@@ -98,6 +99,14 @@ export async function POST(request: NextRequest) {
       role: user.role,
       companyId: user.companyId || undefined
     });
+
+    const welcomeName =
+      [user.firstName, user.lastName].filter(Boolean).join(' ') || company.name;
+    void sendSubscribeWelcomeEmail({
+      recipientEmail: user.email,
+      recipientName: welcomeName,
+      companyName: company.name,
+    }).catch((err) => console.error('Register welcome email failed:', err));
 
     return NextResponse.json({
       success: true,

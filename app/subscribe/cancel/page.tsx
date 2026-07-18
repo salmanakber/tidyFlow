@@ -2,21 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { SUBSCRIBE_THEME as T } from '@/lib/public-plan-scope';
 
 const APP_DEEP_LINK = 'tidyflow://subscribe/cancel';
 
 export default function SubscribeCancelPage() {
   const [autoOpenFailed, setAutoOpenFailed] = useState(false);
-
-  const colors = {
-    navyDark: '#0B1E36',
-    navyLight: '#5A6E85',
-    amber: '#D97706',
-    amberLight: '#FEF3C7',
-    bg: '#F8FAFC',
-    cardBg: '#FFFFFF',
-    border: '#E2E8F0',
-  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -37,105 +28,71 @@ export default function SubscribeCancelPage() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
-        background: colors.bg,
-        fontFamily: 'system-ui, -apple-system, sans-serif',
+        background: `linear-gradient(180deg, ${T.navyDeep}, ${T.navy} 50%, ${T.canvas})`,
+        fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
       }}
     >
       <div
         style={{
-          maxWidth: 440,
+          maxWidth: 420,
           width: '100%',
-          background: colors.cardBg,
-          borderRadius: 16,
-          padding: '40px 32px',
-          border: `1px solid ${colors.border}`,
-          borderTop: `4px solid ${colors.navyDark}`,
+          background: T.surface,
+          borderRadius: 18,
+          padding: 28,
+          border: `1px solid ${T.border}`,
           textAlign: 'center',
-          boxShadow:
-            '0 10px 25px -5px rgba(11, 30, 54, 0.05), 0 8px 10px -6px rgba(11, 30, 54, 0.05)',
+          boxShadow: '0 20px 40px rgba(6,21,37,0.28)',
         }}
       >
         <div
           style={{
             width: 56,
             height: 56,
-            borderRadius: '50%',
-            background: colors.amberLight,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 20,
+            borderRadius: 999,
+            margin: '0 auto 14px',
+            background: T.amberSoft,
+            color: T.amberDeep,
+            display: 'grid',
+            placeItems: 'center',
+            fontSize: 22,
+            fontWeight: 800,
           }}
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={colors.amber}
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          ×
         </div>
-
-        <h1
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            margin: '0 0 12px',
-            color: colors.navyDark,
-            letterSpacing: '-0.02em',
-          }}
-        >
-          Checkout canceled
-        </h1>
-
-        <p
-          style={{
-            fontSize: 15,
-            lineHeight: 1.6,
-            color: colors.navyLight,
-            margin: '0 0 28px',
-          }}
-        >
+        <h1 style={{ margin: '0 0 8px', color: T.navy, fontSize: 24 }}>Checkout canceled</h1>
+        <p style={{ margin: '0 0 20px', color: T.inkMid, fontSize: 14, lineHeight: 1.5 }}>
           {autoOpenFailed
-            ? 'No payment was taken. Tap below to return to the TidyFlow app and try again when you are ready.'
+            ? 'No payment was taken. You can return to your plan and try again anytime.'
             : 'Returning to the TidyFlow app…'}
         </p>
-
         <a
           href={APP_DEEP_LINK}
           style={{
             display: 'block',
-            background: colors.navyDark,
-            color: '#ffffff',
+            background: `linear-gradient(90deg, ${T.amber}, ${T.amberDeep})`,
+            color: T.navyDeep,
             textDecoration: 'none',
-            padding: '14px 24px',
-            borderRadius: 8,
-            fontWeight: 600,
-            fontSize: 15,
-            marginBottom: 12,
+            borderRadius: 12,
+            padding: '13px 16px',
+            fontWeight: 800,
+            marginBottom: 10,
           }}
         >
-          Open TidyFlow App
+          Open TidyFlow app
         </a>
-
         <Link
-          href="/login"
+          href="/subscribe"
           style={{
             display: 'block',
-            color: colors.navyLight,
+            color: T.navy,
             textDecoration: 'none',
-            padding: '10px 24px',
-            fontWeight: 600,
-            fontSize: 14,
+            fontWeight: 700,
+            fontSize: 13,
+            padding: '8px 0',
           }}
         >
-          Back to web login
+          Back to plans
         </Link>
       </div>
     </main>

@@ -575,3 +575,84 @@ export async function sendUserAccountUpdatedEmail(
     html,
   });
 }
+
+/** Welcome email after public web subscribe signup (does not include password). */
+export async function sendSubscribeWelcomeEmail(input: {
+  recipientEmail: string;
+  recipientName: string;
+  companyName: string;
+  planLabel?: string;
+}): Promise<boolean> {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.tidyflowapp.com';
+  const iosUrl =
+    process.env.NEXT_PUBLIC_IOS_APP_STORE_URL?.trim() ||
+    'https://apps.apple.com/search?term=TidyFlow';
+  const androidUrl =
+    process.env.NEXT_PUBLIC_ANDROID_PLAY_STORE_URL?.trim() ||
+    'https://play.google.com/store/apps/details?id=com.tidyflow.mobile';
+  const name = input.recipientName || 'there';
+  const intro = input.planLabel
+    ? `Thanks for choosing the <strong>${input.planLabel}</strong> plan. Here's what to do next:`
+    : `Thanks for joining TidyFlow. Here's what to do next:`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to TidyFlow</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F7F4EE; margin: 0; padding: 0;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 24px auto; background:#ffffff; border-radius: 14px; overflow:hidden; border:1px solid #E6E0D6;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #061525, #0B1E36); padding: 32px 24px; text-align:center;">
+              <span style="color:#F59E0B; font-size:11px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase; display:block; margin-bottom:8px;">WELCOME</span>
+              <h1 style="color:#ffffff; font-size:24px; font-weight:800; margin:0; letter-spacing:-0.4px;">You're in, ${name}</h1>
+              <p style="color:rgba(255,255,255,0.72); font-size:14px; margin:10px 0 0; line-height:1.5;">Your TidyFlow account for <strong style="color:#F59E0B;">${input.companyName}</strong> is ready.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 24px;">
+              <p style="margin:0 0 14px; font-size:15px; color:#0B1E36; line-height:1.5;">${intro}</p>
+              <ol style="margin:0 0 22px; padding-left:18px; color:#4A5D73; font-size:14px; line-height:1.7;">
+                <li>Complete checkout if you haven't already</li>
+                <li>Download the TidyFlow app</li>
+                <li>Sign in with <strong style="color:#0B1E36; font-family:monospace;">${input.recipientEmail}</strong> and the password you created</li>
+              </ol>
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:18px;">
+                <tr>
+                  <td align="center" style="padding-bottom:10px;">
+                    <a href="${iosUrl}" style="display:inline-block; padding:12px 22px; background:#F59E0B; color:#061525; text-decoration:none; border-radius:10px; font-weight:800; font-size:14px;">Download on the App Store</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding-bottom:10px;">
+                    <a href="${androidUrl}" style="display:inline-block; padding:12px 22px; background:#0B1E36; color:#ffffff; text-decoration:none; border-radius:10px; font-weight:800; font-size:14px;">Get it on Google Play</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <a href="${appUrl}/login" style="display:inline-block; padding:10px 18px; color:#0B1E36; text-decoration:none; font-weight:700; font-size:13px;">Or sign in on the web →</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0; font-size:12px; color:#8A9BB0; line-height:1.5;">For your security, we never send your password by email. If you didn't create this account, contact support right away.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#F7F4EE; padding:18px 24px; text-align:center; border-top:1px solid #E6E0D6;">
+              <p style="margin:0; font-size:11px; color:#8A9BB0;">© ${new Date().getFullYear()} TidyFlow. All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  return sendEmail({
+    to: input.recipientEmail,
+    subject: `Welcome to TidyFlow — ${input.companyName}`,
+    html,
+  });
+}

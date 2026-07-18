@@ -15,6 +15,7 @@ const API_PUBLIC_PAGE_PREFIXES = [
   '/account-deletion',
   '/privacy',
   '/terms',
+  '/subscribe',
 ];
 
 function isStaticAsset(pathname: string): boolean {
