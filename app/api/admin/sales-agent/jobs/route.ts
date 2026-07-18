@@ -40,15 +40,21 @@ export async function GET(request: NextRequest) {
 
   try {
     const [waiting, active, delayed, completed, failed] = await Promise.all([
-      automationQueue.getJobs(['waiting'], 0, 40),
-      automationQueue.getJobs(['active'], 0, 20),
-      automationQueue.getJobs(['delayed'], 0, 40),
-      automationQueue.getJobs(['completed'], 0, 20),
-      automationQueue.getJobs(['failed'], 0, 20),
+      automationQueue.getJobs(['waiting'], 0, 200),
+      automationQueue.getJobs(['active'], 0, 50),
+      automationQueue.getJobs(['delayed'], 0, 80),
+      automationQueue.getJobs(['completed'], 0, 30),
+      automationQueue.getJobs(['failed'], 0, 30),
     ]);
 
     const filter = (jobs: any[]) =>
       jobs.filter((j) => isSalesAgentJob(j.name)).map(serializeJob);
+
+    const saWaiting = filter(waiting);
+    const saActive = filter(active);
+    const saDelayed = filter(delayed);
+    const saCompleted = filter(completed);
+    const saFailed = filter(failed);
 
     const recentLogs = await (prisma as any).saSystemLog.findMany({
       where: {
@@ -57,30 +63,41 @@ export async function GET(request: NextRequest) {
           { category: 'google_places' },
           { category: 'search' },
           { category: 'campaign' },
+          { category: 'ai' },
           { action: { contains: 'discover' } },
+          { action: { contains: 'analyze' } },
         ],
       },
       orderBy: { createdAt: 'desc' },
       take: 30,
     });
 
+    const byPrefix = (jobs: any[], prefix: string) =>
+      jobs.filter((j) => String(j.name || '').startsWith(prefix)).length;
+
     const counts = {
-      waiting: filter(waiting).length,
-      active: filter(active).length,
-      delayed: filter(delayed).length,
-      completed: filter(completed).length,
-      failed: filter(failed).length,
+      waiting: saWaiting.length,
+      active: saActive.length,
+      delayed: saDelayed.length,
+      completed: saCompleted.length,
+      failed: saFailed.length,
+      // Immediate work only — delayed emails / cron must NOT block UI "done"
+      immediate: saWaiting.length + saActive.length,
+      discoverWaiting: byPrefix(saWaiting, 'sa-discover'),
+      discoverActive: byPrefix(saActive, 'sa-discover'),
+      analyzeWaiting: byPrefix(saWaiting, 'sa-analyze'),
+      analyzeActive: byPrefix(saActive, 'sa-analyze'),
     };
 
     return jsonOk({
       redis: true,
       queue: 'tidyflow-automation',
       counts,
-      waiting: filter(waiting),
-      active: filter(active),
-      delayed: filter(delayed),
-      completed: filter(completed),
-      failed: filter(failed),
+      waiting: saWaiting,
+      active: saActive,
+      delayed: saDelayed,
+      completed: saCompleted,
+      failed: saFailed,
       recentLogs,
       howItWorks: {
         discovery:
@@ -93,7 +110,18 @@ export async function GET(request: NextRequest) {
     return jsonOk({
       redis: false,
       error: err.message || 'Background jobs unavailable',
-      counts: { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0 },
+      counts: {
+        waiting: 0,
+        active: 0,
+        delayed: 0,
+        completed: 0,
+        failed: 0,
+        immediate: 0,
+        discoverWaiting: 0,
+        discoverActive: 0,
+        analyzeWaiting: 0,
+        analyzeActive: 0,
+      },
       waiting: [],
       active: [],
       delayed: [],

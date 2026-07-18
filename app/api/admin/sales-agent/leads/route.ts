@@ -85,14 +85,62 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   if (body.action === 'bulk_analyze' && Array.isArray(body.ids)) {
-    await enqueueBulkAnalyze(body.ids.map(Number));
+    const ids = body.ids.map(Number).filter(Boolean);
+    const result = await enqueueBulkAnalyze(ids);
     await saLog({
       category: 'user',
       action: 'bulk_analyze',
-      message: `Queued analyze for ${body.ids.length} leads`,
+      message: `Queued analyze for ${ids.length} leads (queued=${result.queued}, inline=${result.ranInline})`,
       userId: gate.userId,
+      details: result,
     });
-    return jsonOk({ queued: body.ids.length });
+    return jsonOk({ ...result, total: ids.length, ids });
+  }
+
+  /** Progress for a batch of analyze jobs (deleted = processed / no email) */
+  if (body.action === 'analyze_status' && Array.isArray(body.ids)) {
+    const ids = Array.from(new Set(body.ids.map(Number).filter(Boolean)));
+    if (!ids.length) {
+      return jsonOk({ total: 0, done: 0, remaining: 0, deleted: 0, analyzed: 0, pending: [] });
+    }
+    const leads = await (prisma as any).saLeadCompany.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        lastAnalyzedAt: true,
+        crawlStatus: true,
+        hasEmail: true,
+      },
+    });
+    const found = new Set(leads.map((l: any) => l.id as number));
+    const deleted = ids.filter((id) => !found.has(id)).length;
+    const analyzed = leads.filter(
+      (l: any) =>
+        l.lastAnalyzedAt ||
+        l.status === 'ANALYZED' ||
+        l.crawlStatus === 'skipped_no_website' ||
+        l.crawlStatus === 'failed'
+    ).length;
+    const done = deleted + analyzed;
+    const pending = leads
+      .filter(
+        (l: any) =>
+          !l.lastAnalyzedAt &&
+          l.status !== 'ANALYZED' &&
+          l.crawlStatus !== 'skipped_no_website' &&
+          l.crawlStatus !== 'failed'
+      )
+      .map((l: any) => l.id);
+    return jsonOk({
+      total: ids.length,
+      done,
+      remaining: Math.max(0, ids.length - done),
+      deleted,
+      analyzed,
+      pending,
+      pct: ids.length ? Math.round((done / ids.length) * 100) : 100,
+    });
   }
 
   if (body.action === 'bulk_delete' && Array.isArray(body.ids)) {

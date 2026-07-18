@@ -266,7 +266,8 @@ export function initializeAutomationWorker() {
 
   automationWorkerInstance = new Worker('tidyflow-automation', processAutomationJob, {
     connection: getRedisConnectionOptions(),
-    concurrency: 3,
+    // Sales-agent analyze/discover share this worker with billing jobs
+    concurrency: 5,
   });
 
   automationWorkerInstance.on('completed', (job) => {

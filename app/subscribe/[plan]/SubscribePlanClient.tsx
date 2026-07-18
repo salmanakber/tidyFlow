@@ -615,10 +615,6 @@ export default function PublicSubscribePlanPage() {
           <Link href="/subscribe" style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
             ← All plans
           </Link>
-          {'  ·  '}
-          <Link href="/login" style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
-            Sign in
-          </Link>
         </p>
       </div>
     </main>

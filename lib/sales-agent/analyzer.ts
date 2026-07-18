@@ -38,7 +38,30 @@ Lower scores: already using competitor software, not a cleaning business, person
 export async function analyzeLeadCompany(companyId: number): Promise<any> {
   const company = await (prisma as any).saLeadCompany.findUnique({ where: { id: companyId } });
   if (!company) throw new Error('Lead company not found');
-  if (!company.website) throw new Error('Lead has no website to analyze');
+  if (!company.website) {
+    await (prisma as any).saLeadCompany.update({
+      where: { id: companyId },
+      data: {
+        crawlStatus: 'skipped_no_website',
+        crawlError: 'No website on listing',
+        lastCrawledAt: new Date(),
+      },
+    });
+    await saLog({
+      level: 'info',
+      category: 'ai',
+      action: 'analyze_skipped_no_website',
+      message: `Skipped ${company.name} — no website`,
+      entityType: 'SaLeadCompany',
+      entityId: companyId,
+    });
+    return { companyId, skipped: true, reason: 'no_website' };
+  }
+
+  await (prisma as any).saLeadCompany.update({
+    where: { id: companyId },
+    data: { crawlStatus: 'analyzing' },
+  }).catch(() => {});
 
   const crawl = await crawlWebsite(company.website);
   const primaryEmail = crawl.emails[0] || company.email || null;

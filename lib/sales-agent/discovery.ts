@@ -43,6 +43,88 @@ export interface PlacesSearchInput {
   userId?: number;
   maxResults?: number;
   discoveryGroupId?: number;
+  /** Extra Google Business filters (Places API + post-filter) */
+  filters?: PlacesDiscoveryFilters;
+}
+
+/**
+ * Google does not expose company registration date for most listings.
+ * We approximate "new vs established" with review volume + future-opening flag.
+ * @see https://developers.google.com/maps/documentation/places/web-service/text-search
+ */
+export interface PlacesDiscoveryFilters {
+  /** any | likely_new (few reviews) | established (many reviews) | opening_soon */
+  maturity?: 'any' | 'likely_new' | 'established' | 'opening_soon';
+  maxReviewCount?: number;
+  minReviewCount?: number;
+  minRating?: number;
+  /** any | with_website | without_website */
+  website?: 'any' | 'with_website' | 'without_website';
+  /** Include mobile / service-area businesses (common for cleaning) */
+  includePureServiceArea?: boolean;
+  openNow?: boolean;
+}
+
+function resolveMaturityBounds(filters?: PlacesDiscoveryFilters): {
+  minReviewCount?: number;
+  maxReviewCount?: number;
+  openingSoonOnly?: boolean;
+  includeFutureOpening?: boolean;
+} {
+  if (!filters) return {};
+  const maturity = filters.maturity || 'any';
+  if (maturity === 'likely_new') {
+    return {
+      maxReviewCount: filters.maxReviewCount ?? 15,
+      minReviewCount: filters.minReviewCount,
+      includeFutureOpening: false,
+    };
+  }
+  if (maturity === 'established') {
+    return {
+      minReviewCount: filters.minReviewCount ?? 50,
+      maxReviewCount: filters.maxReviewCount,
+      includeFutureOpening: false,
+    };
+  }
+  if (maturity === 'opening_soon') {
+    return {
+      openingSoonOnly: true,
+      includeFutureOpening: true,
+    };
+  }
+  return {
+    minReviewCount: filters.minReviewCount,
+    maxReviewCount: filters.maxReviewCount,
+    includeFutureOpening: false,
+  };
+}
+
+function placePassesFilters(
+  place: any,
+  filters?: PlacesDiscoveryFilters
+): boolean {
+  if (!filters) return true;
+  const bounds = resolveMaturityBounds(filters);
+  const reviews = place.userRatingCount ?? 0;
+  const rating = place.rating ?? 0;
+  const hasWebsite = !!place.websiteUri;
+  const status = String(place.businessStatus || '');
+
+  if (bounds.openingSoonOnly) {
+    if (status !== 'FUTURE_OPENING') return false;
+  } else if (status === 'CLOSED_PERMANENTLY') {
+    return false;
+  }
+
+  if (bounds.maxReviewCount != null && reviews > bounds.maxReviewCount) return false;
+  if (bounds.minReviewCount != null && reviews < bounds.minReviewCount) return false;
+  if (filters.minRating != null && rating < filters.minRating) return false;
+
+  if (filters.website === 'with_website' && !hasWebsite) return false;
+  if (filters.website === 'without_website' && hasWebsite) return false;
+
+  return true;
 }
 
 function buildQuery(input: PlacesSearchInput) {
@@ -53,11 +135,12 @@ function buildQuery(input: PlacesSearchInput) {
   return parts.filter(Boolean).join(' ');
 }
 
-/** Google Places Text Search (New) API */
+/** Google Places Text Search (New) — scrapes Google Business listings */
 export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise<{
   created: number;
   skipped: number;
   leads: any[];
+  filteredOut?: number;
 }> {
   const config = await getDiscoveryConfig();
   if (!config.googlePlacesApiKey) {
@@ -66,14 +149,36 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
 
   const query = buildQuery(input);
   const started = Date.now();
+  const filters = input.filters || {};
+  const bounds = resolveMaturityBounds(filters);
 
   await saLog({
     category: 'google_places',
     action: 'search_start',
-    message: `Searching Places: ${query}`,
-    details: input,
+    message: `Searching Google Business (Places): ${query}`,
+    details: { ...input, filters },
     userId: input.userId,
   });
+
+  const requestBody: Record<string, unknown> = {
+    textQuery: query,
+    // Fetch full page then post-filter (Places has no review-count filter)
+    maxResultCount: Math.min(Math.max(input.maxResults || config.maxResults, 20), 20),
+  };
+
+  if (filters.minRating != null && filters.minRating > 0) {
+    requestBody.minRating = Math.min(5, Math.max(0, Number(filters.minRating)));
+  }
+  if (filters.openNow) {
+    requestBody.openNow = true;
+  }
+  if (filters.includePureServiceArea !== false) {
+    // Cleaning companies are often service-area / mobile
+    requestBody.includePureServiceAreaBusinesses = true;
+  }
+  if (bounds.includeFutureOpening) {
+    requestBody.includeFutureOpeningBusinesses = true;
+  }
 
   const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
@@ -81,12 +186,9 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': config.googlePlacesApiKey,
       'X-Goog-FieldMask':
-        'places.id,places.displayName,places.formattedAddress,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.businessStatus,places.addressComponents',
+        'places.id,places.displayName,places.formattedAddress,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.businessStatus,places.addressComponents,places.openingDate,places.types,places.googleMapsUri',
     },
-    body: JSON.stringify({
-      textQuery: query,
-      maxResultCount: Math.min(input.maxResults || config.maxResults, 20),
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -107,9 +209,17 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   const places = data.places || [];
   let created = 0;
   let skipped = 0;
+  let filteredOut = 0;
   const leads: any[] = [];
+  const targetCount = Math.min(input.maxResults || config.maxResults, 20);
 
   for (const place of places) {
+    if (!placePassesFilters(place, filters)) {
+      filteredOut++;
+      continue;
+    }
+    if (created >= targetCount) break;
+
     const name = place.displayName?.text || 'Unknown';
     const website = place.websiteUri || null;
     const websiteNormalized = normalizeWebsite(website);
@@ -137,9 +247,12 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
 
     if (existing) {
       skipped++;
-      // Skip companies already in the system — do not attach them to this search
       continue;
     }
+
+    const openingHint = place.openingDate
+      ? ` opening=${place.openingDate.year || ''}-${place.openingDate.month || ''}-${place.openingDate.day || ''}`
+      : '';
 
     const lead = await (prisma as any).saLeadCompany.create({
       data: {
@@ -158,7 +271,7 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
         category: input.category || 'cleaning',
         industry: 'cleaning',
         source: 'GOOGLE_PLACES',
-        discoveryKeyword: query,
+        discoveryKeyword: `${query}${openingHint}${filters.maturity ? ` [${filters.maturity}]` : ''}`,
         campaignId: input.campaignId || null,
         hasWebsite: !!website,
         hasPhone: !!phone,
@@ -180,15 +293,15 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   await saLog({
     category: 'google_places',
     action: 'search_complete',
-    message: `Found ${places.length}, created ${created}, skipped ${skipped}`,
-    details: { query, created, skipped, discoveryGroupId: input.discoveryGroupId },
+    message: `Found ${places.length}, created ${created}, skipped ${skipped}, filtered ${filteredOut}`,
+    details: { query, created, skipped, filteredOut, filters, discoveryGroupId: input.discoveryGroupId },
     durationMs: Date.now() - started,
     userId: input.userId,
   });
 
   await recordDiscoveryChunkResult(input.discoveryGroupId, { created, skipped, leads });
 
-  return { created, skipped, leads };
+  return { created, skipped, leads, filteredOut };
 }
 
 /** Fallback: search-engine style discovery via DuckDuckGo HTML (no API key). */
@@ -330,6 +443,7 @@ export async function discoverMultiLocation(input: {
   campaignId?: number;
   userId?: number;
   discoveryGroupId?: number;
+  filters?: PlacesDiscoveryFilters;
 }): Promise<{ created: number; skipped: number; runs: number; details: any[]; discoveryGroupId?: number }> {
   const method = input.method || 'google_places';
   const keywords = (input.keywords || []).map((k) => k.trim()).filter(Boolean);
@@ -386,13 +500,13 @@ export async function discoverMultiLocation(input: {
                   campaignId: input.campaignId,
                   userId: input.userId,
                   discoveryGroupId: groupId,
+                  filters: input.filters,
                 });
           created += result.created;
           skipped += result.skipped;
           details.push({ keyword, country, city, ...result, leads: undefined });
         } catch (err: any) {
           details.push({ keyword, country, city, error: err.message });
-          // Still count the chunk so group can complete
           await recordDiscoveryChunkResult(groupId, { created: 0, skipped: 0, leads: [] });
           await saLog({
             level: 'warn',

@@ -75,6 +75,7 @@ export async function enqueueMultiDiscovery(payload: Record<string, unknown>) {
           campaignId: payload.campaignId,
           userId: payload.userId,
           discoveryGroupId: group.id,
+          filters: payload.filters,
         };
         const jobName = method === 'search_engine' ? 'sa-discover-search' : 'sa-discover-places';
         const queued = await addJob(jobName, chunk as any, {
@@ -106,16 +107,61 @@ export async function enqueueAnalyzeLead(companyId: number) {
   const queued = await addJob(
     'sa-analyze-lead',
     { companyId },
-    { jobId: `sa-analyze-lead-${companyId}-${Date.now()}` }
+    {
+      jobId: `sa-analyze-lead-${companyId}-${Date.now()}`,
+      // Prefer analyze throughput when mixed with other automation jobs
+      priority: 2,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 3000 },
+    }
   );
   if (!queued) await analyzeLeadCompany(companyId);
   return queued;
 }
 
+/** Queue all analyze jobs; if Redis is down, run a small concurrent inline batch (avoid HTTP timeout). */
 export async function enqueueBulkAnalyze(companyIds: number[]) {
-  for (const id of companyIds) {
-    await enqueueAnalyzeLead(id);
+  const ids = Array.from(new Set(companyIds.map(Number).filter(Boolean)));
+  let queued = 0;
+  const inlineIds: number[] = [];
+
+  for (const id of ids) {
+    const ok = await addJob(
+      'sa-analyze-lead',
+      { companyId: id },
+      {
+        jobId: `sa-analyze-lead-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        priority: 2,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 3000 },
+      }
+    );
+    if (ok) queued++;
+    else inlineIds.push(id);
   }
+
+  let ranInline = 0;
+  let inlineErrors = 0;
+  // Cap inline work so the API responds; remaining stay for a later retry
+  const INLINE_LIMIT = 8;
+  const INLINE_CONCURRENCY = 2;
+  const toRun = inlineIds.slice(0, INLINE_LIMIT);
+  for (let i = 0; i < toRun.length; i += INLINE_CONCURRENCY) {
+    const slice = toRun.slice(i, i + INLINE_CONCURRENCY);
+    const results = await Promise.allSettled(slice.map((id) => analyzeLeadCompany(id)));
+    for (const r of results) {
+      if (r.status === 'fulfilled') ranInline++;
+      else inlineErrors++;
+    }
+  }
+
+  return {
+    queued,
+    ranInline,
+    inlineErrors,
+    deferredInline: Math.max(0, inlineIds.length - toRun.length),
+    total: ids.length,
+  };
 }
 
 export async function enqueueSendEmail(sentEmailId: number, delayMs = 0) {
@@ -218,8 +264,34 @@ export async function processSalesAgentAutomationJob(job: { name: string; data: 
     }
     case 'sa-discover-multi':
       return discoverMultiLocation(job.data);
-    case 'sa-analyze-lead':
-      return analyzeLeadCompany(job.data.companyId);
+    case 'sa-analyze-lead': {
+      try {
+        return await analyzeLeadCompany(job.data.companyId);
+      } catch (err: any) {
+        try {
+          await (prisma as any).saLeadCompany.update({
+            where: { id: job.data.companyId },
+            data: {
+              crawlStatus: 'failed',
+              crawlError: String(err?.message || 'Analyze failed').slice(0, 500),
+              lastCrawledAt: new Date(),
+            },
+          });
+        } catch {
+          /* lead may have been deleted */
+        }
+        await saLog({
+          level: 'warn',
+          category: 'ai',
+          action: 'analyze_job_soft_fail',
+          message: err?.message || 'Analyze failed',
+          entityType: 'SaLeadCompany',
+          entityId: job.data.companyId,
+          success: false,
+        });
+        return { companyId: job.data.companyId, skipped: true, error: err?.message };
+      }
+    }
     case 'sa-send-email':
       return deliverSalesEmail(job.data.sentEmailId);
     case 'sa-retry-email':

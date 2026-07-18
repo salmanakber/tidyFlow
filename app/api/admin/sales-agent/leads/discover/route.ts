@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     maxResults?: number;
     campaignId?: number;
     userId: number;
+    filters?: Record<string, unknown>;
   } = {
     method,
     keywords,
@@ -64,6 +65,19 @@ export async function POST(request: NextRequest) {
     campaignId: body.campaignId ? Number(body.campaignId) : undefined,
     userId: gate.userId,
   };
+
+  if (method === 'google_places' && body.filters && typeof body.filters === 'object') {
+    const f = body.filters;
+    payload.filters = {
+      maturity: f.maturity || 'any',
+      maxReviewCount: f.maxReviewCount != null ? Number(f.maxReviewCount) : undefined,
+      minReviewCount: f.minReviewCount != null ? Number(f.minReviewCount) : undefined,
+      minRating: f.minRating != null ? Number(f.minRating) : undefined,
+      website: f.website || 'any',
+      includePureServiceArea: f.includePureServiceArea !== false,
+      openNow: !!f.openNow,
+    };
+  }
 
   await saLog({
     category: 'user',

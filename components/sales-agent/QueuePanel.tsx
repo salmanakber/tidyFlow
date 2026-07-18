@@ -41,8 +41,9 @@ export default function QueuePanel({
       setData(next)
       onUpdateRef.current?.(next)
 
-      const c = next?.counts || {}
-      const busy = (c.active || 0) + (c.waiting || 0) + (c.delayed || 0)
+  const c = next?.counts || {}
+      // Delayed jobs (campaign emails, reply sync) must not keep the UI "busy" forever
+      const busy = (c.active || 0) + (c.waiting || 0)
       if (busy > 0) {
         wasBusy.current = true
         setShowProgress(true)
@@ -68,11 +69,14 @@ export default function QueuePanel({
   if (loading && !data) return <LoadingBlock />
 
   const c = data?.counts || {}
-  const busy = (c.active || 0) + (c.waiting || 0) + (c.delayed || 0)
+  const busy = (c.active || 0) + (c.waiting || 0)
+  const delayed = c.delayed || 0
   const done = c.completed || 0
   const failed = c.failed || 0
   const totalTracked = busy + done + failed
   const pct = totalTracked > 0 ? Math.round(((done + failed) / totalTracked) * 100) : busy > 0 ? 5 : 100
+  const analyzeBusy = (c.analyzeActive || 0) + (c.analyzeWaiting || 0)
+  const discoverBusy = (c.discoverActive || 0) + (c.discoverWaiting || 0)
 
   const rows = [
     ...(data?.active || []).map((j: any) => ({ ...j, state: "active" })),
@@ -133,9 +137,13 @@ export default function QueuePanel({
       </div>
 
       {showProgress && (
-        <div className="py-1">
+        <div className="py-1 space-y-1">
           <ProgressBar
-            label={busy > 0 ? "Working on background queues..." : "Queue idle"}
+            label={
+              busy > 0
+                ? `Working now — ${busy} job(s)${discoverBusy ? ` · ${discoverBusy} find` : ""}${analyzeBusy ? ` · ${analyzeBusy} analyze` : ""}${delayed ? ` · ${delayed} delayed later` : ""}`
+                : "Queue idle (no active/waiting jobs)"
+            }
             pct={busy > 0 ? Math.max(pct, 8) : 100}
             tone={busy > 0 ? "navy" : "green"}
           />

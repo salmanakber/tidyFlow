@@ -103,12 +103,19 @@ function TagInput({
 
 const PAGE_SIZE_OPTIONS = [5, 15,  25, 100, 250] as const
 
+type BusinessMaturity = "any" | "likely_new" | "established" | "opening_soon"
+type WebsiteFilter = "any" | "with_website" | "without_website"
+
 export default function LeadDiscoveryTab() {
   const [method, setMethod] = useState<"google_places" | "search_engine">("google_places")
   const [countries, setCountries] = useState<string[]>([])
   const [cities, setCities] = useState<string[]>([])
   const [keywords, setKeywords] = useState<string[]>(["Cleaning Company", "Commercial Cleaning"])
   const [maxResults, setMaxResults] = useState("15")
+  const [maturity, setMaturity] = useState<BusinessMaturity>("any")
+  const [websiteFilter, setWebsiteFilter] = useState<WebsiteFilter>("any")
+  const [minRating, setMinRating] = useState("")
+  const [includeServiceArea, setIncludeServiceArea] = useState(true)
   const [discovering, setDiscovering] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
@@ -132,6 +139,15 @@ export default function LeadDiscoveryTab() {
   const [ungroupedOnly, setUngroupedOnly] = useState(false)
   const [repliedOnly, setRepliedOnly] = useState(false)
   const [activeGroupProgress, setActiveGroupProgress] = useState<any | null>(null)
+  const [trackingGroupId, setTrackingGroupId] = useState<number | null>(null)
+  const [analyzeBatchIds, setAnalyzeBatchIds] = useState<number[]>([])
+  const [analyzeProgress, setAnalyzeProgress] = useState<{
+    total: number
+    done: number
+    remaining: number
+    deleted: number
+    pct: number
+  } | null>(null)
   const [newGroupName, setNewGroupName] = useState("")
   const [assignGroupId, setAssignGroupId] = useState("")
   const [showAssignPanel, setShowAssignPanel] = useState(false)
@@ -238,12 +254,133 @@ export default function LeadDiscoveryTab() {
     await Promise.all([loadLeads({ silent: true }), loadGroups()])
   }, [loadLeads, loadGroups])
 
+  const finishDiscovery = useCallback(
+    async (note?: string) => {
+      setDiscovering(false)
+      setTrackingGroupId(null)
+      setMessage({ type: "success", text: note || "Find leads finished — list updated." })
+      await refreshAll()
+    },
+    [refreshAll]
+  )
+
+  const finishAnalyze = useCallback(
+    async (note?: string) => {
+      setAnalyzing(false)
+      setAnalyzeBatchIds([])
+      setAnalyzeProgress(null)
+      setMessage({ type: "success", text: note || "Analyze finished — list updated." })
+      await refreshAll()
+    },
+    [refreshAll]
+  )
+
   const handleQueueIdle = useCallback(() => {
-    setMessage({ type: "success", text: "Finished — leads and groups updated." })
-    setDiscovering(false)
-    setAnalyzing(false)
-    refreshAll()
-  }, [refreshAll])
+    // Soft signal only — discovery/analyze completion is driven by group + analyze_status polls
+    if (!discovering && !analyzing) {
+      refreshAll()
+    }
+  }, [refreshAll, discovering, analyzing])
+
+  // Live refresh while find/analyze runs (do not wait for queue "idle" — delayed emails keep Redis busy forever)
+  useEffect(() => {
+    if (!discovering && !analyzing) return
+
+    let cancelled = false
+    let analyzeIdleStreak = 0
+    let discoverIdleStreak = 0
+
+    const tick = async () => {
+      if (cancelled) return
+      try {
+        await Promise.all([loadLeads({ silent: true }), loadGroups()])
+
+        if (discovering && trackingGroupId) {
+          const data = await saGet("/groups").catch(() => null)
+          const list = Array.isArray(data) ? data : []
+          const g = list.find((x: any) => x.id === trackingGroupId) || null
+          if (g) {
+            setActiveGroupProgress(g)
+            if (g.status === "COMPLETED" || (g.totalChunks > 0 && g.completedChunks >= g.totalChunks)) {
+              await finishDiscovery(
+                `Find leads done — ${g.createdCount ?? 0} new, ${g.skippedCount ?? 0} duplicates (${g.completedChunks}/${g.totalChunks} searches).`
+              )
+              return
+            }
+          }
+          const queue = await saGet("/jobs").catch(() => null)
+          const c = queue?.counts || {}
+          const discoverBusy = (c.discoverActive || 0) + (c.discoverWaiting || 0)
+          if (discoverBusy === 0) {
+            discoverIdleStreak++
+            // Worker finished but group counter lagged — stop spinner after ~10s idle
+            if (discoverIdleStreak >= 4) {
+              await finishDiscovery(
+                g
+                  ? `Find leads updated — ${g.createdCount ?? 0} new so far (${g.completedChunks ?? 0}/${g.totalChunks || "?"} searches).`
+                  : "Find leads updated — refresh if anything is still missing."
+              )
+              return
+            }
+          } else {
+            discoverIdleStreak = 0
+          }
+        }
+
+        if (analyzing && analyzeBatchIds.length) {
+          const status = await saPost("/leads", {
+            action: "analyze_status",
+            ids: analyzeBatchIds,
+          })
+          if (cancelled) return
+          setAnalyzeProgress({
+            total: status.total,
+            done: status.done,
+            remaining: status.remaining,
+            deleted: status.deleted || 0,
+            pct: status.pct ?? 0,
+          })
+          const queue = await saGet("/jobs").catch(() => null)
+          const c = queue?.counts || {}
+          const analyzeBusy = (c.analyzeActive || 0) + (c.analyzeWaiting || 0)
+          if (status.remaining === 0) {
+            const removed = status.deleted ? ` · ${status.deleted} removed (no email)` : ""
+            await finishAnalyze(`Analyze done — ${status.done}/${status.total} processed${removed}.`)
+            return
+          }
+          if (analyzeBusy === 0) {
+            analyzeIdleStreak++
+            // No analyze jobs left but some leads unfinished — stop stuck spinner
+            if (analyzeIdleStreak >= 3) {
+              await finishAnalyze(
+                `Analyze stopped at ${status.done}/${status.total} (queue empty). Re-select remaining and Analyze again if needed.`
+              )
+            }
+          } else {
+            analyzeIdleStreak = 0
+          }
+        }
+      } catch {
+        /* keep polling */
+      }
+    }
+
+    tick()
+    const t = setInterval(tick, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [
+    discovering,
+    analyzing,
+    trackingGroupId,
+    analyzeBatchIds,
+    loadLeads,
+    loadGroups,
+    finishDiscovery,
+    finishAnalyze,
+  ])
 
   const askAI = async () => {
     if (!countries.length) {
@@ -293,6 +430,15 @@ export default function LeadDiscoveryTab() {
     setDiscovering(true)
     setMessage(null)
     try {
+      const filters =
+        method === "google_places"
+          ? {
+              maturity,
+              website: websiteFilter,
+              minRating: minRating ? Number(minRating) : undefined,
+              includePureServiceArea: includeServiceArea,
+            }
+          : undefined
       const data = await saPost(
         "/leads/discover",
         {
@@ -302,12 +448,14 @@ export default function LeadDiscoveryTab() {
           countries,
           cities,
           maxResults: Number(maxResults) || 15,
+          ...(filters ? { filters } : {}),
         },
         { timeout: useQueue ? 60000 : 300000 }
       )
 
       if (data.discoveryGroupId) {
         setGroupFilter(String(data.discoveryGroupId))
+        setTrackingGroupId(Number(data.discoveryGroupId))
         setPage(1)
       }
 
@@ -316,11 +464,12 @@ export default function LeadDiscoveryTab() {
           type: "success",
           text:
             data.note ||
-            `Started ${data.enqueued ?? data.chunks ?? 0} search(es). Results will appear here when ready.`,
+            `Started ${data.enqueued ?? data.chunks ?? 0} search(es). Results will appear here as they finish.`,
         })
         await loadGroups()
         if (!(data.enqueued > 0)) {
           setDiscovering(false)
+          setTrackingGroupId(null)
           await refreshAll()
         }
       } else {
@@ -358,18 +507,48 @@ export default function LeadDiscoveryTab() {
 
   const runBulkAnalyze = async () => {
     if (!selected.length) return
+    const ids = [...selected]
     setAnalyzing(true)
+    setAnalyzeBatchIds(ids)
+    setAnalyzeProgress({ total: ids.length, done: 0, remaining: ids.length, deleted: 0, pct: 0 })
     setMessage(null)
     try {
-      await saPost("/leads", { action: "bulk_analyze", ids: selected })
+      const data = await saPost(
+        "/leads",
+        { action: "bulk_analyze", ids },
+        { timeout: 180000 }
+      )
+      const queued = data.queued ?? ids.length
+      const inline = data.ranInline ? ` · ${data.ranInline} ran immediately` : ""
+      const deferred = data.deferredInline
+        ? ` · ${data.deferredInline} need Redis worker (retry Analyze if stuck)`
+        : ""
       setMessage({
         type: "success",
-        text: `Analyzing ${selected.length} leads… companies with no visible email are removed automatically.`,
+        text: `Analyzing ${ids.length} leads (${queued} queued${inline}${deferred}). Progress updates below — leads without email are removed.`,
       })
       setSelected([])
+      // If everything ran inline already, poll once then finish
+      if ((data.queued || 0) === 0 && (data.deferredInline || 0) === 0) {
+        const status = await saPost("/leads", { action: "analyze_status", ids })
+        setAnalyzeProgress({
+          total: status.total,
+          done: status.done,
+          remaining: status.remaining,
+          deleted: status.deleted || 0,
+          pct: status.pct ?? 100,
+        })
+        if (status.remaining === 0) {
+          await finishAnalyze(
+            `Analyze done — ${status.done}/${status.total} processed${status.deleted ? ` · ${status.deleted} removed` : ""}.`
+          )
+        }
+      }
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
       setAnalyzing(false)
+      setAnalyzeBatchIds([])
+      setAnalyzeProgress(null)
     }
   }
 
@@ -531,7 +710,7 @@ export default function LeadDiscoveryTab() {
                   : "text-slate-500 hover:text-[#0D1E36]"
               }`}
             >
-              <MapPin className="w-3.5 h-3.5" /> Google Places
+              <MapPin className="w-3.5 h-3.5" /> Google Business
             </button>
             <button
               type="button"
@@ -542,10 +721,20 @@ export default function LeadDiscoveryTab() {
                   : "text-slate-500 hover:text-[#0D1E36]"
               }`}
             >
-              <Globe className="w-3.5 h-3.5" /> Search Engine
+              <Globe className="w-3.5 h-3.5" /> Website search
             </button>
           </div>
         </div>
+
+        {method === "google_places" ? (
+          <p className="text-xs text-slate-500 -mt-2">
+            Pulls Google Business / Maps listings (name, phone, address, website, reviews) — not website scraping.
+          </p>
+        ) : (
+          <p className="text-xs text-slate-500 -mt-2">
+            Finds company websites via search results, then you can analyze pages for contacts.
+          </p>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TagInput
@@ -557,7 +746,7 @@ export default function LeadDiscoveryTab() {
           />
           <TagInput
             label="Target Cities (Optional)"
-            hint="Supports Places & Search Engine contexts"
+            hint="Supports Google Business & website search"
             tags={cities}
             onChange={setCities}
             placeholder="e.g. London, Dubai, Berlin"
@@ -571,6 +760,79 @@ export default function LeadDiscoveryTab() {
           onChange={setKeywords}
           placeholder="e.g. Office Cleaning, Janitorial Services"
         />
+
+        {method === "google_places" && (
+          <div className="rounded-xl border border-gray-200 bg-[#F8F9FC] p-4 space-y-4">
+            <div className="flex items-start gap-2">
+              <Filter className="w-4 h-4 text-[#D97706] mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[#0D1E36]">
+                  Google Business filters
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Google does not expose company registration date. “New” / “Established” uses review volume as a proxy; “Opening soon” uses Maps future-opening listings.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">
+                  Business age
+                </label>
+                <select
+                  className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
+                  value={maturity}
+                  onChange={(e) => setMaturity(e.target.value as BusinessMaturity)}
+                >
+                  <option value="any">Any</option>
+                  <option value="likely_new">Likely new (≤15 reviews)</option>
+                  <option value="established">Established (50+ reviews)</option>
+                  <option value="opening_soon">Opening soon</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">
+                  Website on listing
+                </label>
+                <select
+                  className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
+                  value={websiteFilter}
+                  onChange={(e) => setWebsiteFilter(e.target.value as WebsiteFilter)}
+                >
+                  <option value="any">Any</option>
+                  <option value="with_website">Has website</option>
+                  <option value="without_website">No website</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#0D1E36] uppercase tracking-wider">
+                  Min rating
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step={0.5}
+                  className={`${inputCls} focus:border-[#D97706] text-sm h-[42px]`}
+                  value={minRating}
+                  onChange={(e) => setMinRating(e.target.value)}
+                  placeholder="e.g. 4"
+                />
+              </div>
+              <div className="space-y-1.5 flex flex-col justify-end">
+                <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0D1E36] cursor-pointer h-[42px]">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={includeServiceArea}
+                    onChange={(e) => setIncludeServiceArea(e.target.checked)}
+                  />
+                  Include service-area / mobile businesses
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="sm:col-span-3 space-y-2">
@@ -595,15 +857,30 @@ export default function LeadDiscoveryTab() {
           <ProgressBar
             label={
               activeGroupProgress
-                ? `Finding leads — ${activeGroupProgress.completedChunks}/${activeGroupProgress.totalChunks} chunks (${activeGroupProgress.label})`
-                : "Finding leads…"
+                ? `Finding leads — ${activeGroupProgress.completedChunks}/${activeGroupProgress.totalChunks} searches · ${activeGroupProgress.createdCount ?? 0} new (${activeGroupProgress.label})`
+                : "Finding leads — starting searches…"
             }
-            pct={activeGroupProgress?.progressPct}
-            indeterminate={!activeGroupProgress || activeGroupProgress.progressPct < 1}
+            pct={
+              activeGroupProgress?.totalChunks > 0
+                ? Math.max(4, activeGroupProgress.progressPct || 0)
+                : undefined
+            }
+            indeterminate={!activeGroupProgress || !(activeGroupProgress.totalChunks > 0)}
             tone="amber"
           />
         )}
-        {analyzing && <ProgressBar label="Analyzing selected leads…" indeterminate tone="navy" />}
+        {analyzing && (
+          <ProgressBar
+            label={
+              analyzeProgress
+                ? `Analyzing leads — ${analyzeProgress.done}/${analyzeProgress.total} done${analyzeProgress.deleted ? ` · ${analyzeProgress.deleted} removed` : ""}${analyzeProgress.remaining ? ` · ${analyzeProgress.remaining} left` : ""}`
+                : "Analyzing selected leads…"
+            }
+            pct={analyzeProgress ? Math.max(analyzeProgress.pct, analyzeProgress.done > 0 ? 4 : 0) : undefined}
+            indeterminate={!analyzeProgress || analyzeProgress.pct < 1}
+            tone="navy"
+          />
+        )}
 
         <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
           <button 
@@ -636,12 +913,18 @@ export default function LeadDiscoveryTab() {
           </button>
           
           <p className="w-full text-xs text-gray-400 leading-relaxed mt-1">
-            Each query initializes a fresh Lead Group. Duplicates are bypassed dynamically. Output tables refresh on runtime completion.
+            Each query creates a Lead Group. The list refreshes live as searches finish — no manual refresh needed. Duplicates are skipped.
           </p>
         </div>
       </div>
 
-      <QueuePanel onQueueBecameIdle={handleQueueIdle} onQueueUpdate={() => loadGroups()} />
+      <QueuePanel
+        onQueueBecameIdle={handleQueueIdle}
+        onQueueUpdate={() => {
+          loadGroups()
+          if (discovering || analyzing) loadLeads({ silent: true })
+        }}
+      />
 
       {/* Leads Groups Directory */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-5">
