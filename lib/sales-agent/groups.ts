@@ -230,7 +230,7 @@ export async function recordDiscoveryChunkResult(
 function mapGroup(g: any) {
   const emailedCount = g.emailedCount ?? 0;
   const memberCount = g._count?.members ?? 0;
-  const alreadySent = emailedCount > 0;
+  const alreadySent = g.alreadySent != null ? !!g.alreadySent : emailedCount > 0;
   return {
     ...g,
     memberCount,
@@ -245,6 +245,8 @@ function mapGroup(g: any) {
   };
 }
 
+const ALREADY_SENT_MARKER = ' · Already sent';
+
 export async function listDiscoveryGroups(limit = 50) {
   await ensureHighPriorityRepliesGroup();
   const groups = await (prisma as any).saDiscoveryGroup.findMany({
@@ -252,20 +254,34 @@ export async function listDiscoveryGroups(limit = 50) {
     take: limit,
     include: {
       _count: { select: { members: true } },
-      members: {
-        select: {
-          company: { select: { emailSentCount: true } },
-        },
-      },
     },
   });
-  const mapped = groups.map((g: any) => {
-    const emailedCount = (g.members || []).filter(
-      (m: any) => (m.company?.emailSentCount || 0) > 0
-    ).length;
-    const { members, ...rest } = g;
-    return mapGroup({ ...rest, emailedCount });
-  });
+
+  const groupIds = groups.map((g: any) => g.id);
+  let emailedMap = new Map<number, number>();
+  if (groupIds.length) {
+    // Lightweight aggregate — do NOT load every member row (that was freezing Outreach)
+    const emailed = await (prisma as any).saDiscoveryGroupMember.groupBy({
+      by: ['groupId'],
+      where: {
+        groupId: { in: groupIds },
+        company: { emailSentCount: { gt: 0 } },
+      },
+      _count: { _all: true },
+    });
+    emailedMap = new Map(
+      emailed.map((row: any) => [row.groupId, row._count?._all ?? row._count ?? 0])
+    );
+  }
+
+  const mapped = groups.map((g: any) =>
+    mapGroup({
+      ...g,
+      emailedCount: emailedMap.get(g.id) || 0,
+      alreadySent:
+        (emailedMap.get(g.id) || 0) > 0 || String(g.label || '').includes(ALREADY_SENT_MARKER),
+    })
+  );
   // Priority group always first
   mapped.sort((a: any, b: any) => {
     if (a.isPriority && !b.isPriority) return -1;
@@ -274,8 +290,6 @@ export async function listDiscoveryGroups(limit = 50) {
   });
   return mapped;
 }
-
-const ALREADY_SENT_MARKER = ' · Already sent';
 
 /**
  * After a campaign emails leads, mark every discovery group that contains them

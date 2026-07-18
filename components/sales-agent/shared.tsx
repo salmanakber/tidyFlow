@@ -11,13 +11,25 @@ export function saHeaders() {
   return { Authorization: `Bearer ${getToken()}` }
 }
 
-export async function saGet<T = any>(path: string, params?: Record<string, any>): Promise<T> {
-  const res = await axios.get(`/api/admin/sales-agent${path}`, {
-    headers: saHeaders(),
-    params,
-  })
-  if (!res.data.success) throw new Error(res.data.message || "Request failed")
-  return res.data.data
+export async function saGet<T = any>(
+  path: string,
+  params?: Record<string, any>,
+  opts?: { timeout?: number }
+): Promise<T> {
+  try {
+    const res = await axios.get(`/api/admin/sales-agent${path}`, {
+      headers: saHeaders(),
+      params,
+      timeout: opts?.timeout ?? 30000,
+    })
+    if (!res.data.success) throw new Error(res.data.message || "Request failed")
+    return res.data.data
+  } catch (e: any) {
+    if (e?.code === "ECONNABORTED" || e?.message?.includes("timeout")) {
+      throw new Error("Request timed out — try again")
+    }
+    throw new Error(e?.response?.data?.message || e?.message || "Request failed")
+  }
 }
 
 export async function saPost<T = any>(path: string, body?: any, opts?: { timeout?: number }): Promise<T> {

@@ -308,8 +308,20 @@ export default function TemplatesTab() {
                       <div className="flex flex-wrap items-center justify-end gap-3">
                         <button 
                           type="button" 
-                          className="text-[#0D1E36] hover:text-[#D97706] font-semibold text-[11px] inline-flex items-center gap-1 transition-colors" 
-                          onClick={() => setEditing(t)}
+                          className="text-[#0D1E36] hover:text-[#D97706] font-semibold text-[11px] inline-flex items-center gap-1 transition-colors disabled:opacity-50" 
+                          disabled={busyId === t.id}
+                          onClick={async () => {
+                            setBusyId(t.id)
+                            try {
+                              const full = await saGet(`/templates/${t.id}`)
+                              setEditing(full)
+                              setPreview(null)
+                            } catch (e: any) {
+                              setMessage({ type: "error", text: e.message })
+                            } finally {
+                              setBusyId(null)
+                            }
+                          }}
                         >
                           Edit
                         </button>

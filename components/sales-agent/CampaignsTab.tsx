@@ -47,24 +47,22 @@ export default function CampaignsTab() {
   const [saving, setSaving] = useState(false)
   const [actionId, setActionId] = useState<number | null>(null)
   const [leadSearch, setLeadSearch] = useState("")
+  const [leadsLoading, setLeadsLoading] = useState(false)
 
-  const load = async () => {
+  const loadCore = async () => {
     setLoading(true)
     try {
-      const [campaigns, tpls, leads, grp] = await Promise.all([
+      const [campaigns, tpls, grp] = await Promise.all([
         saGet("/campaigns"),
         saGet("/templates"),
-        saGet("/leads", {
-          page: 1,
-          pageSize: 500,
-          emailFound: "true",
-          discoveryGroupId: groupFilter || undefined,
-        }),
         saGet("/groups"),
       ])
-      setItems(campaigns)
-      setTemplates(tpls.filter((t: any) => t.status === "PUBLISHED" || t.status === "DRAFT"))
-      setAllLeads(leads.items || [])
+      setItems(Array.isArray(campaigns) ? campaigns : [])
+      setTemplates(
+        (Array.isArray(tpls) ? tpls : []).filter(
+          (t: any) => t.status === "PUBLISHED" || t.status === "DRAFT"
+        )
+      )
       setGroups(Array.isArray(grp) ? grp : [])
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
@@ -73,10 +71,34 @@ export default function CampaignsTab() {
     }
   }
 
+  const loadLeads = async () => {
+    setLeadsLoading(true)
+    try {
+      const leads = await saGet("/leads", {
+        page: 1,
+        pageSize: 200,
+        emailFound: "true",
+        light: "true",
+        discoveryGroupId: groupFilter || undefined,
+      })
+      setAllLeads(leads.items || [])
+    } catch (e: any) {
+      setMessage({ type: "error", text: e.message })
+    } finally {
+      setLeadsLoading(false)
+    }
+  }
+
   useEffect(() => {
-    load()
+    loadCore()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupFilter])
+  }, [])
+
+  // Only fetch lead picker data when the create/edit form is open
+  useEffect(() => {
+    if (showForm) loadLeads()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, groupFilter])
 
   const openCreate = () => {
     setEditingId(null)
@@ -141,7 +163,7 @@ export default function CampaignsTab() {
       setShowForm(false)
       setEditingId(null)
       setForm(emptyForm)
-      load()
+      loadCore()
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
@@ -160,7 +182,7 @@ export default function CampaignsTab() {
             ? "Campaign started — emails are sending to your selected leads"
             : `Campaign ${status.toLowerCase()}`,
       })
-      await load()
+      await loadCore()
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
@@ -183,7 +205,7 @@ export default function CampaignsTab() {
         setShowForm(false)
         setEditingId(null)
       }
-      load()
+      loadCore()
     } catch (e: any) {
       setMessage({ type: "error", text: e.response?.data?.message || e.message })
     }
@@ -448,7 +470,9 @@ export default function CampaignsTab() {
 
                 {/* Leads Scrollable Area */}
                 <div className="max-h-56 overflow-y-auto border border-[#E3E7F0] rounded-lg bg-white shadow-inner">
-                  {filteredLeads.length === 0 ? (
+                  {leadsLoading ? (
+                    <div className="text-center py-10 px-4 text-xs text-[#8890A0]">Loading leads…</div>
+                  ) : filteredLeads.length === 0 ? (
                     <div className="text-center py-10 px-4">
                       <p className="text-xs text-[#8890A0]">
                         No matching leads identified. Navigate to <span className="font-semibold text-[#5B6478]">Find Leads</span> to ingest contacts.

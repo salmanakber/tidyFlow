@@ -10,10 +10,20 @@ export async function GET(request: NextRequest) {
   if (gate instanceof NextResponse) return gate;
 
   const status = request.nextUrl.searchParams.get('status');
+  // List view: skip huge html/text bodies so Outreach → Templates opens quickly
   const items = await (prisma as any).saEmailTemplate.findMany({
     where: status ? { status } : {},
     orderBy: { updatedAt: 'desc' },
-    include: { _count: { select: { versions: true, campaigns: true } } },
+    select: {
+      id: true,
+      name: true,
+      subject: true,
+      status: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: { select: { versions: true, campaigns: true } },
+    },
   });
   return jsonOk(items);
 }

@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(500, Math.max(1, parseInt(sp.get('pageSize') || '25', 10)));
   const sortBy = sp.get('sortBy') || 'createdAt';
   const sortDir = sp.get('sortDir') === 'asc' ? 'asc' : 'desc';
+  const light = sp.get('light') === '1' || sp.get('light') === 'true';
   const filters = parseLeadFiltersFromSearchParams(sp);
   const where = buildLeadWhere(filters);
 
@@ -29,6 +30,30 @@ export async function GET(request: NextRequest) {
   ]);
   const orderBy = { [allowedSort.has(sortBy) ? sortBy : 'createdAt']: sortDir };
 
+  const include = light
+    ? undefined
+    : {
+        analyses: { orderBy: { createdAt: 'desc' }, take: 1 },
+        contacts: { take: 3 },
+        groupMembers: { include: { group: { select: { id: true, label: true, method: true } } } },
+        _count: { select: { sentEmails: true, replies: true } },
+      };
+
+  const select = light
+    ? {
+        id: true,
+        name: true,
+        email: true,
+        city: true,
+        country: true,
+        status: true,
+        emailSentCount: true,
+        hasEmail: true,
+        leadScore: true,
+        website: true,
+      }
+    : undefined;
+
   const [total, items] = await Promise.all([
     (prisma as any).saLeadCompany.count({ where }),
     (prisma as any).saLeadCompany.findMany({
@@ -36,18 +61,13 @@ export async function GET(request: NextRequest) {
       orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
-      include: {
-        analyses: { orderBy: { createdAt: 'desc' }, take: 1 },
-        contacts: { take: 3 },
-        groupMembers: { include: { group: { select: { id: true, label: true, method: true } } } },
-        _count: { select: { sentEmails: true, replies: true } },
-      },
+      ...(select ? { select } : { include }),
     }),
   ]);
 
   // Replied / converted leads float to top within the page when default sort
   const sorted =
-    sortBy === 'createdAt'
+    !light && sortBy === 'createdAt'
       ? [...items].sort((a: any, b: any) => {
           const ap = a.status === 'REPLIED' || a.status === 'CONVERTED' || (a._count?.replies || 0) > 0 ? 1 : 0;
           const bp = b.status === 'REPLIED' || b.status === 'CONVERTED' || (b._count?.replies || 0) > 0 ? 1 : 0;
