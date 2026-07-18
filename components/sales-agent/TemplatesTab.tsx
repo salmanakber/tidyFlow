@@ -15,6 +15,7 @@ import {
   inputCls,
 } from "./shared"
 import { Copy, Eye, Plus, Send, Loader2, Sparkles, FileText, Check, Trash2 } from "lucide-react"
+import { SA_COUNTRIES, SA_LANGUAGES, languageLabel } from "@/lib/sales-agent/taxonomy"
 
 const DEFAULT_HTML = `<p>Hi {{contact_name}},</p>
 <p>{{personalized_intro}}</p>
@@ -43,6 +44,8 @@ export default function TemplatesTab() {
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [copiedVar, setCopiedVar] = useState<string | null>(null)
+  const [filterLanguage, setFilterLanguage] = useState("")
+  const [filterCountry, setFilterCountry] = useState("")
 
   const load = async () => {
     setLoading(true)
@@ -63,6 +66,8 @@ export default function TemplatesTab() {
     setEditing({
       id: null,
       name: "Outreach v1",
+      language: "",
+      country: "",
       subject: "Quick idea for {{company_name}}",
       htmlBody: DEFAULT_HTML,
       textBody: "Hi {{contact_name}},\n\n{{personalized_intro}}\n\nBook a demo: {{booking_link}}\n\n{{sender_name}}",
@@ -190,6 +195,45 @@ export default function TemplatesTab() {
                   <option value="ARCHIVED">Archived</option>
                 </select>
               </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#0D1E36]">
+                  Language <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  className={`${inputCls} transition-all duration-150 focus:border-[#D97706]`}
+                  value={editing.language || ""}
+                  onChange={(e) => setEditing({ ...editing, language: e.target.value })}
+                >
+                  <option value="">Any / not set</option>
+                  {SA_LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#0D1E36]">
+                  Country <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  className={`${inputCls} transition-all duration-150 focus:border-[#D97706]`}
+                  value={editing.country || ""}
+                  onChange={(e) => setEditing({ ...editing, country: e.target.value })}
+                >
+                  <option value="">Any / not set</option>
+                  {SA_COUNTRIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5 flex items-end">
+                <p className="text-[10px] text-gray-400 leading-relaxed pb-2">
+                  Tags who this template is written for (app languages + market). Does not change sending logic.
+                </p>
+              </div>
               <div className="md:col-span-3 space-y-1.5">
                 <label className="text-xs font-semibold text-[#0D1E36]">Subject Line</label>
                 <input 
@@ -276,11 +320,44 @@ export default function TemplatesTab() {
         <EmptyState title="No templates" description="Create an HTML or plain-text outreach template." />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-slate-50 flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Filter language</label>
+              <select
+                className={`${inputCls} min-w-[160px] text-xs py-1.5`}
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+              >
+                <option value="">All languages</option>
+                {SA_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Filter country</label>
+              <select
+                className={`${inputCls} min-w-[180px] text-xs py-1.5`}
+                value={filterCountry}
+                onChange={(e) => setFilterCountry(e.target.value)}
+              >
+                <option value="">All countries</option>
+                {SA_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="text-gray-500 text-[10px] font-bold uppercase tracking-wider bg-slate-50 border-b border-gray-200">
                   <th className="p-4 pl-5">Template Name</th>
+                  <th className="p-4">Audience</th>
                   <th className="p-4">Subject</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Revision</th>
@@ -288,9 +365,33 @@ export default function TemplatesTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {items.map((t) => (
+                {items
+                  .filter((t) => {
+                    if (filterLanguage && t.language !== filterLanguage) return false
+                    if (filterCountry && t.country !== filterCountry) return false
+                    return true
+                  })
+                  .map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50 transition-colors duration-100">
                     <td className="p-4 pl-5 font-semibold text-[#0D1E36]">{t.name}</td>
+                    <td className="p-4">
+                      {t.language || t.country ? (
+                        <span className="inline-flex flex-wrap gap-1">
+                          {t.language ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-[#0D1E36] font-medium">
+                              {languageLabel(t.language)}
+                            </span>
+                          ) : null}
+                          {t.country ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-100 font-medium">
+                              {t.country}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
                     <td className="p-4 text-gray-500 max-w-xs truncate">{t.subject}</td>
                     <td className="p-4">
                       <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-semibold ${

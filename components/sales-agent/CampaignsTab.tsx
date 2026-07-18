@@ -15,11 +15,14 @@ import {
   btnSecondary,
   inputCls,
 } from "./shared"
-import { Play, Pause, Plus, Pencil, Trash2, Loader2, Mail, Settings, Users, CalendarDays } from "lucide-react"
+import { Play, Pause, Plus, Pencil, Trash2, Loader2, Settings, Users, CalendarDays } from "lucide-react"
+import { SA_COUNTRIES, SA_LANGUAGES, formatAudienceTag, languageLabel } from "@/lib/sales-agent/taxonomy"
 
 const emptyForm = {
   name: "",
   templateId: "",
+  language: "",
+  country: "",
   aiPrompt: "",
   delayBetweenEmails: "60",
   maxEmailsPerDay: "50",
@@ -48,6 +51,8 @@ export default function CampaignsTab() {
   const [actionId, setActionId] = useState<number | null>(null)
   const [leadSearch, setLeadSearch] = useState("")
   const [leadsLoading, setLeadsLoading] = useState(false)
+  const [filterLanguage, setFilterLanguage] = useState("")
+  const [filterCountry, setFilterCountry] = useState("")
 
   const loadCore = async () => {
     setLoading(true)
@@ -118,6 +123,8 @@ export default function CampaignsTab() {
     setForm({
       name: c.name || "",
       templateId: c.templateId ? String(c.templateId) : "",
+      language: c.language || "",
+      country: c.country || "",
       aiPrompt: c.aiPrompt || "",
       delayBetweenEmails: String(c.delayBetweenEmails ?? 60),
       maxEmailsPerDay: String(c.maxEmailsPerDay ?? 50),
@@ -130,6 +137,8 @@ export default function CampaignsTab() {
   const payload = () => ({
     name: form.name,
     templateId: form.templateId || null,
+    language: form.language || null,
+    country: form.country || null,
     aiPrompt: form.aiPrompt || null,
     delayBetweenEmails: Number(form.delayBetweenEmails),
     maxEmailsPerDay: Number(form.maxEmailsPerDay),
@@ -336,9 +345,49 @@ export default function CampaignsTab() {
                     {templates.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
+                        {formatAudienceTag({ language: t.language, country: t.country })
+                          ? ` · ${formatAudienceTag({ language: t.language, country: t.country })}`
+                          : ""}
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">
+                    Language <span className="text-[#8890A0] font-normal">(optional)</span>
+                  </label>
+                  <select
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.language}
+                    onChange={(e) => setForm({ ...form, language: e.target.value })}
+                  >
+                    <option value="">Any / not set</option>
+                    {SA_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#5B6478]">
+                    Country <span className="text-[#8890A0] font-normal">(optional)</span>
+                  </label>
+                  <select
+                    className={`${inputCls} transition-all duration-150 focus:border-[#0B1B3B]`}
+                    value={form.country}
+                    onChange={(e) => setForm({ ...form, country: e.target.value })}
+                  >
+                    <option value="">Any / not set</option>
+                    {SA_COUNTRIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-[#8890A0]">
+                    Tags who this campaign is for — does not auto-filter leads.
+                  </p>
                 </div>
               </div>
             </div>
@@ -567,11 +616,44 @@ export default function CampaignsTab() {
         />
       ) : (
         <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#E3E7F0] bg-[#F8F9FC] flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-[#8890A0]">Filter language</label>
+              <select
+                className={`${inputCls} min-w-[160px] text-xs py-1.5`}
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+              >
+                <option value="">All languages</option>
+                {SA_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-[#8890A0]">Filter country</label>
+              <select
+                className={`${inputCls} min-w-[180px] text-xs py-1.5`}
+                value={filterCountry}
+                onChange={(e) => setFilterCountry(e.target.value)}
+              >
+                <option value="">All countries</option>
+                {SA_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="text-[#8890A0] text-[10px] font-semibold uppercase tracking-wider bg-[#F6F7FB] border-b border-[#E3E7F0]">
                   <th className="p-4 pl-5">Campaign Name</th>
+                  <th className="p-4">Audience</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Associated Template</th>
                   <th className="p-4 text-center">Selected Leads</th>
@@ -580,7 +662,13 @@ export default function CampaignsTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EEF0F5]">
-                {items.map((c) => {
+                {items
+                  .filter((c) => {
+                    if (filterLanguage && c.language !== filterLanguage) return false
+                    if (filterCountry && c.country !== filterCountry) return false
+                    return true
+                  })
+                  .map((c) => {
                   let selectedCount = 0
                   try {
                     const cfg = c.discoveryConfig ? JSON.parse(c.discoveryConfig) : {}
@@ -588,9 +676,28 @@ export default function CampaignsTab() {
                   } catch {
                     /* ignore */
                   }
+                  const audience = formatAudienceTag({ language: c.language, country: c.country })
                   return (
                     <tr key={c.id} className="hover:bg-[#F8F9FC] transition-colors duration-100">
                       <td className="p-4 pl-5 font-semibold text-[#0B1B3B]">{c.name}</td>
+                      <td className="p-4">
+                        {audience ? (
+                          <span className="inline-flex flex-wrap gap-1">
+                            {c.language ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#EEF0F5] text-[#0B1B3B] font-medium">
+                                {languageLabel(c.language)}
+                              </span>
+                            ) : null}
+                            {c.country ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#8A5A00] font-medium">
+                                {c.country}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="text-[#8890A0]">—</span>
+                        )}
+                      </td>
                       <td className="p-4">
                         <span className={`inline-block text-[10px] px-2.5 py-0.5 rounded-full font-semibold ${statusCls(c.status)}`}>
                           {c.status}

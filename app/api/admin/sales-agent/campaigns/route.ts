@@ -9,12 +9,17 @@ export async function GET(request: NextRequest) {
 
   const sp = request.nextUrl.searchParams;
   const status = sp.get('status');
-  const where = status ? { status } : {};
+  const language = sp.get('language');
+  const country = sp.get('country');
+  const where: Record<string, unknown> = {};
+  if (status) where.status = status;
+  if (language) where.language = language;
+  if (country) where.country = country;
   const items = await (prisma as any).saCampaign.findMany({
     where,
     orderBy: { createdAt: 'desc' },
     include: {
-      template: { select: { id: true, name: true, subject: true } },
+      template: { select: { id: true, name: true, subject: true, language: true, country: true } },
       _count: { select: { leads: true, sentEmails: true } },
     },
   });
@@ -31,6 +36,7 @@ export async function POST(request: NextRequest) {
   const campaign = await (prisma as any).saCampaign.create({
     data: {
       name: body.name,
+      language: body.language || null,
       country: body.country || null,
       cities: Array.isArray(body.cities) ? JSON.stringify(body.cities) : body.cities || null,
       keywords: Array.isArray(body.keywords) ? JSON.stringify(body.keywords) : body.keywords || null,

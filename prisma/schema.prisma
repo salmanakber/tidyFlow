@@ -1807,6 +1807,7 @@ model SaAiAnalysis {
 model SaCampaign {
   id                  Int               @id @default(autoincrement())
   name                String
+  language            String?
   country             String?
   cities              String?           @db.Text
   keywords            String?           @db.Text
@@ -1833,6 +1834,8 @@ model SaCampaign {
   sentEmails  SaSentEmail[]
 
   @@index([status])
+  @@index([language])
+  @@index([country])
   @@index([createdAt])
   @@map("sa_campaigns")
 }
@@ -1840,6 +1843,8 @@ model SaCampaign {
 model SaEmailTemplate {
   id          Int              @id @default(autoincrement())
   name        String
+  language    String?
+  country     String?
   subject     String
   htmlBody    String?          @map("html_body") @db.Text
   textBody    String?          @map("text_body") @db.Text
@@ -1854,6 +1859,8 @@ model SaEmailTemplate {
   sentEmails SaSentEmail[]
 
   @@index([status])
+  @@index([language])
+  @@index([country])
   @@map("sa_email_templates")
 }
 

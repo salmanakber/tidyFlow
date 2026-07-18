@@ -38,6 +38,8 @@ export async function PATCH(
   if (body.htmlBody !== undefined) data.htmlBody = body.htmlBody;
   if (body.textBody !== undefined) data.textBody = body.textBody;
   if (body.status !== undefined) data.status = body.status;
+  if (body.language !== undefined) data.language = body.language || null;
+  if (body.country !== undefined) data.country = body.country || null;
 
   const contentChanged =
     (body.subject !== undefined && body.subject !== existing.subject) ||

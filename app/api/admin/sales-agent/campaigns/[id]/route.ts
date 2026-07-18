@@ -36,6 +36,7 @@ export async function PATCH(
   const data: Record<string, unknown> = {};
   const fields = [
     'name',
+    'language',
     'country',
     'templateId',
     'aiPrompt',
@@ -46,7 +47,9 @@ export async function PATCH(
     'status',
   ];
   for (const f of fields) {
-    if (body[f] !== undefined) data[f] = body[f];
+    if (body[f] !== undefined) {
+      data[f] = body[f] === '' ? null : body[f];
+    }
   }
   if (body.cities !== undefined) {
     data.cities = Array.isArray(body.cities) ? JSON.stringify(body.cities) : body.cities;

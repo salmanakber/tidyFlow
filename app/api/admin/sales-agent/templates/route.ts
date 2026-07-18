@@ -10,14 +10,22 @@ export async function GET(request: NextRequest) {
   if (gate instanceof NextResponse) return gate;
 
   const status = request.nextUrl.searchParams.get('status');
+  const language = request.nextUrl.searchParams.get('language');
+  const country = request.nextUrl.searchParams.get('country');
+  const where: Record<string, unknown> = {};
+  if (status) where.status = status;
+  if (language) where.language = language;
+  if (country) where.country = country;
   // List view: skip huge html/text bodies so Outreach → Templates opens quickly
   const items = await (prisma as any).saEmailTemplate.findMany({
-    where: status ? { status } : {},
+    where,
     orderBy: { updatedAt: 'desc' },
     select: {
       id: true,
       name: true,
       subject: true,
+      language: true,
+      country: true,
       status: true,
       version: true,
       createdAt: true,
@@ -43,6 +51,8 @@ export async function POST(request: NextRequest) {
         subject: src.subject,
         htmlBody: src.htmlBody,
         textBody: src.textBody,
+        language: src.language || null,
+        country: src.country || null,
         status: 'DRAFT',
         version: 1,
         createdById: gate.userId,
@@ -69,6 +79,8 @@ export async function POST(request: NextRequest) {
       subject: body.subject,
       htmlBody: body.htmlBody || null,
       textBody: body.textBody || null,
+      language: body.language || null,
+      country: body.country || null,
       status: body.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
       version: 1,
       createdById: gate.userId,
