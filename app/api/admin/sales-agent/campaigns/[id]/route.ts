@@ -233,15 +233,16 @@ async function startCampaign(campaignId: number, userId: number) {
     data: { campaignId },
   });
 
-  const limit = campaign.maxEmailsPerDay || 50;
-  const toSend = ready.slice(0, limit);
-  const staggerSeconds = campaign.delayBetweenEmails || 60;
+  // Pace only — does NOT cap total campaign size. Spread remaining leads across days.
+  const perDay = Math.max(1, Number(campaign.maxEmailsPerDay) || 50);
+  const staggerSeconds = Math.max(0, Number(campaign.delayBetweenEmails) || 60);
 
-  let leadStagger = 0;
   let queued = 0;
   let skipped = 0;
+  let leadIndex = 0;
+  const queuedLeadIds: number[] = [];
 
-  for (const lead of toSend) {
+  for (const lead of ready) {
     if (!lead.email) {
       skipped++;
       continue;
@@ -258,6 +259,12 @@ async function startCampaign(campaignId: number, userId: number) {
       });
 
       const vars = await buildTemplateVars(lead.id);
+      let queuedAnyStep = false;
+
+      // Day-bucket + within-day stagger so 111 leads aren't cut off at 50
+      const dayOffset = Math.floor(leadIndex / perDay);
+      const indexInDay = leadIndex % perDay;
+      const leadStagger = dayOffset * 24 * 3600 + indexInDay * staggerSeconds;
 
       for (const step of steps) {
         const already = await (prisma as any).saSentEmail.findFirst({
@@ -298,9 +305,13 @@ async function startCampaign(campaignId: number, userId: number) {
         });
         await enqueueSendEmail(record.id, delayMs);
         queued++;
+        queuedAnyStep = true;
       }
 
-      leadStagger += staggerSeconds;
+      if (queuedAnyStep) {
+        queuedLeadIds.push(lead.id);
+        leadIndex++;
+      }
     } catch (err: any) {
       skipped++;
       await saLog({
@@ -318,7 +329,7 @@ async function startCampaign(campaignId: number, userId: number) {
   await saLog({
     category: 'campaign',
     action: 'campaign_emails_queued',
-    message: `Campaign ${campaign.name}: steps=${steps.length} queued=${queued} skipped=${skipped} selected=${selectedIds.length}`,
+    message: `Campaign ${campaign.name}: steps=${steps.length} queued=${queued} skipped=${skipped} selected=${selectedIds.length} ready=${ready.length} pace=${perDay}/day`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,
@@ -326,6 +337,9 @@ async function startCampaign(campaignId: number, userId: number) {
       queued,
       skipped,
       selected: selectedIds.length,
+      ready: ready.length,
+      perDay,
+      daysSpanned: Math.max(1, Math.ceil(ready.length / perDay)),
       steps: steps.map((s) => ({
         step: s.step,
         templateId: s.templateId,
@@ -336,8 +350,8 @@ async function startCampaign(campaignId: number, userId: number) {
     },
   });
 
-  if (queued > 0) {
-    const marked = await markDiscoveryGroupsEmailed(toSend.map((l: any) => l.id));
+  if (queuedLeadIds.length > 0) {
+    const marked = await markDiscoveryGroupsEmailed(queuedLeadIds);
     await saLog({
       category: 'campaign',
       action: 'groups_marked_emailed',
@@ -351,7 +365,7 @@ async function startCampaign(campaignId: number, userId: number) {
   await saLog({
     category: 'campaign',
     action: 'campaign_started',
-    message: `Started campaign ${campaign.name} — ${steps.length} segment(s) for ${toSend.length} leads`,
+    message: `Started campaign ${campaign.name} — ${steps.length} segment(s), queued ${queued} email(s) for ${queuedLeadIds.length}/${ready.length} leads (pace ${perDay}/day)`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,

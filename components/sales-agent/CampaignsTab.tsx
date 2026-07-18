@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import axios from "axios"
 import {
   saGet,
@@ -72,8 +72,8 @@ export default function CampaignsTab() {
   const [filterLanguage, setFilterLanguage] = useState("")
   const [filterCountry, setFilterCountry] = useState("")
 
-  const loadCore = async () => {
-    setLoading(true)
+  const loadCore = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const [campaigns, tpls, grp] = await Promise.all([
         saGet("/campaigns"),
@@ -90,9 +90,9 @@ export default function CampaignsTab() {
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [])
 
   const loadLeads = async () => {
     setLeadsLoading(true)
@@ -114,8 +114,24 @@ export default function CampaignsTab() {
 
   useEffect(() => {
     loadCore()
+  }, [loadCore])
+
+  // Live refresh while any campaign is running/paused (round status + counts)
+  useEffect(() => {
+    const active = items.some((c) => c.status === "RUNNING" || c.status === "PAUSED")
+    if (!active) return
+    const t = setInterval(async () => {
+      try {
+        const campaigns = await saGet("/campaigns")
+        setItems(Array.isArray(campaigns) ? campaigns : [])
+      } catch {
+        /* ignore */
+      }
+    }, 4000)
+    return () => clearInterval(t)
+    // Only re-bind when active state flips, not on every items change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [items.some((c) => c.status === "RUNNING" || c.status === "PAUSED")])
 
   // Only fetch lead picker data when the create/edit form is open
   useEffect(() => {
@@ -242,7 +258,7 @@ export default function CampaignsTab() {
         type: "success",
         text:
           status === "RUNNING"
-            ? "Campaign started — segment emails queued on the automation worker"
+            ? "Campaign started — remaining leads are queued (already-sent skipped). Brevo first, Resend if Brevo is limited."
             : `Campaign ${status.toLowerCase()}`,
       })
       await loadCore()
@@ -645,13 +661,19 @@ export default function CampaignsTab() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[#5B6478]">Max leads this run</label>
+                  <label className="text-xs font-medium text-[#5B6478]">
+                    Pace — max leads / day
+                  </label>
                   <input
                     type="number"
+                    min={1}
                     className={`${inputCls}`}
                     value={form.maxEmailsPerDay}
                     onChange={(e) => setForm({ ...form, maxEmailsPerDay: e.target.value })}
                   />
+                  <p className="text-[10px] text-[#8890A0] leading-snug">
+                    Does not cap total leads. Extra leads are scheduled on the next day(s). Start again queues anyone still missing.
+                  </p>
                 </div>
                 <div className="md:col-span-2">
                   <label className="flex items-center gap-2 text-xs font-semibold text-[#0B1B3B] cursor-pointer">
@@ -949,17 +971,51 @@ export default function CampaignsTab() {
                       </td>
                       <td className="p-4">
                         {stepCount > 0 ? (
-                          <div className="space-y-1">
+                          <div className="space-y-1.5 max-w-[260px]">
                             <span className="text-[10px] font-semibold text-[#0B1B3B]">
-                              {stepCount} step{stepCount === 1 ? "" : "s"}
+                              {stepCount} round{stepCount === 1 ? "" : "s"}
                             </span>
-                            {seq.steps.length > 0 && (
-                              <p className="text-[10px] text-[#8890A0] leading-snug max-w-[180px]">
-                                {seq.steps
-                                  .map((s) => `E${s.step} ${formatStepSchedule(s)}`)
-                                  .join(" · ")}
+                            {c.sequenceProgress?.headline ? (
+                              <p className="text-[11px] text-[#0B1B3B] font-medium leading-snug">
+                                {c.sequenceProgress.headline}
                               </p>
-                            )}
+                            ) : null}
+                            {(c.sequenceProgress?.rounds?.length
+                              ? c.sequenceProgress.rounds
+                              : seq.steps
+                            ).map((r: any) => {
+                              const status = r.status || "pending"
+                              const text =
+                                r.summary ||
+                                `E${r.step} ${formatStepSchedule(r)}`
+                              const tone =
+                                status === "sent"
+                                  ? "bg-green-50 text-green-800 border-green-100"
+                                  : status === "sending"
+                                    ? "bg-amber-50 text-amber-800 border-amber-100"
+                                    : status === "upcoming" || status === "pending"
+                                      ? "bg-slate-50 text-slate-600 border-slate-200"
+                                      : status === "failed"
+                                        ? "bg-rose-50 text-rose-700 border-rose-100"
+                                        : "bg-slate-50 text-slate-500 border-slate-100"
+                              return (
+                                <div
+                                  key={r.step}
+                                  className={`text-[10px] leading-snug px-2 py-1 rounded-md border ${tone}`}
+                                >
+                                  <span className="font-semibold uppercase tracking-wide mr-1">
+                                    {status === "sent"
+                                      ? "Sent"
+                                      : status === "sending"
+                                        ? "Sending"
+                                        : status === "upcoming" || status === "pending"
+                                          ? "Upcoming"
+                                          : status}
+                                  </span>
+                                  {text}
+                                </div>
+                              )
+                            })}
                           </div>
                         ) : (
                           <span className="text-[#8890A0]">—</span>
@@ -995,24 +1051,40 @@ export default function CampaignsTab() {
                               ) : (
                                 <Play className="w-3.5 h-3.5" />
                               )}
-                              Start
+                              {(c.emailsSent ?? 0) > 0 ? "Continue remaining" : "Start"}
                             </button>
                           )}
-                          
+
                           {c.status === "RUNNING" && (
-                            <button
-                              type="button"
-                              className="text-[#8A5A00] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
-                              disabled={actionId === c.id}
-                              onClick={() => setStatus(c.id, "PAUSED")}
-                            >
-                              {actionId === c.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Pause className="w-3.5 h-3.5" />
-                              )}
-                              Pause
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="text-[#166534] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
+                                disabled={actionId === c.id}
+                                onClick={() => setStatus(c.id, "RUNNING")}
+                                title="Queue any leads still missing emails"
+                              >
+                                {actionId === c.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Play className="w-3.5 h-3.5" />
+                                )}
+                                Queue remaining
+                              </button>
+                              <button
+                                type="button"
+                                className="text-[#8A5A00] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
+                                disabled={actionId === c.id}
+                                onClick={() => setStatus(c.id, "PAUSED")}
+                              >
+                                {actionId === c.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Pause className="w-3.5 h-3.5" />
+                                )}
+                                Pause
+                              </button>
+                            </>
                           )}
                           
                           {c.status !== "RUNNING" && (

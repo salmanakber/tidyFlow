@@ -71,29 +71,80 @@ export async function buildTemplateVars(companyId: number, extras: Record<string
   };
 }
 
-async function countSentSince(since: Date): Promise<number> {
-  return (prisma as any).saSentEmail.count({
-    where: {
-      deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED'] },
-      sentAt: { gte: since },
-    },
-  });
+type SmtpProvider = 'brevo' | 'resend';
+
+async function countSentSince(since: Date, provider?: SmtpProvider): Promise<number> {
+  const where: Record<string, any> = {
+    deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED'] },
+    sentAt: { gte: since },
+  };
+  if (provider) {
+    // smtpResponse JSON includes `"provider":"brevo"` / `"provider":"resend"`
+    where.smtpResponse = { contains: `"provider":"${provider}"` };
+  }
+  return (prisma as any).saSentEmail.count({ where });
 }
 
-export async function checkSendLimits(): Promise<{ ok: boolean; reason?: string }> {
+export async function checkSendLimits(provider?: SmtpProvider): Promise<{
+  ok: boolean;
+  reason?: string;
+  hourly: number;
+  daily: number;
+  hourlyLimit: number;
+  dailyLimit: number;
+}> {
   const smtp = await getSalesAgentSmtpConfig();
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
 
-  const [hourly, daily] = await Promise.all([countSentSince(hourAgo), countSentSince(dayStart)]);
+  // Provider-scoped limits: Brevo quota should not block Resend fallback
+  const [hourly, daily] = await Promise.all([
+    countSentSince(hourAgo, provider),
+    countSentSince(dayStart, provider),
+  ]);
   if (hourly >= smtp.hourlyLimit) {
-    return { ok: false, reason: `Hourly email limit reached (${smtp.hourlyLimit})` };
+    return {
+      ok: false,
+      reason: `${provider || 'SMTP'} hourly limit reached (${smtp.hourlyLimit})`,
+      hourly,
+      daily,
+      hourlyLimit: smtp.hourlyLimit,
+      dailyLimit: smtp.dailyLimit,
+    };
   }
   if (daily >= smtp.dailyLimit) {
-    return { ok: false, reason: `Daily email limit reached (${smtp.dailyLimit})` };
+    return {
+      ok: false,
+      reason: `${provider || 'SMTP'} daily limit reached (${smtp.dailyLimit})`,
+      hourly,
+      daily,
+      hourlyLimit: smtp.hourlyLimit,
+      dailyLimit: smtp.dailyLimit,
+    };
   }
-  return { ok: true };
+  return {
+    ok: true,
+    hourly,
+    daily,
+    hourlyLimit: smtp.hourlyLimit,
+    dailyLimit: smtp.dailyLimit,
+  };
+}
+
+function isProviderLimitError(err: unknown): boolean {
+  const msg = String((err as any)?.message || err || '').toLowerCase();
+  return (
+    msg.includes('limit') ||
+    msg.includes('quota') ||
+    msg.includes('rate') ||
+    msg.includes('too many') ||
+    msg.includes('429') ||
+    msg.includes('550') ||
+    msg.includes('daily') ||
+    msg.includes('maximum') ||
+    msg.includes('exceed')
+  );
 }
 
 export interface SendSalesEmailInput {
@@ -111,8 +162,6 @@ export interface SendSalesEmailInput {
   aiProvider?: string;
   scheduledFor?: Date | null;
 }
-
-type SmtpProvider = 'brevo' | 'resend';
 
 function createSalesTransport(opts: {
   host: string;
@@ -183,11 +232,16 @@ async function sendWithProvider(input: {
   }
 }
 
-/** Send via Brevo SMTP by default; fall back to Resend on limit/error. */
+/** Create DB row + queue; Brevo is primary at deliver time with Resend fallback. */
 export async function sendSalesEmail(input: SendSalesEmailInput) {
-  const limits = await checkSendLimits();
-  if (!limits.ok && !input.scheduledFor) {
-    throw new Error(limits.reason);
+  // Soft check only for immediate sends — campaigns use scheduledFor and deliver later
+  if (!input.scheduledFor) {
+    const brevoLimits = await checkSendLimits('brevo');
+    const resend = await getResendSmtpConfig();
+    const resendReady = !!(resend.enabled && resend.apiKey && resend.senderEmail);
+    if (!brevoLimits.ok && !resendReady) {
+      throw new Error(brevoLimits.reason || 'Email send limit reached');
+    }
   }
 
   const email = input.to.toLowerCase();
@@ -406,8 +460,11 @@ export async function deliverSalesEmail(sentEmailId: number) {
     throw new Error('No SMTP configured (Brevo or Resend)');
   }
 
+  const brevoLimits = brevoReady ? await checkSendLimits('brevo') : { ok: false, reason: 'Brevo not configured' };
+  const resendLimits = resendReady ? await checkSendLimits('resend') : { ok: false, reason: 'Resend not configured' };
+
   let lastError: any = null;
-  const attempts: Array<{ provider: SmtpProvider; ok: boolean; error?: string }> = [];
+  const attempts: Array<{ provider: SmtpProvider; ok: boolean; error?: string; skipped?: boolean }> = [];
 
   const markSent = async (info: any, provider: SmtpProvider) => {
     const messageId = info.messageId || null;
@@ -458,8 +515,45 @@ export async function deliverSalesEmail(sentEmailId: number) {
     return updated;
   };
 
-  // 1) Primary: Brevo
-  if (brevoReady) {
+  const tryResend = async () => {
+    if (!resendReady) return null;
+    if (!resendLimits.ok) {
+      attempts.push({
+        provider: 'resend',
+        ok: false,
+        skipped: true,
+        error: resendLimits.reason,
+      });
+      lastError = new Error(resendLimits.reason || 'Resend limit reached');
+      return null;
+    }
+    try {
+      const info = await sendWithProvider({
+        provider: 'resend',
+        host: resend.host,
+        port: resend.port,
+        username: resend.username || 'resend',
+        password: resend.apiKey,
+        fromEmail: resend.senderEmail,
+        fromName: resend.senderName,
+        replyToEmail: smtp.replyToEmail || undefined,
+        to: record.recipientEmail,
+        subject: record.subject,
+        html: record.htmlBody || undefined,
+        text: record.textBody || undefined,
+        sentEmailId,
+      });
+      attempts.push({ provider: 'resend', ok: true });
+      return await markSent(info, 'resend');
+    } catch (err: any) {
+      lastError = err;
+      attempts.push({ provider: 'resend', ok: false, error: err.message });
+      return null;
+    }
+  };
+
+  // 1) Primary: Brevo (skip if our Brevo quota is already used — go straight to Resend)
+  if (brevoReady && brevoLimits.ok) {
     try {
       const info = await sendWithProvider({
         provider: 'brevo',
@@ -500,37 +594,70 @@ export async function deliverSalesEmail(sentEmailId: number) {
         entityType: 'SaSentEmail',
         entityId: sentEmailId,
         success: false,
+        details: { limitError: isProviderLimitError(err) },
       });
     }
+  } else if (brevoReady && !brevoLimits.ok) {
+    attempts.push({
+      provider: 'brevo',
+      ok: false,
+      skipped: true,
+      error: brevoLimits.reason,
+    });
+    await saLog({
+      level: 'info',
+      category: 'smtp',
+      action: 'brevo_limit_use_resend',
+      message: `${brevoLimits.reason} — using Resend`,
+      entityType: 'SaSentEmail',
+      entityId: sentEmailId,
+      details: brevoLimits,
+    });
+    lastError = new Error(brevoLimits.reason || 'Brevo limit reached');
   }
 
-  // 2) Fallback: Resend (https://resend.com/docs/send-with-smtp)
-  if (resendReady && (lastError || !brevoReady)) {
-    try {
-      const info = await sendWithProvider({
-        provider: 'resend',
-        host: resend.host,
-        port: resend.port,
-        username: resend.username || 'resend',
-        password: resend.apiKey,
-        fromEmail: resend.senderEmail,
-        fromName: resend.senderName,
-        replyToEmail: smtp.replyToEmail || undefined,
-        to: record.recipientEmail,
-        subject: record.subject,
-        html: record.htmlBody || undefined,
-        text: record.textBody || undefined,
-        sentEmailId,
-      });
-      attempts.push({ provider: 'resend', ok: true });
-      return await markSent(info, 'resend');
-    } catch (err: any) {
-      lastError = err;
-      attempts.push({ provider: 'resend', ok: false, error: err.message });
-    }
+  // 2) Fallback: Resend when Brevo missing, limited, or failed
+  if (resendReady && (lastError || !brevoReady || !brevoLimits.ok)) {
+    const sent = await tryResend();
+    if (sent) return sent;
   }
 
+  // Both limited / failed — keep QUEUED and retry later instead of hard-failing the lead
   const failMsg = lastError?.message || 'Email send failed';
+  const bothLimited =
+    (isProviderLimitError(lastError) || !brevoLimits.ok || !resendLimits.ok) &&
+    attempts.every((a) => !a.ok);
+
+  if (bothLimited) {
+    const retryAt = new Date(Date.now() + 60 * 60 * 1000);
+    await (prisma as any).saSentEmail.update({
+      where: { id: sentEmailId },
+      data: {
+        deliveryStatus: 'QUEUED',
+        scheduledFor: retryAt,
+        retryCount: { increment: 1 },
+        errorMessage: `Deferred — ${failMsg}. Will retry via Brevo/Resend.`,
+        smtpResponse: JSON.stringify({ attempts, deferred: true, retryAt }),
+      },
+    });
+    try {
+      const { enqueueSendEmail } = await import('./queue');
+      await enqueueSendEmail(sentEmailId, 60 * 60 * 1000);
+    } catch {
+      /* sweeper / next start can pick up */
+    }
+    await saLog({
+      level: 'warn',
+      category: 'smtp',
+      action: 'email_deferred_limits',
+      message: `Deferred send to ${record.recipientEmail}: ${failMsg}`,
+      entityType: 'SaSentEmail',
+      entityId: sentEmailId,
+      details: { attempts, retryAt },
+    });
+    return { ...record, deliveryStatus: 'QUEUED', scheduledFor: retryAt };
+  }
+
   await (prisma as any).saSentEmail.update({
     where: { id: sentEmailId },
     data: {
@@ -547,8 +674,8 @@ export async function deliverSalesEmail(sentEmailId: number) {
     message: failMsg,
     entityType: 'SaSentEmail',
     entityId: sentEmailId,
-    success: false,
     details: { attempts },
+    success: false,
   });
   throw lastError || new Error(failMsg);
 }

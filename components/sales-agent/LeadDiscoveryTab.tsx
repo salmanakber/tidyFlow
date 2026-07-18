@@ -770,7 +770,7 @@ export default function LeadDiscoveryTab() {
                   Google Business filters
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Google does not expose company registration date. “New” / “Established” uses review volume as a proxy; “Opening soon” uses Maps future-opening listings.
+                  Filters use exact Google Business Profile fields (website, rating, reviews, status). “No website” means the listing has no real website URI — Maps/Google links do not count.
                 </p>
               </div>
             </div>

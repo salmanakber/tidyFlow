@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/auth';
 import { saLog } from '@/lib/sales-agent/logger';
-import { buildFollowUpSchedule } from '@/lib/sales-agent/campaign-sequence';
+import { buildCampaignSequenceProgress, buildFollowUpSchedule } from '@/lib/sales-agent/campaign-sequence';
 
 export async function GET(request: NextRequest) {
   const gate = await requireSalesAgentAdmin(request);
@@ -24,7 +24,41 @@ export async function GET(request: NextRequest) {
       _count: { select: { leads: true, sentEmails: true } },
     },
   });
-  return jsonOk(items);
+
+  const campaignIds = items.map((c: any) => c.id);
+  let emailRows: any[] = [];
+  if (campaignIds.length) {
+    emailRows = await (prisma as any).saSentEmail.findMany({
+      where: { campaignId: { in: campaignIds } },
+      select: {
+        campaignId: true,
+        sequenceStep: true,
+        deliveryStatus: true,
+        scheduledFor: true,
+        sentAt: true,
+      },
+    });
+  }
+
+  const byCampaign = new Map<number, any[]>();
+  for (const row of emailRows) {
+    const list = byCampaign.get(row.campaignId) || [];
+    list.push(row);
+    byCampaign.set(row.campaignId, list);
+  }
+
+  const enriched = items.map((c: any) => {
+    const sequenceProgress = buildCampaignSequenceProgress({
+      followUpSchedule: c.followUpSchedule,
+      templateId: c.templateId,
+      startedAt: c.startedAt,
+      status: c.status,
+      emails: byCampaign.get(c.id) || [],
+    });
+    return { ...c, sequenceProgress };
+  });
+
+  return jsonOk(enriched);
 }
 
 export async function POST(request: NextRequest) {

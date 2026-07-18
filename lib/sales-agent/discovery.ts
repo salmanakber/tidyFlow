@@ -15,6 +15,72 @@ export function normalizeWebsite(url?: string | null): string | null {
   }
 }
 
+/** True only for a real business site on the Google Business profile (not Maps / Google host URLs). */
+export function gbpHasWebsite(websiteUri?: string | null): boolean {
+  const raw = String(websiteUri || '').trim();
+  if (!raw) return false;
+  try {
+    const withProto = raw.startsWith('http') ? raw : `https://${raw}`;
+    const host = new URL(withProto).hostname.replace(/^www\./, '').toLowerCase();
+    if (!host) return false;
+    // These appear on some listings but are not a business website field
+    if (
+      host === 'google.com' ||
+      host.endsWith('.google.com') ||
+      host === 'goo.gl' ||
+      host.endsWith('.goo.gl') ||
+      host === 'maps.app.goo.gl' ||
+      host.includes('googleusercontent') ||
+      host === 'share.google' ||
+      host.endsWith('.share.google')
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizePlaceId(id?: string | null): string | null {
+  if (!id) return null;
+  const s = String(id).trim();
+  if (!s) return null;
+  return s.startsWith('places/') ? s : `places/${s}`;
+}
+
+function addressComponentMatch(
+  place: any,
+  input: { country?: string; city?: string; state?: string }
+): boolean {
+  const comps: any[] = place.addressComponents || [];
+  const get = (type: string) => {
+    const c = comps.find((x) => (x.types || []).includes(type));
+    return String(c?.longText || c?.shortText || '').toLowerCase();
+  };
+  if (input.country) {
+    const want = input.country.trim().toLowerCase();
+    const got = get('country');
+    if (got && !got.includes(want) && !want.includes(got)) return false;
+  }
+  if (input.city) {
+    const want = input.city.trim().toLowerCase();
+    const locality = get('locality') || get('postal_town') || get('sublocality');
+    const formatted = String(place.formattedAddress || '').toLowerCase();
+    if (locality) {
+      if (!locality.includes(want) && !want.includes(locality)) return false;
+    } else if (formatted && !formatted.includes(want)) {
+      return false;
+    }
+  }
+  if (input.state) {
+    const want = input.state.trim().toLowerCase();
+    const admin = get('administrative_area_level_1');
+    if (admin && !admin.includes(want) && !want.includes(admin)) return false;
+  }
+  return true;
+}
+
 export interface DiscoveredPlace {
   name: string;
   website?: string | null;
@@ -58,7 +124,7 @@ export interface PlacesDiscoveryFilters {
   maxReviewCount?: number;
   minReviewCount?: number;
   minRating?: number;
-  /** any | with_website | without_website */
+  /** any | with_website | without_website — exact GBP websiteUri (not Maps links) */
   website?: 'any' | 'with_website' | 'without_website';
   /** Include mobile / service-area businesses (common for cleaning) */
   includePureServiceArea?: boolean;
@@ -102,14 +168,22 @@ function resolveMaturityBounds(filters?: PlacesDiscoveryFilters): {
 
 function placePassesFilters(
   place: any,
-  filters?: PlacesDiscoveryFilters
+  filters?: PlacesDiscoveryFilters,
+  location?: { country?: string; city?: string; state?: string }
 ): boolean {
-  if (!filters) return true;
+  if (!filters && !location) return true;
   const bounds = resolveMaturityBounds(filters);
-  const reviews = place.userRatingCount ?? 0;
-  const rating = place.rating ?? 0;
-  const hasWebsite = !!place.websiteUri;
+  // Exact GBP fields only — never invent values
+  const reviews =
+    place.userRatingCount != null && place.userRatingCount !== undefined
+      ? Number(place.userRatingCount)
+      : null;
+  const rating =
+    place.rating != null && place.rating !== undefined ? Number(place.rating) : null;
+  const hasWebsite = gbpHasWebsite(place.websiteUri);
   const status = String(place.businessStatus || '');
+
+  if (location && !addressComponentMatch(place, location)) return false;
 
   if (bounds.openingSoonOnly) {
     if (status !== 'FUTURE_OPENING') return false;
@@ -117,14 +191,52 @@ function placePassesFilters(
     return false;
   }
 
-  if (bounds.maxReviewCount != null && reviews > bounds.maxReviewCount) return false;
-  if (bounds.minReviewCount != null && reviews < bounds.minReviewCount) return false;
-  if (filters.minRating != null && rating < filters.minRating) return false;
+  if (bounds.maxReviewCount != null) {
+    if (reviews == null || reviews > bounds.maxReviewCount) return false;
+  }
+  if (bounds.minReviewCount != null) {
+    if (reviews == null || reviews < bounds.minReviewCount) return false;
+  }
+  if (filters?.minRating != null) {
+    if (rating == null || rating < filters.minRating) return false;
+  }
 
-  if (filters.website === 'with_website' && !hasWebsite) return false;
-  if (filters.website === 'without_website' && hasWebsite) return false;
+  if (filters?.website === 'with_website' && !hasWebsite) return false;
+  if (filters?.website === 'without_website' && hasWebsite) return false;
 
   return true;
+}
+
+async function fetchPlaceDetailsExact(
+  apiKey: string,
+  placeId: string
+): Promise<any | null> {
+  const resource = normalizePlaceId(placeId);
+  if (!resource) return null;
+  try {
+    const response = await fetch(`https://places.googleapis.com/v1/${resource}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask':
+          'id,displayName,formattedAddress,websiteUri,nationalPhoneNumber,rating,userRatingCount,businessStatus,addressComponents,openingDate,types,googleMapsUri',
+      },
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function filtersNeedExactVerify(filters?: PlacesDiscoveryFilters): boolean {
+  if (!filters) return false;
+  if (filters.website && filters.website !== 'any') return true;
+  if (filters.maturity && filters.maturity !== 'any') return true;
+  if (filters.minRating != null && filters.minRating > 0) return true;
+  if (filters.minReviewCount != null || filters.maxReviewCount != null) return true;
+  return false;
 }
 
 function buildQuery(input: PlacesSearchInput) {
@@ -151,18 +263,20 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   const started = Date.now();
   const filters = input.filters || {};
   const bounds = resolveMaturityBounds(filters);
+  const location = { country: input.country, city: input.city, state: input.state };
+  const exactVerify = filtersNeedExactVerify(filters);
 
   await saLog({
     category: 'google_places',
     action: 'search_start',
     message: `Searching Google Business (Places): ${query}`,
-    details: { ...input, filters },
+    details: { ...input, filters, exactVerify },
     userId: input.userId,
   });
 
   const requestBody: Record<string, unknown> = {
     textQuery: query,
-    // Fetch full page then post-filter (Places has no review-count filter)
+    // Fetch full page then post-filter on exact GBP fields
     maxResultCount: Math.min(Math.max(input.maxResults || config.maxResults, 20), 20),
   };
 
@@ -173,7 +287,6 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
     requestBody.openNow = true;
   }
   if (filters.includePureServiceArea !== false) {
-    // Cleaning companies are often service-area / mobile
     requestBody.includePureServiceAreaBusinesses = true;
   }
   if (bounds.includeFutureOpening) {
@@ -213,18 +326,27 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   const leads: any[] = [];
   const targetCount = Math.min(input.maxResults || config.maxResults, 20);
 
-  for (const place of places) {
-    if (!placePassesFilters(place, filters)) {
+  for (const rawPlace of places) {
+    if (created >= targetCount) break;
+
+    // When filters are on, re-read Place Details so website/rating/reviews match the live GBP
+    let place = rawPlace;
+    if (exactVerify && rawPlace.id) {
+      const details = await fetchPlaceDetailsExact(config.googlePlacesApiKey, rawPlace.id);
+      if (details) place = { ...rawPlace, ...details };
+    }
+
+    if (!placePassesFilters(place, filters, location)) {
       filteredOut++;
       continue;
     }
-    if (created >= targetCount) break;
 
     const name = place.displayName?.text || 'Unknown';
-    const website = place.websiteUri || null;
+    const hasSite = gbpHasWebsite(place.websiteUri);
+    const website = hasSite ? String(place.websiteUri).trim() : null;
     const websiteNormalized = normalizeWebsite(website);
     const phone = place.nationalPhoneNumber || null;
-    const googlePlaceId = place.id || null;
+    const googlePlaceId = place.id || rawPlace.id || null;
 
     let city = input.city || null;
     let state = input.state || null;
@@ -271,9 +393,9 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
         category: input.category || 'cleaning',
         industry: 'cleaning',
         source: 'GOOGLE_PLACES',
-        discoveryKeyword: `${query}${openingHint}${filters.maturity ? ` [${filters.maturity}]` : ''}`,
+        discoveryKeyword: `${query}${openingHint}${filters.maturity ? ` [${filters.maturity}]` : ''}${filters.website && filters.website !== 'any' ? ` [${filters.website}]` : ''}`,
         campaignId: input.campaignId || null,
-        hasWebsite: !!website,
+        hasWebsite: hasSite,
         hasPhone: !!phone,
         hasEmail: false,
         status: 'NEW',
@@ -294,7 +416,7 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
     category: 'google_places',
     action: 'search_complete',
     message: `Found ${places.length}, created ${created}, skipped ${skipped}, filtered ${filteredOut}`,
-    details: { query, created, skipped, filteredOut, filters, discoveryGroupId: input.discoveryGroupId },
+    details: { query, created, skipped, filteredOut, filters, exactVerify, discoveryGroupId: input.discoveryGroupId },
     durationMs: Date.now() - started,
     userId: input.userId,
   });

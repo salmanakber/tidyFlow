@@ -46,8 +46,9 @@ export default function SentEmailsTab() {
       const params: Record<string, any> = { page, pageSize: 25 }
       if (status) params.status = status
       if (search) params.search = search
-      setData(await saGet("/sent-emails", params))
-      setSelected([])
+      const next = await saGet("/sent-emails", params)
+      setData(next)
+      if (!silent) setSelected([])
     } catch (e: any) {
       setMessage({ type: "error", text: e.message })
     } finally {
@@ -57,6 +58,12 @@ export default function SentEmailsTab() {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  // Live list while campaign sends — no manual refresh needed
+  useEffect(() => {
+    const t = setInterval(() => load(true), 4000)
+    return () => clearInterval(t)
   }, [load])
 
   const toggleSelect = (id: number) => {
@@ -130,7 +137,7 @@ export default function SentEmailsTab() {
             }}
           >
             <option value="">All statuses</option>
-            {["PENDING", "QUEUED", "SENT", "DELIVERED", "OPENED", "FAILED", "BOUNCED", "RETRYING"].map((s) => (
+            {["PENDING", "QUEUED", "SENT", "DELIVERED", "OPENED", "FAILED", "BOUNCED", "RETRYING", "CANCELED"].map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -139,6 +146,10 @@ export default function SentEmailsTab() {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 px-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            Live updating
+          </span>
           <button 
             type="button" 
             className={`${btnSecondary} inline-flex items-center gap-1.5 text-xs text-[#0D1E36] hover:bg-slate-50`} 
@@ -205,8 +216,9 @@ export default function SentEmailsTab() {
                   <th className="p-4">Recipient</th>
                   <th className="p-4">Subject</th>
                   <th className="p-4">Campaign context</th>
+                  <th className="p-4">Round</th>
                   <th className="p-4">Status</th>
-                  <th className="p-4">Dispatched At</th>
+                  <th className="p-4">Scheduled / Sent</th>
                   <th className="p-4 text-right pr-5">Actions</th>
                 </tr>
               </thead>
@@ -233,12 +245,29 @@ export default function SentEmailsTab() {
                       </td>
                       <td className="p-4 text-slate-500">{e.campaign?.name || "—"}</td>
                       <td className="p-4">
+                        <span className="inline-block text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                          Round {e.sequenceStep || 1}
+                        </span>
+                      </td>
+                      <td className="p-4">
                         <span className={`inline-block text-[10px] px-2.5 py-0.5 rounded-full font-semibold ${getStatusBadge(e.deliveryStatus)}`}>
                           {e.deliveryStatus}
                         </span>
                       </td>
-                      <td className="p-4 text-[10px] text-gray-400 font-mono">
-                        {e.sentAt ? new Date(e.sentAt).toLocaleString() : "—"}
+                      <td className="p-4 text-[10px] text-gray-500 font-mono space-y-0.5">
+                        {e.sentAt ? (
+                          <div>
+                            <span className="text-green-700 font-semibold">Sent </span>
+                            {new Date(e.sentAt).toLocaleString()}
+                          </div>
+                        ) : e.scheduledFor ? (
+                          <div>
+                            <span className="text-amber-700 font-semibold">Due </span>
+                            {new Date(e.scheduledFor).toLocaleString()}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
                       </td>
                       <td className="p-4 text-right pr-5 whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-3">
@@ -299,7 +328,7 @@ export default function SentEmailsTab() {
                     {/* Expanded Email Inspector Section */}
                     {expanded === e.id && (
                       <tr>
-                        <td colSpan={8} className="p-0 bg-slate-50 border-b border-gray-200">
+                        <td colSpan={9} className="p-0 bg-slate-50 border-b border-gray-200">
                           <div className="p-5 space-y-4">
                             {/* Metadata labels */}
                             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] text-slate-500 border-b border-gray-200 pb-3">
