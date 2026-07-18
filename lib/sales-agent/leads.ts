@@ -23,6 +23,8 @@ export interface LeadFilters {
   dateAddedFrom?: string;
   dateAddedTo?: string;
   source?: string;
+  /** true = has been analyzed (lastAnalyzedAt set or status past NEW) */
+  analyzed?: boolean;
 }
 
 export function buildLeadWhere(filters: LeadFilters): Record<string, any> {
@@ -91,6 +93,22 @@ export function buildLeadWhere(filters: LeadFilters): Record<string, any> {
       ],
     });
   }
+  if (filters.analyzed === true) {
+    and.push({
+      OR: [
+        { lastAnalyzedAt: { not: null } },
+        { status: { in: ['ANALYZED', 'CONTACTED', 'QUEUED', 'REPLIED', 'CONVERTED'] } },
+        { leadScore: { not: null } },
+      ],
+    });
+  }
+  if (filters.analyzed === false) {
+    and.push({
+      lastAnalyzedAt: null,
+      leadScore: null,
+      status: 'NEW',
+    });
+  }
   if (and.length) where.AND = and;
 
   return where;
@@ -133,5 +151,6 @@ export function parseLeadFiltersFromSearchParams(sp: URLSearchParams): LeadFilte
     dateAddedFrom: sp.get('dateAddedFrom') || undefined,
     dateAddedTo: sp.get('dateAddedTo') || undefined,
     source: sp.get('source') || undefined,
+    analyzed: bool('analyzed'),
   };
 }
