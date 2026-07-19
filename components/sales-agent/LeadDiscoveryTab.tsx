@@ -675,8 +675,8 @@ export default function LeadDiscoveryTab() {
       <MessageBanner message={message} />
 
       {/* Info Banner Container */}
-      <div className="rounded-xl border border-gray-200 bg-[#F8F9FC] p-5 flex gap-4 shadow-xs">
-        <div className="p-2 rounded-lg bg-[#FEF3C7] text-[#D97706] h-fit">
+      <div className="rounded-2xl border border-[#E8ECF3] bg-gradient-to-br from-[#F8F9FC] via-white to-[#FEF8EF] p-5 flex gap-4 shadow-sm">
+        <div className="p-2.5 rounded-xl bg-[#FEF3C7] text-[#D97706] h-fit ring-1 ring-[#FDE68A]/60">
           <Info className="w-4 h-4 shrink-0" />
         </div>
         <div className="text-xs text-[#0D1E36] space-y-1">
@@ -690,12 +690,15 @@ export default function LeadDiscoveryTab() {
       </div>
 
       {/* Lead Discovery Engine */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-6">
+      <div className="relative overflow-hidden bg-white rounded-2xl border border-gray-200 shadow-sm">
+        <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#0D1E36] via-[#D97706] to-[#0D1E36]" />
+        <div className="p-6 sm:p-7 space-y-6">
         <div className="pb-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-[#0D1E36]">Find cleaning companies</h2>
-            <p className="text-xs text-gray-400 mt-1">
-              Configure parameters to discover and organize company directories into leads groups
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#D97706] mb-1">Discovery</p>
+            <h2 className="text-base font-bold tracking-tight text-[#0D1E36]">Find cleaning companies</h2>
+            <p className="text-xs text-gray-500 mt-1.5 max-w-xl leading-relaxed">
+              Pull Google Business listings or website search results into organized lead groups — filters apply to live profile fields.
             </p>
           </div>
           
@@ -762,7 +765,7 @@ export default function LeadDiscoveryTab() {
         />
 
         {method === "google_places" && (
-          <div className="rounded-xl border border-gray-200 bg-[#F8F9FC] p-4 space-y-4">
+          <div className="rounded-2xl border border-[#F3E6C8] bg-gradient-to-br from-[#FFFBF3] to-[#F8F9FC] p-4 space-y-4">
             <div className="flex items-start gap-2">
               <Filter className="w-4 h-4 text-[#D97706] mt-0.5 shrink-0" />
               <div>
@@ -915,6 +918,7 @@ export default function LeadDiscoveryTab() {
           <p className="w-full text-xs text-gray-400 leading-relaxed mt-1">
             Each query creates a Lead Group. The list refreshes live as searches finish — no manual refresh needed. Duplicates are skipped.
           </p>
+        </div>
         </div>
       </div>
 

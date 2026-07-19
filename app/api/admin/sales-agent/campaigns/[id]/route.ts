@@ -27,7 +27,71 @@ export async function GET(
     },
   });
   if (!campaign) return jsonError('Campaign not found', 404);
-  return jsonOk(campaign);
+
+  const emails = await (prisma as any).saSentEmail.findMany({
+    where: { campaignId: campaign.id },
+    select: {
+      id: true,
+      sequenceStep: true,
+      deliveryStatus: true,
+      scheduledFor: true,
+      sentAt: true,
+      recipientEmail: true,
+      company: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 500,
+  });
+
+  const byStatus: Record<string, number> = {};
+  const byStep: Record<
+    number,
+    { sent: number; queued: number; failed: number; canceled: number; total: number }
+  > = {};
+  for (const e of emails) {
+    const st = String(e.deliveryStatus || 'UNKNOWN');
+    byStatus[st] = (byStatus[st] || 0) + 1;
+    const step = Math.max(1, Number(e.sequenceStep) || 1);
+    if (!byStep[step]) byStep[step] = { sent: 0, queued: 0, failed: 0, canceled: 0, total: 0 };
+    byStep[step].total++;
+    if (['SENT', 'DELIVERED', 'OPENED'].includes(st)) byStep[step].sent++;
+    else if (['QUEUED', 'PENDING', 'RETRYING'].includes(st)) byStep[step].queued++;
+    else if (['FAILED', 'BOUNCED'].includes(st)) byStep[step].failed++;
+    else if (st === 'CANCELED') byStep[step].canceled++;
+  }
+
+  let selectedLeadIds: number[] = [];
+  try {
+    const cfg = campaign.discoveryConfig ? JSON.parse(campaign.discoveryConfig) : {};
+    selectedLeadIds = Array.isArray(cfg.selectedLeadIds) ? cfg.selectedLeadIds.map(Number) : [];
+  } catch {
+    /* ignore */
+  }
+
+  const { buildCampaignSequenceProgress } = await import('@/lib/sales-agent/campaign-sequence');
+  const sequenceProgress = buildCampaignSequenceProgress({
+    followUpSchedule: campaign.followUpSchedule,
+    templateId: campaign.templateId,
+    startedAt: campaign.startedAt,
+    status: campaign.status,
+    emails,
+  });
+
+  return jsonOk({
+    ...campaign,
+    selectedLeadCount: selectedLeadIds.length,
+    sequenceProgress,
+    dashboard: {
+      totalEmails: emails.length,
+      byStatus,
+      byStep,
+      recent: emails.slice(0, 25),
+      sent: (byStatus.SENT || 0) + (byStatus.DELIVERED || 0) + (byStatus.OPENED || 0),
+      queued: (byStatus.QUEUED || 0) + (byStatus.PENDING || 0) + (byStatus.RETRYING || 0),
+      failed: (byStatus.FAILED || 0) + (byStatus.BOUNCED || 0),
+      canceled: byStatus.CANCELED || 0,
+    },
+  });
 }
 
 export async function PATCH(

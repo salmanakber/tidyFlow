@@ -143,6 +143,112 @@ export async function POST(request: NextRequest) {
     return jsonOk(copy, 201);
   }
 
+  /** AI draft — user must describe HTML style / layout (not a generic template dump) */
+  if (body.action === 'generate') {
+    const brief = String(body.brief || '').trim();
+    const htmlStyle = String(body.htmlStyle || '').trim();
+    if (!brief || brief.length < 12) {
+      return jsonError('Describe what this email should say (at least a short brief).');
+    }
+    if (!htmlStyle || htmlStyle.length < 8) {
+      return jsonError(
+        'Describe the HTML design you want (e.g. minimal single-column, navy header + amber CTA, no cards, clean typography).'
+      );
+    }
+
+    const { salesAgentChat, parseJsonLoose } = await import('@/lib/sales-agent/ai-provider');
+    const followUps = Math.min(3, Math.max(0, Number(body.followUpCount) || 0));
+    const language = body.language || 'en';
+    const country = body.country || '';
+
+    const result = await salesAgentChat(
+      [
+        {
+          role: 'system',
+          content: `You write B2B cold-email HTML for TidyFlow (cleaning ops software).
+Return JSON only:
+{
+  "name": "short pack name",
+  "subject": "email subject with {{company_name}} etc",
+  "htmlBody": "full HTML email body",
+  "textBody": "plain text fallback",
+  "stepLabel": "Day 0 · Initial",
+  "children": [
+    { "name": "...", "subject": "...", "htmlBody": "...", "textBody": "...", "delayDays": 1, "stepLabel": "Day 1 follow-up" }
+  ]
+}
+Rules:
+- Use ONLY these merge tags when needed: {{company_name}} {{contact_name}} {{city}} {{website}} {{services}} {{personalized_intro}} {{sender_name}} {{booking_link}}
+- htmlBody must match the user's requested HTML design — not a generic purple SaaS template
+- Prefer table-based or simple semantic HTML that works in email clients
+- No external CSS frameworks; inline styles only
+- Include ${followUps} follow-up child emails (delayDays escalating). If followUps is 0, children must be [].
+- Tone: professional, concise, cleaning-industry relevant
+- Language code hint: ${language}${country ? `; country focus: ${country}` : ''}`,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            messageBrief: brief,
+            htmlDesignRequest: htmlStyle,
+            followUpCount: followUps,
+            language,
+            country: country || null,
+            ctaPreference: body.cta || 'soft ask for a short demo / booking link',
+          }),
+        },
+      ],
+      { action: 'generate_template', jsonMode: true }
+    );
+
+    const parsed = parseJsonLoose<any>(result.text);
+    if (!parsed?.subject || !parsed?.htmlBody) {
+      return jsonError('AI did not return a usable template — try a clearer design brief.');
+    }
+
+    const children = Array.isArray(parsed.children)
+      ? parsed.children.slice(0, followUps).map((c: any, idx: number) => ({
+          name: c.name || `Follow-up ${idx + 1}`,
+          subject: c.subject || parsed.subject,
+          htmlBody: c.htmlBody || parsed.htmlBody,
+          textBody: c.textBody || '',
+          delayDays: Math.max(1, Number(c.delayDays) || (idx === 0 ? 1 : idx === 1 ? 3 : 7)),
+          stepLabel: c.stepLabel || `Day ${idx === 0 ? 1 : idx === 1 ? 3 : 7} follow-up`,
+          status: 'DRAFT',
+          language: language || '',
+          country: country || '',
+          _draft: true,
+        }))
+      : [];
+
+    await saLog({
+      category: 'ai',
+      action: 'template_generated',
+      message: `AI drafted template pack (${children.length} follow-ups)`,
+      userId: gate.userId,
+      details: { provider: result.provider, followUps: children.length },
+    });
+
+    return jsonOk({
+      draft: {
+        id: null,
+        name: parsed.name || 'AI outreach pack',
+        subject: parsed.subject,
+        htmlBody: parsed.htmlBody,
+        textBody: parsed.textBody || '',
+        status: 'DRAFT',
+        language: language || '',
+        country: country || '',
+        delayDays: 0,
+        stepLabel: parsed.stepLabel || 'Day 0 · Initial',
+        parentId: null,
+        children,
+      },
+      provider: result.provider,
+      model: result.model,
+    });
+  }
+
   if (!body.name || !body.subject) return jsonError('name and subject are required');
 
   const parentId = body.parentId ? Number(body.parentId) : null;

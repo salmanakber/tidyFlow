@@ -99,10 +99,46 @@ export async function POST(
       sender_name: (await getSalesAgentSmtpConfig()).senderName,
       booking_link: body.booking_link || 'https://tidyflowapp.com',
     };
+
+    const renderOne = (tpl: any) => ({
+      id: tpl.id,
+      name: tpl.name,
+      stepLabel: tpl.stepLabel || null,
+      delayDays: tpl.delayDays ?? 0,
+      subject: renderTemplate(tpl.subject, vars),
+      htmlBody: tpl.htmlBody ? renderTemplate(tpl.htmlBody, vars) : null,
+      textBody: tpl.textBody ? renderTemplate(tpl.textBody, vars) : null,
+    });
+
+    // Full pack preview (parent + all children)
+    if (body.includePack) {
+      const pack = await (prisma as any).saEmailTemplate.findUnique({
+        where: { id },
+        include: {
+          children: { orderBy: [{ delayDays: 'asc' }, { id: 'asc' }] },
+          parent: { select: { id: true, name: true } },
+        },
+      });
+      if (!pack) return jsonError('Not found', 404);
+      const root = pack.parentId
+        ? await (prisma as any).saEmailTemplate.findUnique({
+            where: { id: pack.parentId },
+            include: { children: { orderBy: [{ delayDays: 'asc' }, { id: 'asc' }] } },
+          })
+        : pack;
+      if (!root) return jsonError('Pack not found', 404);
+      const steps = [renderOne(root), ...(root.children || []).map(renderOne)];
+      return jsonOk({
+        packId: root.id,
+        packName: root.name,
+        vars,
+        steps,
+        stepCount: steps.length,
+      });
+    }
+
     return jsonOk({
-      subject: renderTemplate(template.subject, vars),
-      htmlBody: template.htmlBody ? renderTemplate(template.htmlBody, vars) : null,
-      textBody: template.textBody ? renderTemplate(template.textBody, vars) : null,
+      ...renderOne(template),
       vars,
     });
   }

@@ -15,9 +15,9 @@ import {
   btnSecondary,
   inputCls,
 } from "./shared"
-import { Play, Pause, Plus, Pencil, Trash2, Loader2, Settings, Users, CalendarDays } from "lucide-react"
+import { Play, Pause, Plus, Pencil, Trash2, Loader2, Settings, Users, CalendarDays, LayoutDashboard, X } from "lucide-react"
 import { SA_COUNTRIES, SA_LANGUAGES, formatAudienceTag, languageLabel } from "@/lib/sales-agent/taxonomy"
-import { formatStepSchedule, parseCampaignSequence } from "@/lib/sales-agent/campaign-sequence"
+import { parseCampaignSequence } from "@/lib/sales-agent/campaign-sequence"
 
 type FormStep = {
   templateId: string
@@ -71,6 +71,22 @@ export default function CampaignsTab() {
   const [leadsLoading, setLeadsLoading] = useState(false)
   const [filterLanguage, setFilterLanguage] = useState("")
   const [filterCountry, setFilterCountry] = useState("")
+  const [details, setDetails] = useState<any | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+
+  const openDetails = async (c: any) => {
+    setDetailsLoading(true)
+    setDetails({ ...c, _loading: true })
+    try {
+      const full = await saGet(`/campaigns/${c.id}`)
+      setDetails(full)
+    } catch (e: any) {
+      setMessage({ type: "error", text: e.message })
+      setDetails(null)
+    } finally {
+      setDetailsLoading(false)
+    }
+  }
 
   const loadCore = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -876,15 +892,100 @@ export default function CampaignsTab() {
         </div>
       )}
 
-      {/* Campaigns Listing Container */}
+      {details && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-100 bg-[#0B1B3B] text-white flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-300 font-bold">Campaign dashboard</p>
+                <h3 className="text-sm font-semibold mt-0.5">{details.name}</h3>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {details.status}
+                  {details.sequenceProgress?.headline ? ` · ${details.sequenceProgress.headline}` : ""}
+                </p>
+              </div>
+              <button type="button" className="text-slate-300 hover:text-white" onClick={() => setDetails(null)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-[#F8F9FC]">
+              {detailsLoading || details._loading ? (
+                <LoadingBlock />
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      ["Selected leads", details.selectedLeadCount ?? "—"],
+                      ["Emails tracked", details.dashboard?.totalEmails ?? 0],
+                      ["Sent", details.dashboard?.sent ?? 0],
+                      ["Queued", details.dashboard?.queued ?? 0],
+                      ["Failed", details.dashboard?.failed ?? 0],
+                      ["Canceled", details.dashboard?.canceled ?? 0],
+                    ].map(([label, val]) => (
+                      <div key={String(label)} className="bg-white rounded-xl border border-gray-200 p-3.5">
+                        <div className="text-xl font-bold text-[#0B1B3B] tabular-nums">{val}</div>
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mt-1">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#0B1B3B]">Rounds</h4>
+                    <div className="space-y-2">
+                      {(details.sequenceProgress?.rounds || []).map((r: any) => (
+                        <div key={r.step} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 bg-[#F8F9FC] px-3 py-2.5">
+                          <div>
+                            <p className="text-xs font-semibold text-[#0B1B3B]">
+                              Round {r.step} · {r.label}
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{r.summary}</p>
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-500">
+                            sent {r.sent} · queued {r.queued} · failed {r.failed}
+                          </div>
+                        </div>
+                      ))}
+                      {!details.sequenceProgress?.rounds?.length && (
+                        <p className="text-xs text-gray-400">No segment schedule yet.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#0B1B3B]">Recent sends</h4>
+                    <div className="max-h-56 overflow-y-auto divide-y divide-gray-100">
+                      {(details.dashboard?.recent || []).map((e: any) => (
+                        <div key={e.id} className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-[#0B1B3B] truncate">{e.company?.name || e.recipientEmail}</p>
+                            <p className="text-[10px] text-gray-400">{e.recipientEmail}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100">{e.deliveryStatus}</span>
+                            <p className="text-[10px] text-gray-400 mt-1">Round {e.sequenceStep || 1}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {!details.dashboard?.recent?.length && (
+                        <p className="text-xs text-gray-400 py-2">No emails queued yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <EmptyState
           title="No campaigns configured"
           description="Build custom campaigns, populate lead lists from Find Leads, then initiate sending operations."
         />
       ) : (
-        <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-[#E3E7F0] bg-[#F8F9FC] flex flex-wrap gap-3 items-end">
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm p-4 flex flex-wrap gap-3 items-end">
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-[#8890A0]">Filter language</label>
               <select
@@ -894,9 +995,7 @@ export default function CampaignsTab() {
               >
                 <option value="">All languages</option>
                 {SA_LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
+                  <option key={l.code} value={l.code}>{l.label}</option>
                 ))}
               </select>
             </div>
@@ -909,200 +1008,141 @@ export default function CampaignsTab() {
               >
                 <option value="">All countries</option>
                 {SA_COUNTRIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="text-[#8890A0] text-[10px] font-semibold uppercase tracking-wider bg-[#F6F7FB] border-b border-[#E3E7F0]">
-                  <th className="p-4 pl-5">Campaign Name</th>
-                  <th className="p-4">Audience</th>
-                  <th className="p-4">Segments</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Associated Template</th>
-                  <th className="p-4 text-center">Selected Leads</th>
-                  <th className="p-4 text-center">Delivered</th>
-                  <th className="p-4 text-right pr-5">Execution Controls</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EEF0F5]">
-                {items
-                  .filter((c) => {
-                    if (filterLanguage && c.language !== filterLanguage) return false
-                    if (filterCountry && c.country !== filterCountry) return false
-                    return true
-                  })
-                  .map((c) => {
-                  let selectedCount = 0
-                  try {
-                    const cfg = c.discoveryConfig ? JSON.parse(c.discoveryConfig) : {}
-                    selectedCount = Array.isArray(cfg.selectedLeadIds) ? cfg.selectedLeadIds.length : 0
-                  } catch {
-                    /* ignore */
-                  }
-                  const audience = formatAudienceTag({ language: c.language, country: c.country })
-                  const seq = parseCampaignSequence(c.followUpSchedule)
-                  const stepCount = seq.steps.length || (c.templateId ? 1 : 0)
-                  return (
-                    <tr key={c.id} className="hover:bg-[#F8F9FC] transition-colors duration-100">
-                      <td className="p-4 pl-5 font-semibold text-[#0B1B3B]">{c.name}</td>
-                      <td className="p-4">
-                        {audience ? (
-                          <span className="inline-flex flex-wrap gap-1">
-                            {c.language ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#EEF0F5] text-[#0B1B3B] font-medium">
-                                {languageLabel(c.language)}
-                              </span>
-                            ) : null}
-                            {c.country ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#8A5A00] font-medium">
-                                {c.country}
-                              </span>
-                            ) : null}
+
+          <div className="grid grid-cols-1 gap-3">
+            {items
+              .filter((c) => {
+                if (filterLanguage && c.language !== filterLanguage) return false
+                if (filterCountry && c.country !== filterCountry) return false
+                return true
+              })
+              .map((c) => {
+                let selectedCount = 0
+                try {
+                  const cfg = c.discoveryConfig ? JSON.parse(c.discoveryConfig) : {}
+                  selectedCount = Array.isArray(cfg.selectedLeadIds) ? cfg.selectedLeadIds.length : 0
+                } catch {
+                  /* ignore */
+                }
+                const seq = parseCampaignSequence(c.followUpSchedule)
+                const stepCount = seq.steps.length || (c.templateId ? 1 : 0)
+                return (
+                  <div
+                    key={c.id}
+                    className="bg-white rounded-xl border border-[#E3E7F0] shadow-sm hover:border-[#D98E04]/35 transition-colors overflow-hidden"
+                  >
+                    <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-start gap-4">
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-bold text-[#0B1B3B]">{c.name}</h4>
+                          <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-semibold ${statusCls(c.status)}`}>
+                            {c.status}
                           </span>
-                        ) : (
-                          <span className="text-[#8890A0]">—</span>
+                          {c.language ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#EEF0F5] font-medium">{languageLabel(c.language)}</span>
+                          ) : null}
+                          {c.country ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#8A5A00] font-medium">{c.country}</span>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Template: <span className="font-medium text-[#0B1B3B]">{c.template?.name || "—"}</span>
+                          {" · "}
+                          {selectedCount} leads selected · {c.emailsSent ?? c._count?.sentEmails ?? 0} delivered
+                          {stepCount ? ` · ${stepCount} round${stepCount === 1 ? "" : "s"}` : ""}
+                        </p>
+                        {c.sequenceProgress?.headline && (
+                          <p className="text-[11px] font-medium text-[#0B1B3B] bg-[#F8F9FC] border border-gray-100 rounded-lg px-3 py-2">
+                            {c.sequenceProgress.headline}
+                          </p>
                         )}
-                      </td>
-                      <td className="p-4">
-                        {stepCount > 0 ? (
-                          <div className="space-y-1.5 max-w-[260px]">
-                            <span className="text-[10px] font-semibold text-[#0B1B3B]">
-                              {stepCount} round{stepCount === 1 ? "" : "s"}
-                            </span>
-                            {c.sequenceProgress?.headline ? (
-                              <p className="text-[11px] text-[#0B1B3B] font-medium leading-snug">
-                                {c.sequenceProgress.headline}
-                              </p>
-                            ) : null}
-                            {(c.sequenceProgress?.rounds?.length
-                              ? c.sequenceProgress.rounds
-                              : seq.steps
-                            ).map((r: any) => {
-                              const status = r.status || "pending"
-                              const text =
-                                r.summary ||
-                                `E${r.step} ${formatStepSchedule(r)}`
-                              const tone =
-                                status === "sent"
-                                  ? "bg-green-50 text-green-800 border-green-100"
-                                  : status === "sending"
-                                    ? "bg-amber-50 text-amber-800 border-amber-100"
-                                    : status === "upcoming" || status === "pending"
-                                      ? "bg-slate-50 text-slate-600 border-slate-200"
-                                      : status === "failed"
-                                        ? "bg-rose-50 text-rose-700 border-rose-100"
-                                        : "bg-slate-50 text-slate-500 border-slate-100"
-                              return (
-                                <div
-                                  key={r.step}
-                                  className={`text-[10px] leading-snug px-2 py-1 rounded-md border ${tone}`}
-                                >
-                                  <span className="font-semibold uppercase tracking-wide mr-1">
-                                    {status === "sent"
-                                      ? "Sent"
-                                      : status === "sending"
-                                        ? "Sending"
-                                        : status === "upcoming" || status === "pending"
-                                          ? "Upcoming"
-                                          : status}
-                                  </span>
-                                  {text}
-                                </div>
-                              )
-                            })}
+                        {c.sequenceProgress?.rounds?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {c.sequenceProgress.rounds.map((r: any) => (
+                              <span
+                                key={r.step}
+                                className={`text-[10px] px-2 py-1 rounded-md border font-medium ${
+                                  r.status === "sent"
+                                    ? "bg-green-50 text-green-800 border-green-100"
+                                    : r.status === "sending"
+                                      ? "bg-amber-50 text-amber-800 border-amber-100"
+                                      : "bg-slate-50 text-slate-600 border-slate-200"
+                                }`}
+                              >
+                                R{r.step} {r.status}
+                              </span>
+                            ))}
                           </div>
-                        ) : (
-                          <span className="text-[#8890A0]">—</span>
                         )}
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-block text-[10px] px-2.5 py-0.5 rounded-full font-semibold ${statusCls(c.status)}`}>
-                          {c.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-[#5B6478]">{c.template?.name || "—"}</td>
-                      <td className="p-4 text-center text-[#0B1B3B] tabular-nums font-medium">{selectedCount}</td>
-                      <td className="p-4 text-center text-[#0B1B3B] tabular-nums font-medium">{c.emailsSent ?? c._count?.sentEmails ?? 0}</td>
-                      <td className="p-4 text-right pr-5">
-                        <div className="flex items-center justify-end gap-4">
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 lg:justify-end shrink-0">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0B1B3B] border border-gray-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-lg"
+                          onClick={() => openDetails(c)}
+                        >
+                          <LayoutDashboard className="w-3.5 h-3.5 text-[#D98E04]" /> Details
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#0B1B3B] border border-gray-200 bg-white hover:bg-slate-50 px-3 py-2 rounded-lg"
+                          onClick={() => openEdit(c)}
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </button>
+                        {(c.status === "DRAFT" || c.status === "PAUSED" || c.status === "COMPLETED") && (
                           <button
                             type="button"
-                            className="text-[#0B1B3B] text-[11px] font-semibold inline-flex items-center gap-1 hover:text-[#D98E04] transition-colors"
-                            onClick={() => openEdit(c)}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#166534] border border-green-100 bg-green-50 hover:bg-green-100 px-3 py-2 rounded-lg disabled:opacity-50"
+                            disabled={actionId === c.id}
+                            onClick={() => setStatus(c.id, "RUNNING")}
                           >
-                            <Pencil className="w-3.5 h-3.5" /> Edit
+                            {actionId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                            {(c.emailsSent ?? 0) > 0 ? "Continue" : "Start"}
                           </button>
-                          
-                          {(c.status === "DRAFT" || c.status === "PAUSED" || c.status === "COMPLETED") && (
+                        )}
+                        {c.status === "RUNNING" && (
+                          <>
                             <button
                               type="button"
-                              className="text-[#166534] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#166534] border border-green-100 bg-green-50 px-3 py-2 rounded-lg disabled:opacity-50"
                               disabled={actionId === c.id}
                               onClick={() => setStatus(c.id, "RUNNING")}
                             >
-                              {actionId === c.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <Play className="w-3.5 h-3.5" />
-                              )}
-                              {(c.emailsSent ?? 0) > 0 ? "Continue remaining" : "Start"}
+                              {actionId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                              Queue remaining
                             </button>
-                          )}
-
-                          {c.status === "RUNNING" && (
-                            <>
-                              <button
-                                type="button"
-                                className="text-[#166534] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
-                                disabled={actionId === c.id}
-                                onClick={() => setStatus(c.id, "RUNNING")}
-                                title="Queue any leads still missing emails"
-                              >
-                                {actionId === c.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Play className="w-3.5 h-3.5" />
-                                )}
-                                Queue remaining
-                              </button>
-                              <button
-                                type="button"
-                                className="text-[#8A5A00] text-[11px] font-semibold inline-flex items-center gap-1 hover:brightness-110 disabled:opacity-50"
-                                disabled={actionId === c.id}
-                                onClick={() => setStatus(c.id, "PAUSED")}
-                              >
-                                {actionId === c.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Pause className="w-3.5 h-3.5" />
-                                )}
-                                Pause
-                              </button>
-                            </>
-                          )}
-                          
-                          {c.status !== "RUNNING" && (
                             <button
                               type="button"
-                              className="text-[#9A2A1E] text-[11px] font-semibold inline-flex items-center gap-1 hover:text-[#7A1F16] transition-colors"
-                              onClick={() => remove(c)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#8A5A00] border border-amber-100 bg-amber-50 px-3 py-2 rounded-lg disabled:opacity-50"
+                              disabled={actionId === c.id}
+                              onClick={() => setStatus(c.id, "PAUSED")}
                             >
-                              <Trash2 className="w-3.5 h-3.5" /> Delete
+                              {actionId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pause className="w-3.5 h-3.5" />}
+                              Pause
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                          </>
+                        )}
+                        {c.status !== "RUNNING" && (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#9A2A1E] border border-rose-100 bg-rose-50 px-3 py-2 rounded-lg"
+                            onClick={() => remove(c)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
           </div>
         </div>
       )}

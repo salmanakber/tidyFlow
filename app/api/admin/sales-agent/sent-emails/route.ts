@@ -18,6 +18,12 @@ export async function GET(request: NextRequest) {
   const where: Record<string, any> = {};
   if (status) where.deliveryStatus = status;
   if (campaignId) where.campaignId = Number(campaignId);
+  const discoveryGroupId = sp.get('discoveryGroupId') || sp.get('groupId');
+  if (discoveryGroupId) {
+    where.company = {
+      groupMembers: { some: { groupId: Number(discoveryGroupId) } },
+    };
+  }
   if (search) {
     where.OR = [
       { recipientEmail: { contains: search, mode: 'insensitive' } },

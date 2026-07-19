@@ -34,6 +34,8 @@ export default function SentEmailsTab() {
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState("")
   const [search, setSearch] = useState("")
+  const [groupId, setGroupId] = useState("")
+  const [groups, setGroups] = useState<any[]>([])
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [retrying, setRetrying] = useState<number | null>(null)
@@ -46,6 +48,7 @@ export default function SentEmailsTab() {
       const params: Record<string, any> = { page, pageSize: 25 }
       if (status) params.status = status
       if (search) params.search = search
+      if (groupId) params.discoveryGroupId = groupId
       const next = await saGet("/sent-emails", params)
       setData(next)
       if (!silent) setSelected([])
@@ -54,11 +57,17 @@ export default function SentEmailsTab() {
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [page, status, search])
+  }, [page, status, search, groupId])
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    saGet("/groups")
+      .then((g) => setGroups(Array.isArray(g) ? g : []))
+      .catch(() => {})
+  }, [])
 
   // Live list while campaign sends — no manual refresh needed
   useEffect(() => {
@@ -140,6 +149,27 @@ export default function SentEmailsTab() {
             {["PENDING", "QUEUED", "SENT", "DELIVERED", "OPENED", "FAILED", "BOUNCED", "RETRYING", "CANCELED"].map((s) => (
               <option key={s} value={s}>
                 {s}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="w-full sm:w-[220px]">
+          <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider mb-1.5">
+            Lead group
+          </label>
+          <select
+            className={`${inputCls} transition-all duration-150 focus:border-[#D97706]`}
+            value={groupId}
+            onChange={(e) => {
+              setGroupId(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="">All groups</option>
+            {groups.map((g) => (
+              <option key={g.id} value={String(g.id)}>
+                {g.label || `Group #${g.id}`}
               </option>
             ))}
           </select>
