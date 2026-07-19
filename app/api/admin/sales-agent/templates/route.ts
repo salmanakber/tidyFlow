@@ -143,20 +143,23 @@ export async function POST(request: NextRequest) {
     return jsonOk(copy, 201);
   }
 
-  /** AI draft — user must describe HTML style / layout (not a generic template dump) */
+  /** AI draft — user describes message + HTML look; defaults to simple human email + 1 CTA */
   if (body.action === 'generate') {
     const brief = String(body.brief || '').trim();
     const htmlStyle = String(body.htmlStyle || '').trim();
     if (!brief || brief.length < 12) {
       return jsonError('Describe what this email should say (at least a short brief).');
     }
-    if (!htmlStyle || htmlStyle.length < 8) {
-      return jsonError(
-        'Describe the HTML design you want (e.g. minimal single-column, navy header + amber CTA, no cards, clean typography).'
-      );
-    }
+    // Allow empty design → AI uses DEFAULT_EMAIL_HTML_DESIGN (simple human email)
+    const designRequest =
+      htmlStyle.length >= 8
+        ? htmlStyle
+        : 'Use the DEFAULT LOOK: simple human-written email, white background, short paragraphs, ONE CTA button at the bottom only.';
 
     const { salesAgentChat, parseJsonLoose } = await import('@/lib/sales-agent/ai-provider');
+    const { buildTemplateGenerationSystemPrompt, DEFAULT_EMAIL_HTML_DESIGN } = await import(
+      '@/lib/sales-agent/product-knowledge'
+    );
     const followUps = Math.min(3, Math.max(0, Number(body.followUpCount) || 0));
     const language = body.language || 'en';
     const country = body.country || '';
@@ -165,36 +168,27 @@ export async function POST(request: NextRequest) {
       [
         {
           role: 'system',
-          content: `You write B2B cold-email HTML for TidyFlow (cleaning ops software).
-Return JSON only:
-{
-  "name": "short pack name",
-  "subject": "email subject with {{company_name}} etc",
-  "htmlBody": "full HTML email body",
-  "textBody": "plain text fallback",
-  "stepLabel": "Day 0 · Initial",
-  "children": [
-    { "name": "...", "subject": "...", "htmlBody": "...", "textBody": "...", "delayDays": 1, "stepLabel": "Day 1 follow-up" }
-  ]
-}
-Rules:
-- Use ONLY these merge tags when needed: {{company_name}} {{contact_name}} {{city}} {{website}} {{services}} {{personalized_intro}} {{sender_name}} {{booking_link}}
-- htmlBody must match the user's requested HTML design — not a generic purple SaaS template
-- Prefer table-based or simple semantic HTML that works in email clients
-- No external CSS frameworks; inline styles only
-- Include ${followUps} follow-up child emails (delayDays escalating). If followUps is 0, children must be [].
-- Tone: professional, concise, cleaning-industry relevant
-- Language code hint: ${language}${country ? `; country focus: ${country}` : ''}`,
+          content: buildTemplateGenerationSystemPrompt({
+            followUps,
+            language,
+            country: country || undefined,
+          }),
         },
         {
           role: 'user',
           content: JSON.stringify({
             messageBrief: brief,
-            htmlDesignRequest: htmlStyle,
+            htmlDesignRequest: designRequest,
+            designPriority:
+              'Follow htmlDesignRequest exactly. If it conflicts with default, user wins. Still keep ONE bottom CTA unless user asks otherwise.',
+            defaultLookReminder: DEFAULT_EMAIL_HTML_DESIGN,
             followUpCount: followUps,
             language,
             country: country || null,
-            ctaPreference: body.cta || 'soft ask for a short demo / booking link',
+            ctaPreference:
+              body.cta ||
+              'One soft CTA only at the bottom — button or link to {{booking_link}}, e.g. “Book a quick demo”',
+            featuresToMention: body.features || null,
           }),
         },
       ],

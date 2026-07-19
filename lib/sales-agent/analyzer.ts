@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 import { crawlWebsite } from './crawler';
 import { salesAgentChat, parseJsonLoose } from './ai-provider';
 import { saLog } from './logger';
+import { TIDYFLOW_ONE_LINER, tidyflowFeaturesForPrompt } from './product-knowledge';
 
 export interface AnalysisFlags {
   needsTidyFlow: boolean;
@@ -16,7 +17,12 @@ export interface AnalysisFlags {
   personalizedIntro: string;
 }
 
-const ANALYSIS_PROMPT = `You are evaluating cleaning / facilities companies as potential customers for TidyFlow — a cleaning operations platform (scheduling, staff, inspections, client portal, GPS proof of work).
+const ANALYSIS_PROMPT = `You are evaluating cleaning / facilities companies as potential customers for TidyFlow.
+
+${TIDYFLOW_ONE_LINER}
+
+TidyFlow features (use when writing personalizedIntro — only real capabilities):
+${tidyflowFeaturesForPrompt()}
 
 Analyze the website content and return JSON only:
 {
@@ -29,7 +35,7 @@ Analyze the website content and return JSON only:
   "websiteOutdated": boolean,
   "leadScore": number (0-100),
   "scoreReason": "short explanation",
-  "personalizedIntro": "one personalized outreach sentence mentioning their company"
+  "personalizedIntro": "one personalized outreach sentence mentioning their company; optionally hint one relevant TidyFlow capability (scheduling, GPS proof, client portal, etc.) without inventing features"
 }
 
 Higher scores: established cleaning company, outdated tech, no clear ops software, commercial/office focus.

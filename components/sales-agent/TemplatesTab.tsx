@@ -51,11 +51,13 @@ export default function TemplatesTab() {
   const [generating, setGenerating] = useState(false)
   const [aiForm, setAiForm] = useState({
     brief: "",
-    htmlStyle: "",
+    htmlStyle:
+      "Simple human-written email: white background, short paragraphs, no fancy layout. One amber (#D97706) CTA button at the bottom only linking to {{booking_link}}. Sign off with {{sender_name}}. No cards, no hero, no purple.",
     followUpCount: "2",
     language: "",
     country: "",
-    cta: "Soft ask for a short demo using {{booking_link}}",
+    cta: "One button at the bottom: Book a quick demo → {{booking_link}}",
+    features: "",
   })
 
   const load = async () => {
@@ -196,6 +198,7 @@ export default function TemplatesTab() {
           language: aiForm.language || undefined,
           country: aiForm.country || undefined,
           cta: aiForm.cta || undefined,
+          features: aiForm.features || undefined,
         },
         { timeout: 120000 }
       )
@@ -544,7 +547,9 @@ export default function TemplatesTab() {
                 <Sparkles className="w-4 h-4 text-[#D97706]" />
                 <div>
                   <h3 className="text-sm font-bold text-[#0D1E36]">Generate template with AI</h3>
-                  <p className="text-[11px] text-gray-500">Tell us the message and the HTML look — not a generic template.</p>
+                  <p className="text-[11px] text-gray-500">
+                    AI knows TidyFlow features. Default design = simple email + one bottom CTA (not a weird landing page).
+                  </p>
                 </div>
               </div>
               <button type="button" className="text-gray-400 hover:text-[#0D1E36] text-xs font-semibold" onClick={() => setShowAi(false)}>
@@ -558,18 +563,34 @@ export default function TemplatesTab() {
                   className={`${inputCls} min-h-[88px]`}
                   value={aiForm.brief}
                   onChange={(e) => setAiForm({ ...aiForm, brief: e.target.value })}
-                  placeholder="e.g. Short cold intro for commercial cleaning owners who still use WhatsApp + spreadsheets — mention ops chaos, offer a 15-min demo."
+                  placeholder="e.g. Short cold intro for commercial cleaning owners still on WhatsApp + spreadsheets. Mention GPS proof of work and client portal. Soft ask for a 15-min demo."
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">HTML design you want</label>
+                <label className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">
+                  Features to mention (optional)
+                </label>
+                <input
+                  className={inputCls}
+                  value={aiForm.features}
+                  onChange={(e) => setAiForm({ ...aiForm, features: e.target.value })}
+                  placeholder="e.g. GPS tracking, client portal, payroll — leave blank if none"
+                />
+                <p className="text-[10px] text-gray-400">
+                  AI maps these to real TidyFlow capabilities (scheduling, inspections, GPS, portal, invoices, mobile, etc.).
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[#0D1E36] uppercase tracking-wider">HTML design (followed exactly)</label>
                 <textarea
                   className={`${inputCls} min-h-[100px]`}
                   value={aiForm.htmlStyle}
                   onChange={(e) => setAiForm({ ...aiForm, htmlStyle: e.target.value })}
-                  placeholder="e.g. Minimal single-column, navy (#0D1E36) header bar with brand name, body in system-friendly sans, one amber (#D97706) CTA button, no cards, no purple gradients, generous whitespace, works in Gmail."
+                  placeholder="Default is already filled: simple human email + one bottom CTA. Change only if you want a different look."
                 />
-                <p className="text-[10px] text-gray-400">Be specific: layout, colors, typography, CTA style. Generic “make a nice email” will be rejected.</p>
+                <p className="text-[10px] text-gray-400">
+                  Be specific if you customize. Vague “make it nice” falls back to the simple default.
+                </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
