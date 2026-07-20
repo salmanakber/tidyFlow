@@ -45,9 +45,8 @@ export async function enqueueMultiDiscovery(payload: Record<string, unknown>) {
     Array.isArray(payload.methods) && payload.methods.length
       ? (payload.methods as Array<'google_places' | 'search_engine'>)
       : [(payload.method as 'google_places' | 'search_engine') || 'google_places'];
-  const profileOnly =
-    payload.profileOnly === true ||
-    (methods.includes('google_places') && methods.includes('search_engine'));
+  // Explicit only — when both sources run, Places covers GBP and search finds websites
+  const profileOnly = payload.profileOnly === true;
   const keywords = (payload.keywords as string[]) || [];
   const countries = ((payload.countries as string[]) || []).filter(Boolean);
   const cities = ((payload.cities as string[]) || []).filter(Boolean);
@@ -61,15 +60,31 @@ export async function enqueueMultiDiscovery(payload: Record<string, unknown>) {
   const { createDiscoveryGroup } = await import('./groups');
   const groupMethod =
     methods.length > 1 ? 'MIXED' : methods[0] === 'search_engine' ? 'search_engine' : 'google_places';
-  const group = await createDiscoveryGroup({
-    method: groupMethod,
-    countries,
-    cities,
-    keywords,
-    totalChunks,
-    userId: payload.userId as number | undefined,
-    status: 'QUEUED',
-  });
+
+  let group: any;
+  const existingGroupId = payload.discoveryGroupId ? Number(payload.discoveryGroupId) : 0;
+  if (existingGroupId > 0) {
+    group = await (prisma as any).saDiscoveryGroup.findUnique({ where: { id: existingGroupId } });
+    if (!group) throw new Error(`Discovery group ${existingGroupId} not found`);
+    group = await (prisma as any).saDiscoveryGroup.update({
+      where: { id: existingGroupId },
+      data: {
+        status: 'QUEUED',
+        totalChunks: { increment: totalChunks },
+      },
+    });
+  } else {
+    group = await createDiscoveryGroup({
+      method: groupMethod,
+      countries,
+      cities,
+      keywords,
+      totalChunks,
+      userId: payload.userId as number | undefined,
+      status: 'QUEUED',
+      label: typeof payload.groupLabel === 'string' ? payload.groupLabel.trim() || undefined : undefined,
+    });
+  }
 
   // Chunked queue: one Redis job per keyword × country × city × method
   let enqueued = 0;

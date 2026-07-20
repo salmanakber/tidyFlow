@@ -109,6 +109,9 @@ type WebsiteFilter = "any" | "with_website" | "without_website"
 export default function LeadDiscoveryTab() {
   const [useGoogleBusiness, setUseGoogleBusiness] = useState(true)
   const [useSearchEngine, setUseSearchEngine] = useState(false)
+  const [groupSaveMode, setGroupSaveMode] = useState<"new" | "existing">("new")
+  const [targetGroupId, setTargetGroupId] = useState("")
+  const [newDiscoverGroupLabel, setNewDiscoverGroupLabel] = useState("")
   const [countries, setCountries] = useState<string[]>([])
   const [cities, setCities] = useState<string[]>([])
   const [keywords, setKeywords] = useState<string[]>(["Cleaning Company", "Commercial Cleaning"])
@@ -432,6 +435,10 @@ export default function LeadDiscoveryTab() {
       })
       return
     }
+    if (groupSaveMode === "existing" && !targetGroupId) {
+      setMessage({ type: "error", text: "Pick an existing group, or switch to Create new group" })
+      return
+    }
     setDiscovering(true)
     setMessage(null)
     try {
@@ -448,13 +455,19 @@ export default function LeadDiscoveryTab() {
         {
           useGoogleBusiness,
           useSearchEngine,
-          profileOnly: useGoogleBusiness && useSearchEngine,
+          profileOnly: false,
           async: useQueue,
           keywords,
           countries,
           cities,
           maxResults: Number(maxResults) || 15,
           ...(filters ? { filters } : {}),
+          ...(groupSaveMode === "existing" && targetGroupId
+            ? { discoveryGroupId: Number(targetGroupId) }
+            : {}),
+          ...(groupSaveMode === "new" && newDiscoverGroupLabel.trim()
+            ? { groupLabel: newDiscoverGroupLabel.trim() }
+            : {}),
         },
         { timeout: useQueue ? 60000 : 300000 }
       )
@@ -734,11 +747,11 @@ export default function LeadDiscoveryTab() {
 
         {useGoogleBusiness && useSearchEngine ? (
           <p className="text-xs text-slate-500 -mt-2">
-            Search engine runs in <strong>business profile mode</strong> (Google Maps listings) — directories like Yelp/Yellow Pages are excluded.
+            Google Business uses Places API (with classic Places fallback if New API is blocked). Search finds company websites — directories like Yelp are excluded.
           </p>
         ) : useGoogleBusiness ? (
           <p className="text-xs text-slate-500 -mt-2">
-            Pulls Google Business / Maps listings (name, phone, address, website, reviews).
+            Pulls Google Business / Maps listings (name, phone, address, website, reviews). If Places API (New) is blocked, classic Places Text Search is used automatically.
           </p>
         ) : useSearchEngine ? (
           <p className="text-xs text-slate-500 -mt-2">
@@ -747,6 +760,55 @@ export default function LeadDiscoveryTab() {
         ) : (
           <p className="text-xs text-amber-700 -mt-2">Enable at least one discovery source above.</p>
         )}
+
+        <div className="rounded-xl border border-gray-200 bg-[#F8F9FC] p-4 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#0D1E36]">Save new leads to</p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] cursor-pointer">
+              <input
+                type="radio"
+                name="groupSaveMode"
+                checked={groupSaveMode === "new"}
+                onChange={() => setGroupSaveMode("new")}
+                className="text-[#D97706] focus:ring-[#D97706]"
+              />
+              Create new group
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] cursor-pointer">
+              <input
+                type="radio"
+                name="groupSaveMode"
+                checked={groupSaveMode === "existing"}
+                onChange={() => setGroupSaveMode("existing")}
+                className="text-[#D97706] focus:ring-[#D97706]"
+              />
+              Existing group
+            </label>
+          </div>
+          {groupSaveMode === "new" ? (
+            <input
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[42px] max-w-md`}
+              value={newDiscoverGroupLabel}
+              onChange={(e) => setNewDiscoverGroupLabel(e.target.value)}
+              placeholder="Optional name — leave blank for auto label"
+            />
+          ) : (
+            <select
+              className={`${inputCls} focus:border-[#D97706] text-sm h-[42px] max-w-md`}
+              value={targetGroupId}
+              onChange={(e) => setTargetGroupId(e.target.value)}
+            >
+              <option value="">Select group…</option>
+              {groups
+                .filter((g) => !g.isPriority)
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label} ({g.memberCount ?? 0})
+                  </option>
+                ))}
+            </select>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TagInput
@@ -925,7 +987,7 @@ export default function LeadDiscoveryTab() {
           </button>
           
           <p className="w-full text-xs text-gray-400 leading-relaxed mt-1">
-            Each query creates a Lead Group. The list refreshes live as searches finish — no manual refresh needed. Duplicates are skipped.
+            Leads go into the group you chose above (new or existing). The list refreshes live as searches finish. Duplicates are skipped.
           </p>
         </div>
         </div>

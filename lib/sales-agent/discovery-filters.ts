@@ -170,13 +170,12 @@ export function buildSearchQueries(input: {
     return [variants[idx % variants.length]];
   }
 
-  const neg =
-    '-site:yelp.com -site:yellowpages.com -site:angi.com -site:homeadvisor.com -site:bbb.org -site:thumbtack.com -site:facebook.com -site:linkedin.com -site:trustpilot.com -site:checkatrade.com -site:mybuilder.com';
+  const neg = '-yelp -yellowpages -angi -homeadvisor -thumbtack -bbb.org -facebook -linkedin';
   const expansions = [
-    `${base} cleaning company ${neg}`,
-    `${base} commercial janitorial ${neg}`,
+    `${base} cleaning company website ${neg}`,
+    `${base} commercial cleaning ${neg}`,
     `${base} office cleaning services ${neg}`,
-    `${base} residential cleaning ${neg}`,
+    `${base} janitorial company ${neg}`,
   ];
   return [expansions[idx % expansions.length]];
 }

@@ -35,22 +35,28 @@ export async function POST(request: NextRequest) {
     return jsonOk(suggestions);
   }
 
-  const method = (body.method === 'search_engine' ? 'search_engine' : 'google_places') as
-    | 'google_places'
-    | 'search_engine';
-  const useGoogleBusiness =
-    body.useGoogleBusiness !== false &&
-    (body.useGoogleBusiness === true || method === 'google_places' || body.useSearchEngine !== true);
-  const useSearchEngine =
-    body.useSearchEngine === true || method === 'search_engine';
+  // Explicit checkbox sources (preferred). Legacy `method` still works.
+  let useGoogleBusiness = body.useGoogleBusiness === true;
+  let useSearchEngine = body.useSearchEngine === true;
+  if (!useGoogleBusiness && !useSearchEngine) {
+    if (body.method === 'search_engine') useSearchEngine = true;
+    else if (body.method === 'google_places') useGoogleBusiness = true;
+    else {
+      // Default: Google Business when neither flag sent (older clients)
+      useGoogleBusiness = body.useGoogleBusiness !== false && body.useSearchEngine !== true;
+      useSearchEngine = body.useSearchEngine === true;
+    }
+  }
+
   const methods: Array<'google_places' | 'search_engine'> = [];
   if (useGoogleBusiness) methods.push('google_places');
   if (useSearchEngine) methods.push('search_engine');
   if (!methods.length) {
     return jsonError('Enable Google Business and/or Search engine discovery');
   }
-  const profileOnly =
-    body.profileOnly === true || (useGoogleBusiness && useSearchEngine);
+
+  // Maps-first search only when explicitly requested (Places already covers GBP)
+  const profileOnly = body.profileOnly === true;
   const keywords = parseList(body.keywords?.length ? body.keywords : body.keyword);
   const countries = parseList(body.countries?.length ? body.countries : body.country);
   const cities = parseList(body.cities?.length ? body.cities : body.city);
@@ -58,6 +64,16 @@ export async function POST(request: NextRequest) {
 
   if (!keywords.length) {
     return jsonError('Add at least one keyword (or ask AI to suggest keywords)');
+  }
+
+  const discoveryGroupId = body.discoveryGroupId ? Number(body.discoveryGroupId) : undefined;
+  const groupLabel =
+    typeof body.groupLabel === 'string' && body.groupLabel.trim()
+      ? body.groupLabel.trim()
+      : undefined;
+
+  if (discoveryGroupId && Number.isNaN(discoveryGroupId)) {
+    return jsonError('Invalid discovery group id');
   }
 
   const payload: {
@@ -69,6 +85,8 @@ export async function POST(request: NextRequest) {
     maxResults?: number;
     campaignId?: number;
     userId: number;
+    discoveryGroupId?: number;
+    groupLabel?: string;
     filters?: Record<string, unknown>;
   } = {
     methods,
@@ -79,6 +97,8 @@ export async function POST(request: NextRequest) {
     maxResults: body.maxResults ? Number(body.maxResults) : undefined,
     campaignId: body.campaignId ? Number(body.campaignId) : undefined,
     userId: gate.userId,
+    discoveryGroupId,
+    groupLabel,
   };
 
   if (methods.includes('google_places') && body.filters && typeof body.filters === 'object') {

@@ -240,6 +240,108 @@ async function fetchPlaceDetailsExact(
   }
 }
 
+/** Map legacy Places API (Text Search / Details) into Places API (New) shape. */
+function mapLegacyPlaceToNew(legacy: any): any {
+  const comps = (legacy.address_components || []).map((c: any) => ({
+    longText: c.long_name,
+    shortText: c.short_name,
+    types: c.types || [],
+  }));
+  const statusMap: Record<string, string> = {
+    OPERATIONAL: 'OPERATIONAL',
+    CLOSED_TEMPORARILY: 'CLOSED_TEMPORARILY',
+    CLOSED_PERMANENTLY: 'CLOSED_PERMANENTLY',
+  };
+  return {
+    id: legacy.place_id ? `places/${legacy.place_id}` : null,
+    displayName: { text: legacy.name || 'Unknown' },
+    formattedAddress: legacy.formatted_address || null,
+    websiteUri: legacy.website || null,
+    nationalPhoneNumber: legacy.formatted_phone_number || legacy.international_phone_number || null,
+    rating: legacy.rating ?? null,
+    userRatingCount: legacy.user_ratings_total ?? null,
+    businessStatus: statusMap[legacy.business_status] || legacy.business_status || 'OPERATIONAL',
+    addressComponents: comps,
+    types: legacy.types || [],
+    googleMapsUri: legacy.url || null,
+    _legacyPlaceId: legacy.place_id || null,
+  };
+}
+
+async function fetchLegacyPlaceDetails(apiKey: string, placeId: string): Promise<any | null> {
+  const id = String(placeId || '').replace(/^places\//, '');
+  if (!id) return null;
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+    url.searchParams.set('place_id', id);
+    url.searchParams.set(
+      'fields',
+      'place_id,name,formatted_address,website,formatted_phone_number,international_phone_number,rating,user_ratings_total,business_status,address_component,type,url'
+    );
+    url.searchParams.set('key', apiKey);
+    const res = await fetch(url.toString());
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 'OK' || !data.result) return null;
+    return mapLegacyPlaceToNew(data.result);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Legacy Places Text Search — works when "Places API" is enabled but
+ * Places API (New) SearchText is blocked (403 API_KEY_SERVICE_BLOCKED).
+ */
+async function searchPlacesLegacy(
+  apiKey: string,
+  query: string,
+  maxResults: number
+): Promise<{ places: any[]; error?: string }> {
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
+    url.searchParams.set('query', query);
+    url.searchParams.set('key', apiKey);
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    if (data.status === 'REQUEST_DENIED') {
+      return {
+        places: [],
+        error:
+          data.error_message ||
+          'Legacy Places Text Search denied — enable Places API (or Places API New) for this key in Google Cloud Console.',
+      };
+    }
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      return {
+        places: [],
+        error: `Legacy Places status ${data.status}: ${data.error_message || 'unknown'}`,
+      };
+    }
+    const results = Array.isArray(data.results) ? data.results.slice(0, maxResults) : [];
+    // Enrich with Details so website/phone are available (Text Search omits website)
+    const places: any[] = [];
+    for (const row of results) {
+      const details = await fetchLegacyPlaceDetails(apiKey, row.place_id);
+      places.push(details || mapLegacyPlaceToNew(row));
+    }
+    return { places };
+  } catch (err: any) {
+    return { places: [], error: err?.message || 'Legacy Places request failed' };
+  }
+}
+
+function isPlacesNewApiBlocked(status: number, body: string): boolean {
+  if (status === 403) return true;
+  const t = body.toLowerCase();
+  return (
+    t.includes('api_key_service_blocked') ||
+    t.includes('permission_denied') ||
+    t.includes('are blocked') ||
+    t.includes('places.googleapis.com')
+  );
+}
+
 function filtersNeedExactVerify(filters?: PlacesDiscoveryFilters): boolean {
   if (!filters) return false;
   if (filters.website && filters.website !== 'any') return true;
@@ -304,6 +406,9 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
     requestBody.includeFutureOpeningBusinesses = true;
   }
 
+  let places: any[] = [];
+  let usedApi: 'places_new' | 'places_legacy' = 'places_new';
+
   const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
@@ -315,22 +420,48 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
     body: JSON.stringify(requestBody),
   });
 
-  if (!response.ok) {
+  if (response.ok) {
+    const data = await response.json();
+    places = data.places || [];
+  } else {
     const body = await response.text();
     await saLog({
-      level: 'error',
+      level: 'warn',
       category: 'google_places',
-      action: 'search_failed',
-      message: body,
+      action: 'search_new_api_failed',
+      message: body.slice(0, 800),
       success: false,
-      durationMs: Date.now() - started,
       userId: input.userId,
+      details: { status: response.status },
     });
-    throw new Error(`Google Places API error (${response.status}): ${body}`);
+
+    if (isPlacesNewApiBlocked(response.status, body)) {
+      // Key often has classic "Places API" enabled but not Places API (New)
+      const legacy = await searchPlacesLegacy(
+        config.googlePlacesApiKey,
+        query,
+        Math.min(Math.max(input.maxResults || config.maxResults, 20), 20)
+      );
+      if (legacy.error && !legacy.places.length) {
+        throw new Error(
+          `Google Places blocked for Places API (New). Legacy fallback also failed: ${legacy.error}. ` +
+            `In Google Cloud Console → APIs & Services → enable “Places API” and/or “Places API (New)”, ` +
+            `and remove Places restrictions from this API key (project 28387859014).`
+        );
+      }
+      places = legacy.places;
+      usedApi = 'places_legacy';
+      await saLog({
+        category: 'google_places',
+        action: 'search_legacy_fallback',
+        message: `Used legacy Places Text Search (${places.length} results) after New API ${response.status}`,
+        userId: input.userId,
+      });
+    } else {
+      throw new Error(`Google Places API error (${response.status}): ${body}`);
+    }
   }
 
-  const data = await response.json();
-  const places = data.places || [];
   let created = 0;
   let skipped = 0;
   let filteredOut = 0;
@@ -342,8 +473,14 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
 
     // When filters are on, re-read Place Details so website/rating/reviews match the live GBP
     let place = rawPlace;
-    if (exactVerify && rawPlace.id) {
-      const details = await fetchPlaceDetailsExact(config.googlePlacesApiKey, rawPlace.id);
+    if (exactVerify && (rawPlace.id || rawPlace._legacyPlaceId)) {
+      const details =
+        usedApi === 'places_legacy'
+          ? await fetchLegacyPlaceDetails(
+              config.googlePlacesApiKey,
+              rawPlace._legacyPlaceId || rawPlace.id
+            )
+          : await fetchPlaceDetailsExact(config.googlePlacesApiKey, rawPlace.id);
       if (details) place = { ...rawPlace, ...details };
     }
 
@@ -428,7 +565,16 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
     category: 'google_places',
     action: 'search_complete',
     message: `Found ${places.length}, created ${created}, skipped ${skipped}, filtered ${filteredOut}`,
-    details: { query, created, skipped, filteredOut, filters, exactVerify, discoveryGroupId: input.discoveryGroupId },
+    details: {
+      query,
+      created,
+      skipped,
+      filteredOut,
+      filters,
+      exactVerify,
+      usedApi,
+      discoveryGroupId: input.discoveryGroupId,
+    },
     durationMs: Date.now() - started,
     userId: input.userId,
   });
@@ -438,37 +584,74 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   return { created, skipped, leads, filteredOut };
 }
 
-function extractDuckDuckGoUrls(html: string, maxResults: number): string[] {
-  const urls: string[] = [];
-  const hrefRegex = /uddg=([^&"]+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = hrefRegex.exec(html)) && urls.length < maxResults * 3) {
+function extractDuckDuckGoUrls(html: string, maxResults: number): Array<{ url: string; title?: string; snippet?: string }> {
+  const out: Array<{ url: string; title?: string; snippet?: string }> = [];
+  const seen = new Set<string>();
+
+  const push = (raw: string, title?: string, snippet?: string) => {
     try {
-      const decoded = decodeURIComponent(match[1]);
-      if (decoded.startsWith('http') && !decoded.includes('duckduckgo.com')) {
-        urls.push(decoded);
+      let url = raw;
+      if (url.includes('uddg=')) {
+        const m = url.match(/uddg=([^&]+)/);
+        if (m) url = decodeURIComponent(m[1]);
       }
+      if (!url.startsWith('http') || url.includes('duckduckgo.com')) return;
+      const key = url.split('?')[0].toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ url, title, snippet });
+    } catch {
+      /* skip */
+    }
+  };
+
+  // Result blocks: title link + snippet
+  const blockRe =
+    /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|td)>|)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = blockRe.exec(html)) && out.length < maxResults * 4) {
+    const title = match[2]?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const snippet = match[3]?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    push(match[1], title, snippet);
+  }
+
+  const hrefRegex = /uddg=([^&"]+)/g;
+  while ((match = hrefRegex.exec(html)) && out.length < maxResults * 4) {
+    try {
+      push(decodeURIComponent(match[1]));
     } catch {
       /* skip */
     }
   }
 
-  const resultRegex = /class="result__a"[^>]*href="([^"]+)"/g;
-  while ((match = resultRegex.exec(html)) && urls.length < maxResults * 3) {
-    const href = match[1];
-    if (href.startsWith('http') && !href.includes('duckduckgo.com')) {
-      urls.push(href);
+  return out;
+}
+
+async function fetchSearchHtml(query: string): Promise<string> {
+  const encoded = encodeURIComponent(query);
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+
+  // Try DuckDuckGo HTML first, then lite
+  for (const url of [
+    `https://html.duckduckgo.com/html/?q=${encoded}`,
+    `https://lite.duckduckgo.com/lite/?q=${encoded}`,
+  ]) {
+    try {
+      const response = await fetch(url, { headers });
+      if (!response.ok) continue;
+      const html = await response.text();
+      if (html && html.length > 500 && !html.includes('anomaly-modal')) return html;
+      if (html && html.length > 500) return html;
+    } catch {
+      /* try next */
     }
   }
-
-  const snippetRegex = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
-  while ((match = snippetRegex.exec(html)) && urls.length < maxResults * 3) {
-    const snippet = match[1].replace(/<[^>]+>/g, ' ');
-    const httpInSnippet = snippet.match(/https?:\/\/[^\s"'<>]+/gi) || [];
-    urls.push(...httpInSnippet);
-  }
-
-  return urls;
+  throw new Error('Search engine request failed — DuckDuckGo returned no usable results');
 }
 
 /** Search-engine discovery via DuckDuckGo HTML (no API key). */
@@ -481,13 +664,13 @@ export async function discoverViaSearchEngine(input: {
   campaignId?: number;
   userId?: number;
   discoveryGroupId?: number;
-  /** When true (e.g. paired with Google Business), only Maps / business-profile URLs. */
+  /** Prefer Maps / business-profile URLs; falls back to websites if none found. */
   profileOnly?: boolean;
   chunkIndex?: number;
 }): Promise<{ created: number; skipped: number; leads: any[]; filteredOut?: number }> {
   const config = await getDiscoveryConfig();
   const maxResults = input.maxResults || config.maxResults;
-  const profileOnly = !!input.profileOnly;
+  const wantProfiles = !!input.profileOnly;
   const locationParts = [input.city, input.state, input.country].filter(Boolean);
   const fullKeyword = locationParts.length
     ? `${input.keyword} ${locationParts.join(' ')}`
@@ -497,33 +680,46 @@ export async function discoverViaSearchEngine(input: {
     city: input.city,
     state: input.state,
     country: input.country,
-    profileOnly,
+    profileOnly: wantProfiles,
     chunkIndex: input.chunkIndex,
   })[0];
-  const query = encodeURIComponent(searchQuery);
   const started = Date.now();
   const fingerprints = await loadLeadFingerprints({ country: input.country });
 
   await saLog({
     category: 'search',
     action: 'search_start',
-    message: `Search engine discovery (${profileOnly ? 'business profiles' : 'websites'}): ${searchQuery}`,
-    details: { country: input.country, city: input.city, profileOnly },
+    message: `Search engine discovery (${wantProfiles ? 'profiles-first' : 'websites'}): ${searchQuery}`,
+    details: { country: input.country, city: input.city, profileOnly: wantProfiles },
     userId: input.userId,
   });
 
-  const response = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; TidyFlowSalesAgent/1.0)',
-    },
-  });
+  let html = await fetchSearchHtml(searchQuery);
+  let hits = extractDuckDuckGoUrls(html, maxResults);
 
-  if (!response.ok) {
-    throw new Error(`Search engine request failed (${response.status})`);
+  // If profile-oriented query returned nothing useful, retry without Maps restriction
+  if (wantProfiles && hits.filter((h) => isGoogleMapsUrl(h.url)).length < 2) {
+    const websiteQuery = buildSearchQueries({
+      keyword: input.keyword,
+      city: input.city,
+      state: input.state,
+      country: input.country,
+      profileOnly: false,
+      chunkIndex: input.chunkIndex,
+    })[0];
+    try {
+      html = await fetchSearchHtml(websiteQuery);
+      hits = extractDuckDuckGoUrls(html, maxResults);
+      await saLog({
+        category: 'search',
+        action: 'search_profile_fallback_websites',
+        message: `Maps query sparse — fell back to website search: ${websiteQuery}`,
+        userId: input.userId,
+      });
+    } catch {
+      /* keep original hits */
+    }
   }
-
-  const html = await response.text();
-  const rawUrls = extractDuckDuckGoUrls(html, maxResults);
 
   type Candidate = {
     url: string;
@@ -531,15 +727,16 @@ export async function discoverViaSearchEngine(input: {
     name?: string;
     placeId?: string;
     isMaps: boolean;
-    snippet?: string;
   };
 
   const candidates: Candidate[] = [];
   const seenKeys = new Set<string>();
 
-  for (const url of rawUrls) {
+  for (const hit of hits) {
+    const url = hit.url;
+    const context = `${hit.title || ''} ${hit.snippet || ''} ${input.keyword}`;
+
     if (isGoogleMapsUrl(url)) {
-      if (!profileOnly) continue;
       const parsed = parseGoogleMapsPlace(url);
       const key = parsed.placeId || parsed.mapsUrl;
       if (seenKeys.has(key)) continue;
@@ -547,27 +744,32 @@ export async function discoverViaSearchEngine(input: {
       candidates.push({
         url: parsed.mapsUrl,
         host: parsed.placeId ? `maps-${parsed.placeId}` : normalizeWebsite(parsed.mapsUrl),
-        name: parsed.name,
+        name: parsed.name || hit.title,
         placeId: parsed.placeId,
         isMaps: true,
       });
       continue;
     }
 
-    if (profileOnly) continue;
-
     const host = normalizeWebsite(url);
     if (!host || isDirectoryHost(host)) continue;
     if (seenKeys.has(host)) continue;
 
-    // Snippet/title context from surrounding HTML (lightweight signal)
-    const idx = html.indexOf(url.slice(0, 40));
-    const snippet =
-      idx >= 0 ? html.slice(Math.max(0, idx - 200), idx + 200).replace(/<[^>]+>/g, ' ') : '';
-    if (!looksLikeCleaningBusiness(snippet, input.keyword)) continue;
+    // Soft filter: keyword already implies cleaning, or title/snippet matches
+    if (!looksLikeCleaningBusiness(context, input.keyword) && !looksLikeCleaningBusiness(host, input.keyword)) {
+      // Still allow if host looks like a company site (not a generic platform)
+      if (!/\.(com|co\.uk|net|org|io|biz|us|ca|au)$/i.test(host)) continue;
+      // Reject obvious non-business paths
+      if (/wikipedia|amazon|ebay|reddit|youtube/i.test(host)) continue;
+    }
 
     seenKeys.add(host);
-    candidates.push({ url: url.split('?')[0], host, isMaps: false, snippet });
+    candidates.push({
+      url: url.split('?')[0],
+      host,
+      name: hit.title?.slice(0, 120) || host,
+      isMaps: false,
+    });
   }
 
   let created = 0;
@@ -609,8 +811,8 @@ export async function discoverViaSearchEngine(input: {
         state: input.state || null,
         country: input.country || null,
         googlePlaceId: cand.placeId || null,
-        source: profileOnly ? 'GOOGLE_MAPS_SEARCH' : 'SEARCH_ENGINE',
-        discoveryKeyword: `${fullKeyword}${profileOnly ? ' [profiles]' : ''}`,
+        source: cand.isMaps ? 'GOOGLE_MAPS_SEARCH' : 'SEARCH_ENGINE',
+        discoveryKeyword: `${fullKeyword}${wantProfiles ? ' [search]' : ''}`,
         campaignId: input.campaignId || null,
         hasWebsite: !!website,
         hasEmail: false,
@@ -644,7 +846,7 @@ export async function discoverViaSearchEngine(input: {
     message: `Search created ${created}, skipped ${skipped}, filtered ${filteredOut} (${searchQuery})`,
     durationMs: Date.now() - started,
     userId: input.userId,
-    details: { profileOnly, filteredOut },
+    details: { wantProfiles, filteredOut, candidates: candidates.length, hits: hits.length },
   });
 
   await recordDiscoveryChunkResult(input.discoveryGroupId, { created, skipped, leads });
@@ -667,16 +869,18 @@ export async function discoverMultiLocation(input: {
   campaignId?: number;
   userId?: number;
   discoveryGroupId?: number;
+  /** Custom label when creating a new group */
+  groupLabel?: string;
   filters?: PlacesDiscoveryFilters;
-  /** Search engine targets Maps/business profiles (auto when paired with Google Business). */
+  /** Search prefers Maps profiles first, then falls back to websites */
   profileOnly?: boolean;
 }): Promise<{ created: number; skipped: number; runs: number; details: any[]; discoveryGroupId?: number }> {
   const methods =
     input.methods?.length
       ? input.methods
       : [input.method || 'google_places'];
-  const profileOnly =
-    input.profileOnly ?? (methods.includes('google_places') && methods.includes('search_engine'));
+  // Only when explicitly requested — Places already covers GBP; search finds websites by default
+  const profileOnly = !!input.profileOnly;
   const keywords = (input.keywords || []).map((k) => k.trim()).filter(Boolean);
   const countries = (input.countries || []).map((c) => c.trim()).filter(Boolean);
   const cities = (input.cities || []).map((c) => c.trim()).filter(Boolean);
@@ -686,13 +890,24 @@ export async function discoverMultiLocation(input: {
   const countryList = countries.length ? countries : [undefined];
   const cityList = cities.length ? cities : [undefined];
 
-  let groupId = input.discoveryGroupId;
+  let groupId = input.discoveryGroupId ? Number(input.discoveryGroupId) : undefined;
   const chunksPerCombo = methods.length;
   const totalChunks = keywords.length * countryList.length * cityList.length * chunksPerCombo;
-  if (!groupId) {
+  const groupMethod =
+    methods.length > 1 ? 'MIXED' : methods[0] === 'search_engine' ? 'search_engine' : 'google_places';
+
+  if (groupId) {
+    const existing = await (prisma as any).saDiscoveryGroup.findUnique({ where: { id: groupId } });
+    if (!existing) throw new Error(`Discovery group ${groupId} not found`);
+    await (prisma as any).saDiscoveryGroup.update({
+      where: { id: groupId },
+      data: {
+        status: 'RUNNING',
+        totalChunks: { increment: totalChunks },
+      },
+    });
+  } else {
     const { createDiscoveryGroup } = await import('./groups');
-    const groupMethod =
-      methods.length > 1 ? 'MIXED' : methods[0] === 'search_engine' ? 'search_engine' : 'google_places';
     const group = await createDiscoveryGroup({
       method: groupMethod,
       countries,
@@ -701,6 +916,7 @@ export async function discoverMultiLocation(input: {
       totalChunks,
       userId: input.userId,
       status: 'RUNNING',
+      label: input.groupLabel?.trim() || undefined,
     });
     groupId = group.id;
   }
