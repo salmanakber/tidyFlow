@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireSalesAgentAdmin, jsonOk, jsonError } from '@/lib/sales-agent/auth';
-import { enqueueAnalyzeLead, enqueueSendEmail } from '@/lib/sales-agent/queue';
+import { enqueueAnalyzeLead, enqueueSendEmail, sweepDueQueuedEmails } from '@/lib/sales-agent/queue';
 import { buildTemplateVars, renderTemplate, sendSalesEmail } from '@/lib/sales-agent/email';
 import { saLog } from '@/lib/sales-agent/logger';
 import { markDiscoveryGroupsEmailed } from '@/lib/sales-agent/groups';
@@ -165,8 +165,13 @@ export async function PATCH(
   const campaign = await (prisma as any).saCampaign.update({ where: { id }, data });
 
   // Kick off campaign run
+  if (body.action === 'queue_remaining') {
+    const result = await queueCampaignEmails(id, gate.userId, { onlyMissing: true });
+    return jsonOk({ ...campaign, queueResult: result });
+  }
+
   if (body.status === 'RUNNING' || body.action === 'start') {
-    await startCampaign(id, gate.userId);
+    await queueCampaignEmails(id, gate.userId);
   }
 
   return jsonOk(campaign);
@@ -193,7 +198,11 @@ function parseDiscoveryConfig(raw: unknown): {
   }
 }
 
-async function startCampaign(campaignId: number, userId: number) {
+async function queueCampaignEmails(
+  campaignId: number,
+  userId: number,
+  opts?: { onlyMissing?: boolean }
+) {
   const campaign = await (prisma as any).saCampaign.findUnique({
     where: { id: campaignId },
     include: { template: true },
@@ -253,11 +262,18 @@ async function startCampaign(campaignId: number, userId: number) {
     return;
   }
 
-  const startedAt = new Date();
-  await (prisma as any).saCampaign.update({
-    where: { id: campaignId },
-    data: { status: 'RUNNING', startedAt, lastError: null },
-  });
+  const startedAt = campaign.startedAt ? new Date(campaign.startedAt) : new Date();
+  if (!opts?.onlyMissing) {
+    await (prisma as any).saCampaign.update({
+      where: { id: campaignId },
+      data: { status: 'RUNNING', startedAt, lastError: null },
+    });
+  } else if (campaign.status !== 'RUNNING') {
+    await (prisma as any).saCampaign.update({
+      where: { id: campaignId },
+      data: { status: 'RUNNING', lastError: null },
+    });
+  }
 
   const cfg = parseDiscoveryConfig(campaign.discoveryConfig);
   const selectedIds = cfg.selectedLeadIds || [];
@@ -283,14 +299,40 @@ async function startCampaign(campaignId: number, userId: number) {
     return;
   }
 
+  const allSelected = await (prisma as any).saLeadCompany.findMany({
+    where: { id: { in: selectedIds } },
+    select: { id: true, email: true, hasEmail: true },
+  });
+  const noEmailCount = allSelected.filter((l: any) => !l.email?.trim()).length;
+
   const ready = await (prisma as any).saLeadCompany.findMany({
     where: {
       id: { in: selectedIds },
       email: { not: null },
-      hasEmail: true,
     },
     include: { analyses: { orderBy: { createdAt: 'desc' }, take: 1 } },
   });
+
+  let leadsToQueue = ready;
+  if (opts?.onlyMissing) {
+    const firstStep = steps[0]?.step || 1;
+    const missingIds: number[] = [];
+    for (const lead of ready) {
+      const hasStep = await (prisma as any).saSentEmail.findFirst({
+        where: {
+          campaignId,
+          companyId: lead.id,
+          sequenceStep: firstStep,
+          deliveryStatus: {
+            in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING', 'RETRYING'],
+          },
+        },
+        select: { id: true },
+      });
+      if (!hasStep) missingIds.push(lead.id);
+    }
+    leadsToQueue = ready.filter((l: any) => missingIds.includes(l.id));
+  }
 
   await (prisma as any).saLeadCompany.updateMany({
     where: { id: { in: selectedIds } },
@@ -303,10 +345,20 @@ async function startCampaign(campaignId: number, userId: number) {
 
   let queued = 0;
   let skipped = 0;
-  let leadIndex = 0;
+  let failed = 0;
+  const existingStep1 = await (prisma as any).saSentEmail.count({
+    where: {
+      campaignId,
+      sequenceStep: steps[0]?.step || 1,
+      deliveryStatus: {
+        in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING', 'RETRYING'],
+      },
+    },
+  });
+  let leadIndex = existingStep1;
   const queuedLeadIds: number[] = [];
 
-  for (const lead of ready) {
+  for (const lead of leadsToQueue) {
     if (!lead.email) {
       skipped++;
       continue;
@@ -377,6 +429,7 @@ async function startCampaign(campaignId: number, userId: number) {
         leadIndex++;
       }
     } catch (err: any) {
+      failed++;
       skipped++;
       await saLog({
         level: 'warn',
@@ -390,20 +443,39 @@ async function startCampaign(campaignId: number, userId: number) {
     }
   }
 
+  const sweep = await sweepDueQueuedEmails(50);
+
+  const queueSummary = {
+    selected: selectedIds.length,
+    withEmail: ready.length,
+    noEmail: noEmailCount,
+    queued,
+    skipped,
+    failed,
+    onlyMissing: !!opts?.onlyMissing,
+    sweptDue: sweep.swept,
+  };
+
+  if (noEmailCount > 0 && ready.length < selectedIds.length) {
+    await (prisma as any).saCampaign.update({
+      where: { id: campaignId },
+      data: {
+        lastError: `${noEmailCount} selected lead(s) have no email — analyze them or remove from campaign. Queued ${queued} email(s) for ${queuedLeadIds.length} lead(s).`,
+      },
+    });
+  }
+
   await saLog({
     category: 'campaign',
     action: 'campaign_emails_queued',
-    message: `Campaign ${campaign.name}: steps=${steps.length} queued=${queued} skipped=${skipped} selected=${selectedIds.length} ready=${ready.length} pace=${perDay}/day`,
+    message: `Campaign ${campaign.name}: steps=${steps.length} queued=${queued} skipped=${skipped} failed=${failed} selected=${selectedIds.length} withEmail=${ready.length} noEmail=${noEmailCount} pace=${perDay}/day`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,
     details: {
-      queued,
-      skipped,
-      selected: selectedIds.length,
-      ready: ready.length,
+      ...queueSummary,
       perDay,
-      daysSpanned: Math.max(1, Math.ceil(ready.length / perDay)),
+      daysSpanned: Math.max(1, Math.ceil((ready.length || 1) / perDay)),
       steps: steps.map((s) => ({
         step: s.step,
         templateId: s.templateId,
@@ -429,11 +501,14 @@ async function startCampaign(campaignId: number, userId: number) {
   await saLog({
     category: 'campaign',
     action: 'campaign_started',
-    message: `Started campaign ${campaign.name} — ${steps.length} segment(s), queued ${queued} email(s) for ${queuedLeadIds.length}/${ready.length} leads (pace ${perDay}/day)`,
+    message: `Started campaign ${campaign.name} — ${steps.length} segment(s), queued ${queued} email(s) for ${queuedLeadIds.length}/${leadsToQueue.length} leads (pace ${perDay}/day)`,
     entityType: 'SaCampaign',
     entityId: campaignId,
     userId,
+    details: queueSummary,
   });
+
+  return queueSummary;
 }
 
 export async function DELETE(

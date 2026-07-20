@@ -2,6 +2,16 @@ import prisma from '@/lib/prisma';
 import { getDiscoveryConfig } from './config';
 import { saLog } from './logger';
 import { recordDiscoveryChunkResult } from './groups';
+import {
+  buildSearchQueries,
+  isDirectoryHost,
+  isDuplicateLead,
+  isGoogleMapsUrl,
+  loadLeadFingerprints,
+  looksLikeCleaningBusiness,
+  parseGoogleMapsPlace,
+  registerNewLead,
+} from './discovery-filters';
 
 export function normalizeWebsite(url?: string | null): string | null {
   if (!url) return null;
@@ -265,6 +275,7 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   const bounds = resolveMaturityBounds(filters);
   const location = { country: input.country, city: input.city, state: input.state };
   const exactVerify = filtersNeedExactVerify(filters);
+  const fingerprints = await loadLeadFingerprints({ country: input.country });
 
   await saLog({
     category: 'google_places',
@@ -358,16 +369,12 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
       if (types.includes('country')) country = c.longText || country;
     }
 
-    const existing = await (prisma as any).saLeadCompany.findFirst({
-      where: {
-        OR: [
-          googlePlaceId ? { googlePlaceId } : undefined,
-          websiteNormalized ? { websiteNormalized } : undefined,
-        ].filter(Boolean),
-      },
+    const dup = await isDuplicateLead(fingerprints, {
+      host: websiteNormalized,
+      phone,
+      placeId: googlePlaceId,
     });
-
-    if (existing) {
+    if (dup) {
       skipped++;
       continue;
     }
@@ -401,6 +408,11 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
         status: 'NEW',
       },
     });
+    registerNewLead(fingerprints, {
+      websiteNormalized,
+      phone,
+      googlePlaceId,
+    });
     created++;
     leads.push(lead);
   }
@@ -426,7 +438,40 @@ export async function discoverViaGooglePlaces(input: PlacesSearchInput): Promise
   return { created, skipped, leads, filteredOut };
 }
 
-/** Fallback: search-engine style discovery via DuckDuckGo HTML (no API key). */
+function extractDuckDuckGoUrls(html: string, maxResults: number): string[] {
+  const urls: string[] = [];
+  const hrefRegex = /uddg=([^&"]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = hrefRegex.exec(html)) && urls.length < maxResults * 3) {
+    try {
+      const decoded = decodeURIComponent(match[1]);
+      if (decoded.startsWith('http') && !decoded.includes('duckduckgo.com')) {
+        urls.push(decoded);
+      }
+    } catch {
+      /* skip */
+    }
+  }
+
+  const resultRegex = /class="result__a"[^>]*href="([^"]+)"/g;
+  while ((match = resultRegex.exec(html)) && urls.length < maxResults * 3) {
+    const href = match[1];
+    if (href.startsWith('http') && !href.includes('duckduckgo.com')) {
+      urls.push(href);
+    }
+  }
+
+  const snippetRegex = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+  while ((match = snippetRegex.exec(html)) && urls.length < maxResults * 3) {
+    const snippet = match[1].replace(/<[^>]+>/g, ' ');
+    const httpInSnippet = snippet.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+    urls.push(...httpInSnippet);
+  }
+
+  return urls;
+}
+
+/** Search-engine discovery via DuckDuckGo HTML (no API key). */
 export async function discoverViaSearchEngine(input: {
   keyword: string;
   country?: string;
@@ -436,21 +481,34 @@ export async function discoverViaSearchEngine(input: {
   campaignId?: number;
   userId?: number;
   discoveryGroupId?: number;
-}): Promise<{ created: number; skipped: number; leads: any[] }> {
+  /** When true (e.g. paired with Google Business), only Maps / business-profile URLs. */
+  profileOnly?: boolean;
+  chunkIndex?: number;
+}): Promise<{ created: number; skipped: number; leads: any[]; filteredOut?: number }> {
   const config = await getDiscoveryConfig();
   const maxResults = input.maxResults || config.maxResults;
+  const profileOnly = !!input.profileOnly;
   const locationParts = [input.city, input.state, input.country].filter(Boolean);
   const fullKeyword = locationParts.length
     ? `${input.keyword} ${locationParts.join(' ')}`
     : input.keyword;
-  const query = encodeURIComponent(fullKeyword);
+  const searchQuery = buildSearchQueries({
+    keyword: input.keyword,
+    city: input.city,
+    state: input.state,
+    country: input.country,
+    profileOnly,
+    chunkIndex: input.chunkIndex,
+  })[0];
+  const query = encodeURIComponent(searchQuery);
   const started = Date.now();
+  const fingerprints = await loadLeadFingerprints({ country: input.country });
 
   await saLog({
     category: 'search',
     action: 'search_start',
-    message: `Search engine discovery: ${fullKeyword}`,
-    details: { country: input.country, city: input.city },
+    message: `Search engine discovery (${profileOnly ? 'business profiles' : 'websites'}): ${searchQuery}`,
+    details: { country: input.country, city: input.city, profileOnly },
     userId: input.userId,
   });
 
@@ -465,64 +523,105 @@ export async function discoverViaSearchEngine(input: {
   }
 
   const html = await response.text();
-  const hrefRegex = /uddg=([^&"]+)/g;
-  const urls: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = hrefRegex.exec(html)) && urls.length < maxResults) {
-    try {
-      const decoded = decodeURIComponent(match[1]);
-      if (decoded.startsWith('http') && !decoded.includes('duckduckgo.com')) {
-        urls.push(decoded);
-      }
-    } catch {
-      /* skip */
-    }
-  }
+  const rawUrls = extractDuckDuckGoUrls(html, maxResults);
 
-  const resultRegex = /class="result__a"[^>]*href="([^"]+)"/g;
-  while ((match = resultRegex.exec(html)) && urls.length < maxResults) {
-    const href = match[1];
-    if (href.startsWith('http') && !href.includes('duckduckgo.com')) {
-      urls.push(href);
-    }
-  }
+  type Candidate = {
+    url: string;
+    host: string | null;
+    name?: string;
+    placeId?: string;
+    isMaps: boolean;
+    snippet?: string;
+  };
 
-  const uniqueHosts = new Map<string, string>();
-  for (const url of urls) {
+  const candidates: Candidate[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const url of rawUrls) {
+    if (isGoogleMapsUrl(url)) {
+      if (!profileOnly) continue;
+      const parsed = parseGoogleMapsPlace(url);
+      const key = parsed.placeId || parsed.mapsUrl;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      candidates.push({
+        url: parsed.mapsUrl,
+        host: parsed.placeId ? `maps-${parsed.placeId}` : normalizeWebsite(parsed.mapsUrl),
+        name: parsed.name,
+        placeId: parsed.placeId,
+        isMaps: true,
+      });
+      continue;
+    }
+
+    if (profileOnly) continue;
+
     const host = normalizeWebsite(url);
-    if (host && !uniqueHosts.has(host)) uniqueHosts.set(host, url.split('?')[0]);
+    if (!host || isDirectoryHost(host)) continue;
+    if (seenKeys.has(host)) continue;
+
+    // Snippet/title context from surrounding HTML (lightweight signal)
+    const idx = html.indexOf(url.slice(0, 40));
+    const snippet =
+      idx >= 0 ? html.slice(Math.max(0, idx - 200), idx + 200).replace(/<[^>]+>/g, ' ') : '';
+    if (!looksLikeCleaningBusiness(snippet, input.keyword)) continue;
+
+    seenKeys.add(host);
+    candidates.push({ url: url.split('?')[0], host, isMaps: false, snippet });
   }
 
   let created = 0;
   let skipped = 0;
+  let filteredOut = 0;
   const leads: any[] = [];
 
-  for (const [host, url] of uniqueHosts) {
-    const existing = await (prisma as any).saLeadCompany.findFirst({
-      where: { websiteNormalized: host },
+  for (const cand of candidates) {
+    if (leads.length >= maxResults) break;
+
+    const dup = await isDuplicateLead(fingerprints, {
+      host: cand.host,
+      placeId: cand.placeId,
     });
-    if (existing) {
+    if (dup) {
       skipped++;
       continue;
     }
 
+    if (!cand.isMaps && cand.host && isDirectoryHost(cand.host)) {
+      filteredOut++;
+      continue;
+    }
+
+    const name = cand.name || cand.host || 'Unknown';
+    const website = cand.isMaps ? null : cand.url;
+    const websiteNormalized = cand.isMaps
+      ? cand.placeId
+        ? `place-${cand.placeId}`
+        : normalizeWebsite(cand.url)
+      : cand.host;
+
     const lead = await (prisma as any).saLeadCompany.create({
       data: {
-        name: host,
-        website: url,
-        websiteNormalized: host,
+        name,
+        website,
+        websiteNormalized,
         city: input.city || null,
         state: input.state || null,
         country: input.country || null,
-        source: 'SEARCH_ENGINE',
-        discoveryKeyword: fullKeyword,
+        googlePlaceId: cand.placeId || null,
+        source: profileOnly ? 'GOOGLE_MAPS_SEARCH' : 'SEARCH_ENGINE',
+        discoveryKeyword: `${fullKeyword}${profileOnly ? ' [profiles]' : ''}`,
         campaignId: input.campaignId || null,
-        hasWebsite: true,
+        hasWebsite: !!website,
         hasEmail: false,
         hasPhone: false,
         industry: 'cleaning',
         status: 'NEW',
       },
+    });
+    registerNewLead(fingerprints, {
+      websiteNormalized,
+      googlePlaceId: cand.placeId,
     });
     created++;
     leads.push(lead);
@@ -542,14 +641,15 @@ export async function discoverViaSearchEngine(input: {
   await saLog({
     category: 'search',
     action: 'search_complete',
-    message: `Search created ${created}, skipped ${skipped} (${fullKeyword})`,
+    message: `Search created ${created}, skipped ${skipped}, filtered ${filteredOut} (${searchQuery})`,
     durationMs: Date.now() - started,
     userId: input.userId,
+    details: { profileOnly, filteredOut },
   });
 
   await recordDiscoveryChunkResult(input.discoveryGroupId, { created, skipped, leads });
 
-  return { created, skipped, leads };
+  return { created, skipped, leads, filteredOut };
 }
 
 /**
@@ -558,6 +658,8 @@ export async function discoverViaSearchEngine(input: {
  */
 export async function discoverMultiLocation(input: {
   method?: 'google_places' | 'search_engine';
+  /** Run both Google Business and search-engine chunks when set. */
+  methods?: Array<'google_places' | 'search_engine'>;
   keywords: string[];
   countries?: string[];
   cities?: string[];
@@ -566,8 +668,15 @@ export async function discoverMultiLocation(input: {
   userId?: number;
   discoveryGroupId?: number;
   filters?: PlacesDiscoveryFilters;
+  /** Search engine targets Maps/business profiles (auto when paired with Google Business). */
+  profileOnly?: boolean;
 }): Promise<{ created: number; skipped: number; runs: number; details: any[]; discoveryGroupId?: number }> {
-  const method = input.method || 'google_places';
+  const methods =
+    input.methods?.length
+      ? input.methods
+      : [input.method || 'google_places'];
+  const profileOnly =
+    input.profileOnly ?? (methods.includes('google_places') && methods.includes('search_engine'));
   const keywords = (input.keywords || []).map((k) => k.trim()).filter(Boolean);
   const countries = (input.countries || []).map((c) => c.trim()).filter(Boolean);
   const cities = (input.cities || []).map((c) => c.trim()).filter(Boolean);
@@ -578,11 +687,14 @@ export async function discoverMultiLocation(input: {
   const cityList = cities.length ? cities : [undefined];
 
   let groupId = input.discoveryGroupId;
+  const chunksPerCombo = methods.length;
+  const totalChunks = keywords.length * countryList.length * cityList.length * chunksPerCombo;
   if (!groupId) {
     const { createDiscoveryGroup } = await import('./groups');
-    const totalChunks = keywords.length * countryList.length * cityList.length;
+    const groupMethod =
+      methods.length > 1 ? 'MIXED' : methods[0] === 'search_engine' ? 'search_engine' : 'google_places';
     const group = await createDiscoveryGroup({
-      method,
+      method: groupMethod,
       countries,
       cities,
       keywords,
@@ -597,48 +709,55 @@ export async function discoverMultiLocation(input: {
   let skipped = 0;
   let runs = 0;
   const details: any[] = [];
+  let chunkIndex = 0;
 
   for (const keyword of keywords) {
     for (const country of countryList) {
       for (const city of cityList) {
-        runs++;
-        try {
-          const result =
-            method === 'search_engine'
-              ? await discoverViaSearchEngine({
-                  keyword,
-                  country,
-                  city,
-                  maxResults: input.maxResults,
-                  campaignId: input.campaignId,
-                  userId: input.userId,
-                  discoveryGroupId: groupId,
-                })
-              : await discoverViaGooglePlaces({
-                  keyword,
-                  country,
-                  city,
-                  maxResults: input.maxResults,
-                  campaignId: input.campaignId,
-                  userId: input.userId,
-                  discoveryGroupId: groupId,
-                  filters: input.filters,
-                });
-          created += result.created;
-          skipped += result.skipped;
-          details.push({ keyword, country, city, ...result, leads: undefined });
-        } catch (err: any) {
-          details.push({ keyword, country, city, error: err.message });
-          await recordDiscoveryChunkResult(groupId, { created: 0, skipped: 0, leads: [] });
-          await saLog({
-            level: 'warn',
-            category: method === 'search_engine' ? 'search' : 'google_places',
-            action: 'multi_discovery_part_failed',
-            message: err.message,
-            details: { keyword, country, city },
-            success: false,
-            userId: input.userId,
-          });
+        for (const method of methods) {
+          runs++;
+          try {
+            const result =
+              method === 'search_engine'
+                ? await discoverViaSearchEngine({
+                    keyword,
+                    country,
+                    city,
+                    maxResults: input.maxResults,
+                    campaignId: input.campaignId,
+                    userId: input.userId,
+                    discoveryGroupId: groupId,
+                    profileOnly,
+                    chunkIndex,
+                  })
+                : await discoverViaGooglePlaces({
+                    keyword,
+                    country,
+                    city,
+                    maxResults: input.maxResults,
+                    campaignId: input.campaignId,
+                    userId: input.userId,
+                    discoveryGroupId: groupId,
+                    filters: input.filters,
+                  });
+            chunkIndex++;
+            created += result.created;
+            skipped += result.skipped;
+            details.push({ keyword, country, city, method, profileOnly, ...result, leads: undefined });
+          } catch (err: any) {
+            chunkIndex++;
+            details.push({ keyword, country, city, method, error: err.message });
+            await recordDiscoveryChunkResult(groupId, { created: 0, skipped: 0, leads: [] });
+            await saLog({
+              level: 'warn',
+              category: method === 'search_engine' ? 'search' : 'google_places',
+              action: 'multi_discovery_part_failed',
+              message: err.message,
+              details: { keyword, country, city, method },
+              success: false,
+              userId: input.userId,
+            });
+          }
         }
       }
     }

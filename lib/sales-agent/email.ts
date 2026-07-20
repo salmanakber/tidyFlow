@@ -267,18 +267,20 @@ export async function sendSalesEmail(input: SendSalesEmailInput) {
     }
   }
 
-  // Also block identical subject to same inbox within 7 days (safety net)
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const dup = await (prisma as any).saSentEmail.findFirst({
-    where: {
-      recipientEmail: email,
-      subject: input.subject,
-      createdAt: { gte: weekAgo },
-      deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING'] },
-    },
-  });
-  if (dup) {
-    throw new Error('Duplicate email prevented (same recipient + subject within 7 days)');
+  // Cross-campaign safety — campaign start already dedupes per step
+  if (!input.campaignId) {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const dup = await (prisma as any).saSentEmail.findFirst({
+      where: {
+        recipientEmail: email,
+        subject: input.subject,
+        createdAt: { gte: weekAgo },
+        deliveryStatus: { in: ['SENT', 'DELIVERED', 'OPENED', 'QUEUED', 'PENDING'] },
+      },
+    });
+    if (dup) {
+      throw new Error('Duplicate email prevented (same recipient + subject within 7 days)');
+    }
   }
 
   const record = await (prisma as any).saSentEmail.create({

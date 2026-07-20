@@ -266,10 +266,34 @@ export default function CampaignsTab() {
     }
   }
 
-  const setStatus = async (id: number, status: string) => {
+  const queueRemaining = async (id: number) => {
     setActionId(id)
     try {
-      await saPatch(`/campaigns/${id}`, { status })
+      const data = await saPatch(`/campaigns/${id}`, { action: "queue_remaining" })
+      const q = data.queueResult
+      setMessage({
+        type: "success",
+        text: q
+          ? `Queued ${q.queued} email(s) for ${q.withEmail - (q.skipped || 0)} lead(s). ${q.noEmail ? `${q.noEmail} selected lead(s) still have no email.` : ""}`
+          : "Remaining leads queued.",
+      })
+      await loadCore()
+    } catch (e: any) {
+      setMessage({ type: "error", text: e.message })
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const setStatus = async (id: number, status: string, c?: any) => {
+    setActionId(id)
+    try {
+      const continuePartial = status === "RUNNING" && (c?.emailsSent ?? 0) > 0
+      if (continuePartial) {
+        await saPatch(`/campaigns/${id}`, { action: "queue_remaining", status: "RUNNING" })
+      } else {
+        await saPatch(`/campaigns/${id}`, { status })
+      }
       setMessage({
         type: "success",
         text:
@@ -1101,7 +1125,7 @@ export default function CampaignsTab() {
                             type="button"
                             className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#166534] border border-green-100 bg-green-50 hover:bg-green-100 px-3 py-2 rounded-lg disabled:opacity-50"
                             disabled={actionId === c.id}
-                            onClick={() => setStatus(c.id, "RUNNING")}
+                            onClick={() => setStatus(c.id, "RUNNING", c)}
                           >
                             {actionId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                             {(c.emailsSent ?? 0) > 0 ? "Continue" : "Start"}
@@ -1113,7 +1137,7 @@ export default function CampaignsTab() {
                               type="button"
                               className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#166534] border border-green-100 bg-green-50 px-3 py-2 rounded-lg disabled:opacity-50"
                               disabled={actionId === c.id}
-                              onClick={() => setStatus(c.id, "RUNNING")}
+                              onClick={() => queueRemaining(c.id)}
                             >
                               {actionId === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                               Queue remaining

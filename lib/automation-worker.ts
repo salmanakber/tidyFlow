@@ -295,9 +295,11 @@ export function initializeAutomationWorker() {
   });
 
   import('./sales-agent/queue')
-    .then(({ ensureReplySyncScheduler }) => ensureReplySyncScheduler())
+    .then(({ ensureReplySyncScheduler, ensureCampaignEmailSweeper }) =>
+      Promise.all([ensureReplySyncScheduler(), ensureCampaignEmailSweeper()])
+    )
     .catch((err) => {
-      console.warn('[Automation Worker] sales-agent reply sync scheduler failed:', err);
+      console.warn('[Automation Worker] sales-agent schedulers failed:', err);
     });
 
   console.log(

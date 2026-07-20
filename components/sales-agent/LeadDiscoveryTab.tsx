@@ -107,7 +107,8 @@ type BusinessMaturity = "any" | "likely_new" | "established" | "opening_soon"
 type WebsiteFilter = "any" | "with_website" | "without_website"
 
 export default function LeadDiscoveryTab() {
-  const [method, setMethod] = useState<"google_places" | "search_engine">("google_places")
+  const [useGoogleBusiness, setUseGoogleBusiness] = useState(true)
+  const [useSearchEngine, setUseSearchEngine] = useState(false)
   const [countries, setCountries] = useState<string[]>([])
   const [cities, setCities] = useState<string[]>([])
   const [keywords, setKeywords] = useState<string[]>(["Cleaning Company", "Commercial Cleaning"])
@@ -420,18 +421,21 @@ export default function LeadDiscoveryTab() {
       setMessage({ type: "error", text: "Add keywords (or use AI Suggest)" })
       return
     }
-    if (!countries.length && method === "google_places") {
+    if (!useGoogleBusiness && !useSearchEngine) {
+      setMessage({ type: "error", text: "Enable Google Business and/or Search engine" })
+      return
+    }
+    if (!countries.length && useGoogleBusiness) {
       setMessage({
         type: "error",
-        text: "Add at least one country (or switch to Search Engine)",
+        text: "Add at least one country for Google Business (or disable Google Business)",
       })
       return
     }
     setDiscovering(true)
     setMessage(null)
     try {
-      const filters =
-        method === "google_places"
+      const filters = useGoogleBusiness
           ? {
               maturity,
               website: websiteFilter,
@@ -442,7 +446,9 @@ export default function LeadDiscoveryTab() {
       const data = await saPost(
         "/leads/discover",
         {
-          method,
+          useGoogleBusiness,
+          useSearchEngine,
+          profileOnly: useGoogleBusiness && useSearchEngine,
           async: useQueue,
           keywords,
           countries,
@@ -702,41 +708,44 @@ export default function LeadDiscoveryTab() {
             </p>
           </div>
           
-          {/* Segmented Controller Tab */}
-          <div className="flex p-1 bg-[#EEF0F5] rounded-xl border border-gray-200 items-center h-[42px] shrink-0">
-            <button
-              type="button"
-              onClick={() => setMethod("google_places")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 h-full ${
-                method === "google_places" 
-                  ? "bg-white text-[#0D1E36] shadow-xs" 
-                  : "text-slate-500 hover:text-[#0D1E36]"
-              }`}
-            >
-              <MapPin className="w-3.5 h-3.5" /> Google Business
-            </button>
-            <button
-              type="button"
-              onClick={() => setMethod("search_engine")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all duration-150 h-full ${
-                method === "search_engine" 
-                  ? "bg-white text-[#0D1E36] shadow-xs" 
-                  : "text-slate-500 hover:text-[#0D1E36]"
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" /> Website search
-            </button>
+          {/* Discovery source checklist */}
+          <div className="flex flex-col gap-2 shrink-0 min-w-[200px]">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sources</p>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useGoogleBusiness}
+                onChange={(e) => setUseGoogleBusiness(e.target.checked)}
+                className="rounded border-gray-300 text-[#D97706] focus:ring-[#D97706]"
+              />
+              <MapPin className="w-3.5 h-3.5 text-[#D97706]" /> Google Business
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#0D1E36] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useSearchEngine}
+                onChange={(e) => setUseSearchEngine(e.target.checked)}
+                className="rounded border-gray-300 text-[#D97706] focus:ring-[#D97706]"
+              />
+              <Globe className="w-3.5 h-3.5 text-[#D97706]" /> Search engine
+            </label>
           </div>
         </div>
 
-        {method === "google_places" ? (
+        {useGoogleBusiness && useSearchEngine ? (
           <p className="text-xs text-slate-500 -mt-2">
-            Pulls Google Business / Maps listings (name, phone, address, website, reviews) — not website scraping.
+            Search engine runs in <strong>business profile mode</strong> (Google Maps listings) — directories like Yelp/Yellow Pages are excluded.
+          </p>
+        ) : useGoogleBusiness ? (
+          <p className="text-xs text-slate-500 -mt-2">
+            Pulls Google Business / Maps listings (name, phone, address, website, reviews).
+          </p>
+        ) : useSearchEngine ? (
+          <p className="text-xs text-slate-500 -mt-2">
+            Finds direct company websites via search — excludes business directories and aggregator sites.
           </p>
         ) : (
-          <p className="text-xs text-slate-500 -mt-2">
-            Finds company websites via search results, then you can analyze pages for contacts.
-          </p>
+          <p className="text-xs text-amber-700 -mt-2">Enable at least one discovery source above.</p>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -764,7 +773,7 @@ export default function LeadDiscoveryTab() {
           placeholder="e.g. Office Cleaning, Janitorial Services"
         />
 
-        {method === "google_places" && (
+        {useGoogleBusiness && (
           <div className="rounded-2xl border border-[#F3E6C8] bg-gradient-to-br from-[#FFFBF3] to-[#F8F9FC] p-4 space-y-4">
             <div className="flex items-start gap-2">
               <Filter className="w-4 h-4 text-[#D97706] mt-0.5 shrink-0" />

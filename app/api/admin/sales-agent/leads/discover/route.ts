@@ -38,6 +38,19 @@ export async function POST(request: NextRequest) {
   const method = (body.method === 'search_engine' ? 'search_engine' : 'google_places') as
     | 'google_places'
     | 'search_engine';
+  const useGoogleBusiness =
+    body.useGoogleBusiness !== false &&
+    (body.useGoogleBusiness === true || method === 'google_places' || body.useSearchEngine !== true);
+  const useSearchEngine =
+    body.useSearchEngine === true || method === 'search_engine';
+  const methods: Array<'google_places' | 'search_engine'> = [];
+  if (useGoogleBusiness) methods.push('google_places');
+  if (useSearchEngine) methods.push('search_engine');
+  if (!methods.length) {
+    return jsonError('Enable Google Business and/or Search engine discovery');
+  }
+  const profileOnly =
+    body.profileOnly === true || (useGoogleBusiness && useSearchEngine);
   const keywords = parseList(body.keywords?.length ? body.keywords : body.keyword);
   const countries = parseList(body.countries?.length ? body.countries : body.country);
   const cities = parseList(body.cities?.length ? body.cities : body.city);
@@ -48,7 +61,8 @@ export async function POST(request: NextRequest) {
   }
 
   const payload: {
-    method: 'google_places' | 'search_engine';
+    methods: Array<'google_places' | 'search_engine'>;
+    profileOnly: boolean;
     keywords: string[];
     countries: string[];
     cities: string[];
@@ -57,7 +71,8 @@ export async function POST(request: NextRequest) {
     userId: number;
     filters?: Record<string, unknown>;
   } = {
-    method,
+    methods,
+    profileOnly,
     keywords,
     countries,
     cities,
@@ -66,7 +81,7 @@ export async function POST(request: NextRequest) {
     userId: gate.userId,
   };
 
-  if (method === 'google_places' && body.filters && typeof body.filters === 'object') {
+  if (methods.includes('google_places') && body.filters && typeof body.filters === 'object') {
     const f = body.filters;
     payload.filters = {
       maturity: f.maturity || 'any',
@@ -82,7 +97,7 @@ export async function POST(request: NextRequest) {
   await saLog({
     category: 'user',
     action: 'discover_leads',
-    message: `Multi discovery via ${method}: ${keywords.length} keywords × ${countries.length || 1} countries (async=${runAsync})`,
+    message: `Multi discovery via ${methods.join('+')}: ${keywords.length} keywords × ${countries.length || 1} countries (async=${runAsync})`,
     userId: gate.userId,
     details: payload,
   });
@@ -96,7 +111,9 @@ export async function POST(request: NextRequest) {
       ranInline: queued.ranInline,
       discoveryGroupId: queued.discoveryGroupId,
       group: queued.group,
-      method,
+      method: methods.length > 1 ? 'MIXED' : methods[0],
+      methods,
+      profileOnly,
       keywords,
       countries,
       cities,
@@ -108,5 +125,11 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await discoverMultiLocation(payload);
-  return jsonOk({ ...result, method, discoveryGroupId: result.discoveryGroupId });
+  return jsonOk({
+    ...result,
+    method: methods.length > 1 ? 'MIXED' : methods[0],
+    methods,
+    profileOnly,
+    discoveryGroupId: result.discoveryGroupId,
+  });
 }

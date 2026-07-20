@@ -41,17 +41,28 @@ export async function enqueueSearchDiscovery(payload: Record<string, unknown>) {
 }
 
 export async function enqueueMultiDiscovery(payload: Record<string, unknown>) {
-  const method = (payload.method as string) || 'google_places';
+  const methods: Array<'google_places' | 'search_engine'> =
+    Array.isArray(payload.methods) && payload.methods.length
+      ? (payload.methods as Array<'google_places' | 'search_engine'>)
+      : [(payload.method as 'google_places' | 'search_engine') || 'google_places'];
+  const profileOnly =
+    payload.profileOnly === true ||
+    (methods.includes('google_places') && methods.includes('search_engine'));
   const keywords = (payload.keywords as string[]) || [];
   const countries = ((payload.countries as string[]) || []).filter(Boolean);
   const cities = ((payload.cities as string[]) || []).filter(Boolean);
   const countryList = countries.length ? countries : [undefined];
   const cityList = cities.length ? cities : [undefined];
-  const totalChunks = Math.max(1, keywords.length * countryList.length * cityList.length);
+  const totalChunks = Math.max(
+    1,
+    keywords.length * countryList.length * cityList.length * methods.length
+  );
 
   const { createDiscoveryGroup } = await import('./groups');
+  const groupMethod =
+    methods.length > 1 ? 'MIXED' : methods[0] === 'search_engine' ? 'search_engine' : 'google_places';
   const group = await createDiscoveryGroup({
-    method,
+    method: groupMethod,
     countries,
     cities,
     keywords,
@@ -60,34 +71,39 @@ export async function enqueueMultiDiscovery(payload: Record<string, unknown>) {
     status: 'QUEUED',
   });
 
-  // Chunked queue: one Redis job per keyword × country × city (visible in Job queue panel)
+  // Chunked queue: one Redis job per keyword × country × city × method
   let enqueued = 0;
   let ranInline = 0;
+  let chunkIndex = 0;
 
   for (const keyword of keywords) {
     for (const country of countryList) {
       for (const city of cityList) {
-        const chunk = {
-          keyword,
-          country,
-          city,
-          maxResults: payload.maxResults,
-          campaignId: payload.campaignId,
-          userId: payload.userId,
-          discoveryGroupId: group.id,
-          filters: payload.filters,
-        };
-        const jobName = method === 'search_engine' ? 'sa-discover-search' : 'sa-discover-places';
-        const queued = await addJob(jobName, chunk as any, {
-          jobId: `${jobName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        });
-        if (queued) {
-          enqueued++;
-        } else {
-          // Redis down — run this chunk inline
-          if (method === 'search_engine') await discoverViaSearchEngine(chunk as any);
-          else await discoverViaGooglePlaces(chunk as any);
-          ranInline++;
+        for (const method of methods) {
+          const chunk = {
+            keyword,
+            country,
+            city,
+            maxResults: payload.maxResults,
+            campaignId: payload.campaignId,
+            userId: payload.userId,
+            discoveryGroupId: group.id,
+            filters: payload.filters,
+            profileOnly: method === 'search_engine' ? profileOnly : undefined,
+            chunkIndex,
+          };
+          chunkIndex++;
+          const jobName = method === 'search_engine' ? 'sa-discover-search' : 'sa-discover-places';
+          const queued = await addJob(jobName, chunk as any, {
+            jobId: `${jobName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          });
+          if (queued) {
+            enqueued++;
+          } else {
+            if (method === 'search_engine') await discoverViaSearchEngine(chunk as any);
+            else await discoverViaGooglePlaces(chunk as any);
+            ranInline++;
+          }
         }
       }
     }
@@ -234,6 +250,51 @@ export async function ensureReplySyncScheduler() {
   }
 }
 
+/** Re-deliver campaign emails whose scheduledFor is due but Bull job may be missing. */
+export async function sweepDueQueuedEmails(limit = 40): Promise<{ swept: number; errors: number }> {
+  const due = await (prisma as any).saSentEmail.findMany({
+    where: {
+      deliveryStatus: { in: ['QUEUED', 'PENDING', 'RETRYING'] },
+      OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
+    },
+    orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+    take: limit,
+    select: { id: true },
+  });
+
+  let swept = 0;
+  let errors = 0;
+  for (const row of due) {
+    try {
+      await deliverSalesEmail(row.id);
+      swept++;
+    } catch {
+      errors++;
+    }
+  }
+  return { swept, errors };
+}
+
+export async function ensureCampaignEmailSweeper() {
+  try {
+    await automationQueue.add(
+      'sa-sweep-due-emails',
+      {},
+      {
+        jobId: 'sa-sweep-due-emails-repeat',
+        repeat: { every: 5 * 60 * 1000 },
+      }
+    );
+    return true;
+  } catch (error) {
+    if (isRedisUnavailable(error)) {
+      console.warn('[SalesAgent] Redis unavailable — email sweeper not registered');
+      return false;
+    }
+    throw error;
+  }
+}
+
 /** Process sales-agent jobs inside automation-worker. */
 export async function processSalesAgentAutomationJob(job: { name: string; data: any; id?: string }) {
   await saLog({
@@ -300,6 +361,8 @@ export async function processSalesAgentAutomationJob(job: { name: string; data: 
       const { syncRepliesFromInbox } = await import('./reply-sync');
       return syncRepliesFromInbox();
     }
+    case 'sa-sweep-due-emails':
+      return sweepDueQueuedEmails();
     case 'sa-run-scheduler-job': {
       const schedulerJob = await (prisma as any).saSchedulerJob.findUnique({
         where: { id: job.data.jobId },

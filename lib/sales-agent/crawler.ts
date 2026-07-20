@@ -5,6 +5,8 @@ export interface CrawlResult {
   finalUrl: string;
   title: string | null;
   emails: string[];
+  /** All candidate emails before strict ranking (for AI validation). */
+  allEmailsFound: string[];
   phones: string[];
   socialLinks: string[];
   aboutPageUrl: string | null;
@@ -243,6 +245,7 @@ export async function crawlWebsite(websiteUrl: string): Promise<CrawlResult> {
       finalUrl: url,
       title: null,
       emails: [],
+      allEmailsFound: [],
       phones: [],
       socialLinks: [],
       aboutPageUrl: null,
@@ -293,12 +296,13 @@ export async function crawlWebsite(websiteUrl: string): Promise<CrawlResult> {
   const homeHits = harvestContacts(primary.html);
   const aboutHits = harvestContacts(aboutHtml);
 
-  const emails = rankEmails([
+  const rawEmails = unique([
     ...contactHits.emails,
     ...footerHits.emails,
     ...homeHits.emails,
     ...aboutHits.emails,
   ]);
+  const emails = rankEmails(rawEmails);
   const phones = unique([
     ...contactHits.phones,
     ...footerHits.phones,
@@ -341,6 +345,7 @@ export async function crawlWebsite(websiteUrl: string): Promise<CrawlResult> {
     finalUrl: primary.finalUrl,
     title: extractTitle(primary.html),
     emails,
+    allEmailsFound: filterEmails(rawEmails).slice(0, 25),
     phones,
     socialLinks,
     aboutPageUrl,
