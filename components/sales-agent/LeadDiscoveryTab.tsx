@@ -14,7 +14,7 @@ import {
   inputCls,
   ProgressBar,
 } from "./shared"
-import { Search, Sparkles, RefreshCw, X, Plus, Info, Trash2, FolderPlus, FolderInput, MapPin, Globe, Eye, Phone, Filter, Mail } from "lucide-react"
+import { Search, Sparkles, RefreshCw, X, Plus, Info, Trash2, FolderPlus, FolderInput, MapPin, Globe, Eye, Phone, Filter, Mail, Pencil, Check } from "lucide-react"
 import QueuePanel from "./QueuePanel"
 
 function parseTags(text: string): string[] {
@@ -157,6 +157,8 @@ export default function LeadDiscoveryTab() {
   const [showAssignPanel, setShowAssignPanel] = useState(false)
   const [detailLead, setDetailLead] = useState<any | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [renamingGroupId, setRenamingGroupId] = useState<number | null>(null)
+  const [renameDraft, setRenameDraft] = useState("")
 
   const loadGroups = useCallback(async () => {
     try {
@@ -649,7 +651,37 @@ export default function LeadDiscoveryTab() {
       await saDelete("/groups", { id: g.id })
       setMessage({ type: "success", text: "Group deleted" })
       if (groupFilter === String(g.id)) setGroupFilter("")
+      if (renamingGroupId === g.id) {
+        setRenamingGroupId(null)
+        setRenameDraft("")
+      }
       await refreshAll()
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message })
+    }
+  }
+
+  const startRenameGroup = (g: any, e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    if (g.isPriority) return
+    const base = String(g.label || "").replace(/\s*·\s*Already sent.*$/i, "").trim()
+    setRenamingGroupId(g.id)
+    setRenameDraft(base)
+  }
+
+  const saveRenameGroup = async (g: any, e?: { stopPropagation?: () => void }) => {
+    e?.stopPropagation?.()
+    const label = renameDraft.trim()
+    if (!label) {
+      setMessage({ type: "error", text: "Enter a group name" })
+      return
+    }
+    try {
+      await saPost("/groups", { action: "rename", groupId: g.id, label })
+      setMessage({ type: "success", text: `Group renamed to "${label}"` })
+      setRenamingGroupId(null)
+      setRenameDraft("")
+      await loadGroups()
     } catch (err: any) {
       setMessage({ type: "error", text: err.message })
     }
@@ -737,7 +769,16 @@ export default function LeadDiscoveryTab() {
               <input
                 type="checkbox"
                 checked={useSearchEngine}
-                onChange={(e) => setUseSearchEngine(e.target.checked)}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setUseSearchEngine(on)
+                  if (on && !useGoogleBusiness) {
+                    setMessage({
+                      type: "success",
+                      text: "Search-only mode — uses DuckDuckGo + AI filtering. No Google Places API key required.",
+                    })
+                  }
+                }}
                 className="rounded border-gray-300 text-[#D97706] focus:ring-[#D97706]"
               />
               <Globe className="w-3.5 h-3.5 text-[#D97706]" /> Search engine
@@ -755,7 +796,7 @@ export default function LeadDiscoveryTab() {
           </p>
         ) : useSearchEngine ? (
           <p className="text-xs text-slate-500 -mt-2">
-            Finds direct company websites via search — excludes business directories and aggregator sites.
+            Finds direct company websites via DuckDuckGo — AI filters out directories and aggregator sites. Does not use Google Places API.
           </p>
         ) : (
           <p className="text-xs text-amber-700 -mt-2">Enable at least one discovery source above.</p>
@@ -1072,36 +1113,90 @@ export default function LeadDiscoveryTab() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 space-y-1">
-                      <div className="text-sm font-bold text-[#0D1E36] truncate flex items-center gap-2 flex-wrap">
-                        {g.label}
-                        {g.isPriority && (
-                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309]">
-                            Priority
-                          </span>
-                        )}
-                        {(g.alreadySent || (g.emailedCount || 0) > 0) && (
-                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E1F5E9] text-[#166534]">
-                            Already sent
-                            {g.emailedCount != null && g.memberCount
-                              ? ` (${g.emailedCount}/${g.memberCount})`
-                              : ""}
-                          </span>
-                        )}
-                      </div>
+                    <div className="min-w-0 space-y-1 flex-1">
+                      {renamingGroupId === g.id ? (
+                        <div
+                          className="flex flex-wrap items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            className={`${inputCls} text-sm h-9 max-w-[220px]`}
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveRenameGroup(g)
+                              if (e.key === "Escape") {
+                                setRenamingGroupId(null)
+                                setRenameDraft("")
+                              }
+                            }}
+                            autoFocus
+                            aria-label="Group name"
+                          />
+                          <button
+                            type="button"
+                            className="p-1.5 rounded-lg text-green-700 hover:bg-green-50"
+                            title="Save name"
+                            onClick={() => saveRenameGroup(g)}
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="p-1.5 rounded-lg text-gray-400 hover:bg-slate-100"
+                            title="Cancel"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setRenamingGroupId(null)
+                              setRenameDraft("")
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-sm font-bold text-[#0D1E36] truncate flex items-center gap-2 flex-wrap">
+                          {g.label}
+                          {g.isPriority && (
+                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FEF3C7] text-[#B45309]">
+                              Priority
+                            </span>
+                          )}
+                          {(g.alreadySent || (g.emailedCount || 0) > 0) && (
+                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#E1F5E9] text-[#166534]">
+                              Already sent
+                              {g.emailedCount != null && g.memberCount
+                                ? ` (${g.emailedCount}/${g.memberCount})`
+                                : ""}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="text-xs text-gray-400 font-medium flex flex-wrap gap-x-2">
                         <span>{g.memberCount ?? 0} direct leads</span>
                         <span>· Status: {g.status}</span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-[#9A2A1E] hover:bg-rose-50/50 transition-colors"
-                      title="Delete group"
-                      onClick={(e) => deleteGroup(g, e)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!g.isPriority && renamingGroupId !== g.id && (
+                        <button
+                          type="button"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-[#0D1E36] hover:bg-slate-100 transition-colors"
+                          title="Rename group"
+                          onClick={(e) => startRenameGroup(g, e)}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-[#9A2A1E] hover:bg-rose-50/50 transition-colors"
+                        title="Delete group"
+                        onClick={(e) => deleteGroup(g, e)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   {(g.status === "RUNNING" || g.status === "QUEUED") && (
                     <div className="mt-3">

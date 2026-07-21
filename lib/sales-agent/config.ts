@@ -17,17 +17,22 @@ export function encryptSecret(value: string): string {
 }
 
 export function decryptSecret(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
   try {
-    const parts = value.split(':');
-    if (parts.length < 2) return value;
+    const parts = raw.split(':');
+    if (parts.length < 2) return raw;
     const iv = Buffer.from(parts[0], 'hex');
-    const encrypted = parts[1];
+    if (iv.length !== 16) return raw;
+    const encrypted = parts.slice(1).join(':');
     const decipher = crypto.createDecipheriv(ALGORITHM, getKeyBuffer(), iv);
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    return decrypted;
+    return decrypted.trim();
   } catch {
-    return value;
+    // Encrypted blob — never return ciphertext as an API key (causes Google 403)
+    if (/^[0-9a-f]{32}:[0-9a-f]+$/i.test(raw)) return '';
+    return raw;
   }
 }
 
@@ -67,9 +72,10 @@ export async function upsertSetting(
   category: SettingCategory,
   opts: { encrypt?: boolean; description?: string; updatedById?: number } = {}
 ) {
+  const trimmed = String(value ?? '').trim();
+  if (trimmed.startsWith('••••')) return; // keep existing secret
   const shouldEncrypt = opts.encrypt ?? false;
-  const stored = shouldEncrypt && value && !value.startsWith('••••') ? encryptSecret(value) : value;
-  if (value.startsWith('••••')) return; // keep existing secret
+  const stored = shouldEncrypt && trimmed ? encryptSecret(trimmed) : trimmed;
 
   await (prisma as any).saModuleSetting.upsert({
     where: { key },
@@ -205,8 +211,14 @@ export async function getResendSmtpConfig(): Promise<ResendSmtpConfig> {
 
 export async function getDiscoveryConfig() {
   const d = await getSettingsByCategory('discovery');
+  const dbKey = String(d.google_places_api_key || '').trim();
+  const envKey = String(
+    process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY || ''
+  ).trim();
+  // Prefer saved admin key; env is fallback only when DB is empty
+  const googlePlacesApiKey = dbKey || envKey;
   return {
-    googlePlacesApiKey: d.google_places_api_key || process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY || '',
+    googlePlacesApiKey,
     searchEngine: d.search_engine || 'duckduckgo',
     searchDelayMs: parseInt(d.search_delay_ms || '1500', 10),
     maxResults: parseInt(d.max_results || '20', 10),

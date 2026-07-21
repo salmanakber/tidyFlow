@@ -6,6 +6,7 @@ import {
   createManualGroup,
   assignLeadsToGroup,
   deleteDiscoveryGroup,
+  renameDiscoveryGroup,
   removeLeadsFromDiscoveryGroup,
   ensureHighPriorityRepliesGroup,
 } from '@/lib/sales-agent/groups';
@@ -124,6 +125,27 @@ export async function POST(request: NextRequest) {
     if (!groupId || !leadIds.length) return jsonError('groupId and leadIds required');
     const removed = await removeLeadsFromDiscoveryGroup(groupId, leadIds);
     return jsonOk({ removed });
+  }
+
+  if (action === 'rename') {
+    const groupId = Number(body.groupId);
+    const label = String(body.label || '').trim();
+    if (!groupId) return jsonError('groupId required');
+    if (!label) return jsonError('label is required');
+    try {
+      const group = await renameDiscoveryGroup(groupId, label);
+      await saLog({
+        category: 'user',
+        action: 'group_rename',
+        message: `Renamed group #${groupId} to “${group.label}”`,
+        userId: gate.userId,
+        entityType: 'SaDiscoveryGroup',
+        entityId: groupId,
+      });
+      return jsonOk(group);
+    } catch (e: any) {
+      return jsonError(e.message || 'Rename failed', 400);
+    }
   }
 
   return jsonError('Unknown action');

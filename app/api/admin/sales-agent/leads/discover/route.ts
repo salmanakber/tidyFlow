@@ -66,6 +66,16 @@ export async function POST(request: NextRequest) {
     return jsonError('Add at least one keyword (or ask AI to suggest keywords)');
   }
 
+  if (useGoogleBusiness && !useSearchEngine) {
+    const { getDiscoveryConfig } = await import('@/lib/sales-agent/config');
+    const discoveryCfg = await getDiscoveryConfig();
+    if (!discoveryCfg.googlePlacesApiKey) {
+      return jsonError(
+        'Google Places API key not configured. Add it in Setup → Email & Discovery, or use Search engine only.'
+      );
+    }
+  }
+
   const discoveryGroupId = body.discoveryGroupId ? Number(body.discoveryGroupId) : undefined;
   const groupLabel =
     typeof body.groupLabel === 'string' && body.groupLabel.trim()

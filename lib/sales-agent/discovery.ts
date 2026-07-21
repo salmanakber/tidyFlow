@@ -8,10 +8,10 @@ import {
   isDuplicateLead,
   isGoogleMapsUrl,
   loadLeadFingerprints,
-  looksLikeCleaningBusiness,
   parseGoogleMapsPlace,
   registerNewLead,
 } from './discovery-filters';
+import { filterSearchHitsForRealBusinesses } from './search-result-filter';
 
 export function normalizeWebsite(url?: string | null): string | null {
   if (!url) return null;
@@ -695,10 +695,10 @@ export async function discoverViaSearchEngine(input: {
   });
 
   let html = await fetchSearchHtml(searchQuery);
-  let hits = extractDuckDuckGoUrls(html, maxResults);
+  let rawHits = extractDuckDuckGoUrls(html, maxResults);
 
   // If profile-oriented query returned nothing useful, retry without Maps restriction
-  if (wantProfiles && hits.filter((h) => isGoogleMapsUrl(h.url)).length < 2) {
+  if (wantProfiles && rawHits.filter((h) => isGoogleMapsUrl(h.url)).length < 2) {
     const websiteQuery = buildSearchQueries({
       keyword: input.keyword,
       city: input.city,
@@ -709,7 +709,7 @@ export async function discoverViaSearchEngine(input: {
     })[0];
     try {
       html = await fetchSearchHtml(websiteQuery);
-      hits = extractDuckDuckGoUrls(html, maxResults);
+      rawHits = extractDuckDuckGoUrls(html, maxResults);
       await saLog({
         category: 'search',
         action: 'search_profile_fallback_websites',
@@ -719,6 +719,20 @@ export async function discoverViaSearchEngine(input: {
     } catch {
       /* keep original hits */
     }
+  }
+
+  // Website search: AI + blocklist to drop directories (no Google Places API)
+  let hits = rawHits;
+  let filterStats = { aiFiltered: 0, staticFiltered: 0 };
+  if (!wantProfiles) {
+    const filtered = await filterSearchHitsForRealBusinesses(rawHits, fullKeyword, {
+      userId: input.userId,
+    });
+    hits = filtered.kept;
+    filterStats = {
+      aiFiltered: filtered.aiFiltered,
+      staticFiltered: filtered.staticFiltered,
+    };
   }
 
   type Candidate = {
@@ -731,12 +745,17 @@ export async function discoverViaSearchEngine(input: {
 
   const candidates: Candidate[] = [];
   const seenKeys = new Set<string>();
+  let filteredOut = 0;
 
   for (const hit of hits) {
     const url = hit.url;
-    const context = `${hit.title || ''} ${hit.snippet || ''} ${input.keyword}`;
 
-    if (isGoogleMapsUrl(url)) {
+    if (!wantProfiles && isGoogleMapsUrl(url)) {
+      filteredOut++;
+      continue;
+    }
+
+    if (wantProfiles && isGoogleMapsUrl(url)) {
       const parsed = parseGoogleMapsPlace(url);
       const key = parsed.placeId || parsed.mapsUrl;
       if (seenKeys.has(key)) continue;
@@ -752,16 +771,11 @@ export async function discoverViaSearchEngine(input: {
     }
 
     const host = normalizeWebsite(url);
-    if (!host || isDirectoryHost(host)) continue;
-    if (seenKeys.has(host)) continue;
-
-    // Soft filter: keyword already implies cleaning, or title/snippet matches
-    if (!looksLikeCleaningBusiness(context, input.keyword) && !looksLikeCleaningBusiness(host, input.keyword)) {
-      // Still allow if host looks like a company site (not a generic platform)
-      if (!/\.(com|co\.uk|net|org|io|biz|us|ca|au)$/i.test(host)) continue;
-      // Reject obvious non-business paths
-      if (/wikipedia|amazon|ebay|reddit|youtube/i.test(host)) continue;
+    if (!host || isDirectoryHost(host)) {
+      filteredOut++;
+      continue;
     }
+    if (seenKeys.has(host)) continue;
 
     seenKeys.add(host);
     candidates.push({
@@ -774,7 +788,6 @@ export async function discoverViaSearchEngine(input: {
 
   let created = 0;
   let skipped = 0;
-  let filteredOut = 0;
   const leads: any[] = [];
 
   for (const cand of candidates) {
@@ -846,7 +859,7 @@ export async function discoverViaSearchEngine(input: {
     message: `Search created ${created}, skipped ${skipped}, filtered ${filteredOut} (${searchQuery})`,
     durationMs: Date.now() - started,
     userId: input.userId,
-    details: { wantProfiles, filteredOut, candidates: candidates.length, hits: hits.length },
+    details: { wantProfiles, filteredOut, filterStats, candidates: candidates.length, hits: hits.length },
   });
 
   await recordDiscoveryChunkResult(input.discoveryGroupId, { created, skipped, leads });

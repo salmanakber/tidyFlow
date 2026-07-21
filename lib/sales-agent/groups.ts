@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma';
 
 export const HIGH_PRIORITY_METHOD = 'PRIORITY_REPLIES';
 export const HIGH_PRIORITY_LABEL = '⭐ High priority — Replied';
+const ALREADY_SENT_MARKER = ' · Already sent';
 
 export function buildDiscoveryGroupLabel(input: {
   countries?: string[];
@@ -149,6 +150,31 @@ export async function deleteDiscoveryGroup(groupId: number) {
   return group;
 }
 
+export async function renameDiscoveryGroup(groupId: number, newLabel: string) {
+  const label = String(newLabel || '').trim();
+  if (!label) throw new Error('Group name is required');
+
+  const group = await (prisma as any).saDiscoveryGroup.findUnique({ where: { id: groupId } });
+  if (!group) throw new Error('Group not found');
+  if (group.method === HIGH_PRIORITY_METHOD) {
+    throw new Error('The high-priority replies group cannot be renamed');
+  }
+
+  const oldLabel = String(group.label || '');
+  let suffix = '';
+  const markerIdx = oldLabel.indexOf(ALREADY_SENT_MARKER);
+  if (markerIdx >= 0) {
+    suffix = oldLabel.slice(markerIdx);
+  }
+  const base = label.includes(ALREADY_SENT_MARKER) ? label : label.replace(/\s*·\s*Already sent.*$/i, '').trim();
+  const finalLabel = suffix && !base.includes(ALREADY_SENT_MARKER) ? `${base}${suffix}` : base;
+
+  return (prisma as any).saDiscoveryGroup.update({
+    where: { id: groupId },
+    data: { label: finalLabel },
+  });
+}
+
 export async function ensureHighPriorityRepliesGroup(opts?: { backfill?: boolean }) {
   let group = await (prisma as any).saDiscoveryGroup.findFirst({
     where: { method: HIGH_PRIORITY_METHOD },
@@ -244,8 +270,6 @@ function mapGroup(g: any) {
       g.totalChunks > 0 ? Math.min(100, Math.round((g.completedChunks / g.totalChunks) * 100)) : 0,
   };
 }
-
-const ALREADY_SENT_MARKER = ' · Already sent';
 
 export async function listDiscoveryGroups(limit = 50) {
   await ensureHighPriorityRepliesGroup();

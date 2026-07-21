@@ -779,6 +779,146 @@ export async function testReplySync() {
   }
 }
 
+/** Verify Google Places API key (New API, then legacy Text Search fallback). */
+export async function testGooglePlacesConnection(input?: {
+  apiKey?: string;
+  userId?: number;
+}) {
+  const { getDiscoveryConfig } = await import('./config');
+  const config = await getDiscoveryConfig();
+  const apiKey = String(input?.apiKey || config.googlePlacesApiKey || '').trim();
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      step: 'google_places',
+      error:
+        'Google Places API key not configured. Paste your key and save, or use Change to replace an existing key.',
+    };
+  }
+
+  if (!apiKey.startsWith('AIza')) {
+    return {
+      ok: false,
+      step: 'google_places',
+      error:
+        'Key does not look like a valid Google API key (should start with AIza). Check for extra spaces or a corrupted saved value — click Change and re-enter.',
+    };
+  }
+
+  const query = 'cleaning company London';
+  const started = Date.now();
+
+  try {
+    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName',
+      },
+      body: JSON.stringify({ textQuery: query, maxResultCount: 3 }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const count = Array.isArray(data.places) ? data.places.length : 0;
+      await saLog({
+        category: 'google_places',
+        action: 'connection_test_ok',
+        message: `Places API (New) OK — ${count} sample results`,
+        userId: input?.userId,
+        durationMs: Date.now() - started,
+      });
+      return {
+        ok: true,
+        step: 'google_places',
+        api: 'places_new',
+        message: `Places API (New) OK — ${count} sample result(s) for "${query}"`,
+        resultCount: count,
+        nextSteps: [
+          'Enable billing on the Google Cloud project if you hit quota errors later.',
+          'If discovery still fails, ensure both “Places API” and “Places API (New)” are enabled for this key.',
+        ],
+      };
+    }
+
+    const body = await response.text();
+    const blocked =
+      response.status === 403 ||
+      body.toLowerCase().includes('api_key_service_blocked') ||
+      body.toLowerCase().includes('permission_denied');
+
+    if (blocked) {
+      const legacyUrl = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
+      legacyUrl.searchParams.set('query', query);
+      legacyUrl.searchParams.set('key', apiKey);
+      const legacyRes = await fetch(legacyUrl.toString());
+      const legacyData = await legacyRes.json();
+
+      if (legacyData.status === 'OK' || legacyData.status === 'ZERO_RESULTS') {
+        const count = Array.isArray(legacyData.results) ? legacyData.results.length : 0;
+        await saLog({
+          category: 'google_places',
+          action: 'connection_test_legacy_ok',
+          message: `Legacy Places OK after New API ${response.status}`,
+          userId: input?.userId,
+          durationMs: Date.now() - started,
+        });
+        return {
+          ok: true,
+          step: 'google_places',
+          api: 'places_legacy',
+          message: `Legacy Places API OK — ${count} sample result(s). (Places API New returned ${response.status}; classic API works.)`,
+          resultCount: count,
+          warning:
+            'Places API (New) is blocked for this key — discovery will use legacy Text Search automatically.',
+          nextSteps: [
+            'In Google Cloud Console → APIs & Services, enable “Places API (New)” for full features.',
+            'Check API key restrictions: allow Places API + server IP or no app restrictions for backend use.',
+          ],
+        };
+      }
+
+      const legacyMsg = legacyData.error_message || legacyData.status || 'REQUEST_DENIED';
+      await saLog({
+        level: 'warn',
+        category: 'google_places',
+        action: 'connection_test_failed',
+        message: `New ${response.status}; legacy: ${legacyMsg}`,
+        userId: input?.userId,
+        success: false,
+        details: { body: body.slice(0, 500), legacyStatus: legacyData.status },
+      });
+      return {
+        ok: false,
+        step: 'google_places',
+        error: `Google Places denied (New API ${response.status}, legacy: ${legacyMsg})`,
+        hint: body.slice(0, 280) || legacyMsg,
+        nextSteps: [
+          'Google Cloud Console → APIs & Services → enable “Places API” and “Places API (New)”.',
+          'API key → Application restrictions: use “None” or IP addresses (not HTTP referrers) for server-side calls.',
+          'Confirm billing is enabled on the project.',
+          'Re-save the key here (Change → paste → Save discovery settings).',
+        ],
+      };
+    }
+
+    return {
+      ok: false,
+      step: 'google_places',
+      error: `Google Places API error (${response.status})`,
+      hint: body.slice(0, 400),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      step: 'google_places',
+      error: err?.message || 'Google Places connection test failed',
+    };
+  }
+}
+
 /** Full diagnostics: Brevo SMTP + Resend SMTP + IMAP (+ optional Brevo send). */
 export async function runEmailDiagnostics(input?: { sendTo?: string; userId?: number }) {
   const smtp = await testSmtpConnection();

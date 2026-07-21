@@ -227,6 +227,7 @@ export default function SettingsTab() {
   const [testSend, setTestSend] = useState<any>(null)
   const [testResendSend, setTestResendSend] = useState<any>(null)
   const [testSync, setTestSync] = useState<any>(null)
+  const [testGooglePlaces, setTestGooglePlaces] = useState<any>(null)
   const [editSecrets, setEditSecrets] = useState<Record<string, boolean>>({})
   const [jobForm, setJobForm] = useState({
     name: "",
@@ -358,6 +359,7 @@ export default function SettingsTab() {
       test_send: 45000,
       test_resend_send: 45000,
       test_reply_sync: 60000,
+      test_google_places: 25000,
       test_all: 90000,
     }
     try {
@@ -372,6 +374,7 @@ export default function SettingsTab() {
       if (action === "test_send") setTestSend(result)
       if (action === "test_resend_send") setTestResendSend(result)
       if (action === "test_reply_sync") setTestSync(result)
+      if (action === "test_google_places") setTestGooglePlaces(result)
       if (action === "test_all") {
         setTestSmtp(result.smtp)
         setTestResendSmtp(result.resendSmtp)
@@ -406,6 +409,7 @@ export default function SettingsTab() {
       if (action === "test_send") setTestSend({ ok: false, error: errText })
       if (action === "test_resend_send") setTestResendSend({ ok: false, error: errText })
       if (action === "test_reply_sync") setTestSync({ ok: false, error: errText })
+      if (action === "test_google_places") setTestGooglePlaces({ ok: false, error: errText })
       setMessage({ type: "error", text: errText })
     } finally {
       setTesting(null)
@@ -1033,8 +1037,48 @@ export default function SettingsTab() {
               onCancel={() => cancelEditSecret("googlePlacesApiKey")}
               value={form.googlePlacesApiKey || ""}
               onChange={(v) => setForm({ ...form, googlePlacesApiKey: v })}
-              placeholder="Google Places API key"
+              placeholder="Google Places API key (starts with AIza)"
             />
+            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+              Required only for <strong>Google Business</strong> discovery. Search-engine-only mode does not use this key.
+              Save the key, then run Test — checks Places API (New) and legacy Text Search fallback.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <button
+                type="button"
+                className={`${btnSecondary} text-xs py-2`}
+                disabled={!!testing}
+                onClick={async () => {
+                  setTesting("test_google_places")
+                  setMessage(null)
+                  try {
+                    const payload: Record<string, string> = { action: "test_google_places" }
+                    const draft = String(form.googlePlacesApiKey || "").trim()
+                    if (draft && !draft.startsWith("••")) {
+                      payload.googlePlacesApiKey = draft
+                    }
+                    const result = await saPost("/settings", payload, { timeout: 25000 })
+                    setTestGooglePlaces(result)
+                    setMessage({
+                      type: result.ok ? "success" : "error",
+                      text: result.message || result.error || (result.ok ? "Places API OK" : "Places test failed"),
+                    })
+                  } catch (e: any) {
+                    const errText = e?.message || "Places test failed"
+                    setTestGooglePlaces({ ok: false, error: errText })
+                    setMessage({ type: "error", text: errText })
+                  } finally {
+                    setTesting(null)
+                  }
+                }}
+              >
+                <Database className="w-3.5 h-3.5 text-[#D97706]" />
+                {testing === "test_google_places" ? "Testing Places…" : "Test Google Places API"}
+              </button>
+            </div>
+            <div className="mt-3">
+              <ResultCard result={testGooglePlaces} />
+            </div>
           </div>
           <div className="space-y-1.5">
             <label className="block text-[10px] font-bold text-[#0D1E36] uppercase tracking-wider">Active Search Engine</label>

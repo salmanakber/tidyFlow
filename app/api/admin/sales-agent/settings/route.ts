@@ -18,6 +18,7 @@ import {
   runEmailDiagnostics,
   testResendSmtpConnection,
   sendTestResendEmail,
+  testGooglePlacesConnection,
 } from '@/lib/sales-agent/connection-test';
 
 export async function GET(request: NextRequest) {
@@ -170,6 +171,19 @@ export async function POST(request: NextRequest) {
     return jsonOk(
       await runEmailDiagnostics({
         sendTo: body.toEmail || body.to || undefined,
+        userId: gate.userId,
+      })
+    );
+  }
+
+  if (action === 'test_google_places') {
+    const override =
+      typeof body.googlePlacesApiKey === 'string' && body.googlePlacesApiKey.trim()
+        ? body.googlePlacesApiKey.trim()
+        : undefined;
+    return jsonOk(
+      await testGooglePlacesConnection({
+        apiKey: override,
         userId: gate.userId,
       })
     );
