@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '../../../../lib/prisma';
 import { getUserFromRequest, hashPassword, comparePassword } from '../../../../lib/auth';
+import { isStrongPassword } from '@/lib/password-policy';
+import { getCompanyInvoiceSettings } from '@/lib/invoice-settings';
 
 /**
  * GET /api/auth/me
@@ -31,8 +33,18 @@ export async function GET(request: NextRequest) {
         companyId: true,
         isActive: true,
         isHeadSuperAdmin: true,
-        createdAt: true
-      }
+        createdAt: true,
+        googleId: true,
+        company: {
+          select: {
+            name: true,
+            planTier: true,
+            subscriptionStatus: true,
+            isTrialActive: true,
+            trialEndsAt: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -49,6 +61,26 @@ export async function GET(request: NextRequest) {
       }, { status: 403 });
     }
 
+    const invoice = user.companyId ? await getCompanyInvoiceSettings(user.companyId) : null;
+    const personName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim().toLowerCase();
+    const emailLocal = user.email.split('@')[0].toLowerCase().replace(/[._-]/g, '');
+    const companyName = (user.company?.name || '').trim();
+    const companyKey = companyName.toLowerCase().replace(/[._-]/g, '');
+    const placeholderCompanyName =
+      !companyName ||
+      (personName.length > 0 && companyName.toLowerCase() === personName) ||
+      (emailLocal.length > 0 && companyKey === emailLocal);
+
+    const createdMs = user.createdAt ? new Date(user.createdAt).getTime() : 0;
+    const isNewAccount = Number.isFinite(createdMs) && Date.now() - createdMs < 30 * 24 * 60 * 60 * 1000;
+
+    const missingSetup: string[] = [];
+    if (!user.firstName?.trim()) missingSetup.push('firstName');
+    if (!user.lastName?.trim()) missingSetup.push('lastName');
+    if (placeholderCompanyName) missingSetup.push('companyName');
+    if (isNewAccount && !invoice?.address?.trim()) missingSetup.push('address');
+    if (isNewAccount && !invoice?.phone?.trim()) missingSetup.push('companyPhone');
+
     return NextResponse.json({
       success: true,
       data: {
@@ -62,8 +94,21 @@ export async function GET(request: NextRequest) {
           role: user.role,
           companyId: user.companyId,
           isHeadSuperAdmin: user.isHeadSuperAdmin,
-          createdAt: user.createdAt
-        }
+          createdAt: user.createdAt,
+          hasGoogle: !!user.googleId,
+        },
+        company: user.company
+          ? {
+              name: user.company.name,
+              planTier: user.company.planTier,
+              subscriptionStatus: user.company.subscriptionStatus,
+              isTrialActive: user.company.isTrialActive,
+              trialEndsAt: user.company.trialEndsAt,
+            }
+          : null,
+        needsOnboarding: missingSetup.length > 0,
+        missingSetup,
+        placeholderCompanyName,
       }
     }, { status: 200 });
 
@@ -93,6 +138,14 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { firstName, lastName, phone, currentPassword, newPassword, profileImage } = body;
 
+    const existing = await prisma.user.findUnique({
+      where: { id: tokenUser.userId },
+      select: { passwordHash: true, googleId: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
+    }
+
     const updateData: any = {};
 
     if (firstName !== undefined && firstName !== null) updateData.firstName = firstName.trim();
@@ -105,40 +158,34 @@ export async function PATCH(request: NextRequest) {
 
     // Handle password change
     if (newPassword) {
-      if (!currentPassword) {
+      const strength = isStrongPassword(newPassword);
+      if (!strength.valid) {
         return NextResponse.json({
           success: false,
-          message: 'Current password is required to change password'
+          message: strength.message || 'Please choose a stronger password',
         }, { status: 400 });
       }
 
-      // Get current user to verify password
-      const user = await prisma.user.findUnique({
-        where: { id: tokenUser.userId },
-        select: { passwordHash: true },
-      });
-
-      if (!user) {
-        return NextResponse.json({
-          success: false,
-          message: 'User not found'
-        }, { status: 404 });
+      const googleWithoutCurrent = !!existing.googleId && !currentPassword;
+      if (!googleWithoutCurrent) {
+        if (!currentPassword) {
+          return NextResponse.json({
+            success: false,
+            message: 'Current password is required to change password',
+          }, { status: 400 });
+        }
+        const isPasswordValid = await comparePassword(currentPassword, existing.passwordHash);
+        if (!isPasswordValid) {
+          return NextResponse.json({
+            success: false,
+            message: 'Current password is incorrect',
+          }, { status: 401 });
+        }
       }
 
-      // Verify current password
-      const isPasswordValid = await comparePassword(currentPassword, user.passwordHash);
-      if (!isPasswordValid) {
-        return NextResponse.json({
-          success: false,
-          message: 'Current password is incorrect'
-        }, { status: 401 });
-      }
-
-      // Hash new password
       updateData.passwordHash = await hashPassword(newPassword);
     }
 
-    // Update user
     const updatedUser = await prisma.user.update({
       where: { id: tokenUser.userId },
       data: updateData,

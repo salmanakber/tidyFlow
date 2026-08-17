@@ -9,8 +9,11 @@ import {
   type PublicPlanPayload,
 } from '@/lib/public-plan-scope';
 import AppDownloadBanner from '@/components/AppDownloadBanner';
+import { getCustomerUserEmail } from '@/lib/customer-account';
+import { isCustomerLoggedIn, startCustomerCheckout } from '@/lib/customer-checkout';
 
-const STEPS = ['Choose plan', 'Secure checkout', 'Download app', 'Sign in'];
+const STEPS_NEW = ['Choose plan', 'Secure checkout', 'Download app', 'Sign in'];
+const STEPS_UPGRADE = ['Choose plan', 'Stripe checkout', 'Plan upgraded'];
 
 function CheckIcon({ dimmed }: { dimmed?: boolean }) {
   return (
@@ -47,8 +50,13 @@ export default function SubscribeIndexPage() {
   const [plans, setPlans] = useState<PublicPlanPayload[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [signedInEmail, setSignedInEmail] = useState('');
+  const [checkoutTier, setCheckoutTier] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoggedIn(isCustomerLoggedIn());
+    setSignedInEmail(getCustomerUserEmail());
     const load = async () => {
       try {
         const res = await fetch('/api/public/plans', { cache: 'no-store' });
@@ -66,6 +74,23 @@ export default function SubscribeIndexPage() {
 
   const recommendedTier =
     plans.length >= 3 ? plans[1]?.tier : plans.length === 2 ? plans[1]?.tier : undefined;
+  const steps = loggedIn ? STEPS_UPGRADE : STEPS_NEW;
+
+  const startUpgrade = async (tier: string) => {
+    setError('');
+    setCheckoutTier(tier);
+    try {
+      const url = await startCustomerCheckout({
+        planTier: tier,
+        useTrial: true,
+        source: 'web_logged_in_upgrade',
+      });
+      window.location.href = url;
+    } catch (e: any) {
+      setError(e?.message || 'Could not start checkout');
+      setCheckoutTier(null);
+    }
+  };
 
   return (
     <main
@@ -146,10 +171,12 @@ export default function SubscribeIndexPage() {
             </span>
           </div>
           <h1 style={{ margin: '0 0 12px', fontSize: 'clamp(32px, 5.5vw, 44px)', fontWeight: 800, letterSpacing: -0.9, lineHeight: 1.15, color: T.navy }}>
-            Choose the plan that fits your team
+            {loggedIn ? 'Upgrade your TidyFlow plan' : 'Choose the plan that fits your team'}
           </h1>
           <p style={{ margin: '0 auto', maxWidth: 540, color: T.inkMid, fontSize: 15, lineHeight: 1.6 }}>
-            Create your account, complete secure checkout, then download the app and sign in with the same email.
+            {loggedIn
+              ? `You're signed in${signedInEmail ? ` as ${signedInEmail}` : ''}. Choose a plan to continue to Stripe — no new account needed.`
+              : 'Create your account, complete secure checkout, then download the app and sign in with the same email.'}
           </p>
         </div>
 
@@ -167,13 +194,13 @@ export default function SubscribeIndexPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
+              gridTemplateColumns: loggedIn ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)',
               gap: 12,
               position: 'relative',
               zIndex: 2,
             }}
           >
-            {STEPS.map((step, i) => {
+            {steps.map((step, i) => {
               const isActive = i === 0;
               return (
                 <div key={step} style={{ textAlign: 'center' }}>
@@ -431,6 +458,7 @@ export default function SubscribeIndexPage() {
                     </ul>
 
                     {/* Action Button */}
+                    {loggedIn === false ? (
                     <Link
                       href={`/subscribe/${slug}`}
                       className="interactive-btn"
@@ -454,6 +482,41 @@ export default function SubscribeIndexPage() {
                     >
                       {hasTrial ? `Start ${plan.trialDays}-day trial` : `Continue with ${plan.label}`}
                     </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        className="interactive-btn"
+                        disabled={loggedIn !== true || !!checkoutTier}
+                        onClick={() => void startUpgrade(plan.tier)}
+                        style={{
+                          marginTop: 'auto',
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'center',
+                          border: 'none',
+                          cursor: checkoutTier ? 'wait' : 'pointer',
+                          borderRadius: 12,
+                          padding: '14px 18px',
+                          fontWeight: 800,
+                          fontSize: 14,
+                          background: recommended
+                            ? `linear-gradient(90deg, ${T.amber}, ${T.amberDeep})`
+                            : `linear-gradient(135deg, ${T.navyDeep}, ${T.navyMid || T.navy})`,
+                          color: recommended ? T.navyDeep : '#fff',
+                          boxShadow: recommended
+                            ? '0 8px 20px rgba(217,119,6,0.18)'
+                            : '0 8px 18px rgba(11,30,54,0.12)',
+                        }}
+                      >
+                        {loggedIn !== true
+                          ? 'Checking account…'
+                          : checkoutTier === plan.tier
+                          ? 'Opening Stripe…'
+                          : hasTrial
+                            ? `Upgrade with ${plan.trialDays}-day trial`
+                            : `Upgrade to ${plan.label}`}
+                      </button>
+                    )}
                   </div>
                 </article>
               );
@@ -498,11 +561,22 @@ export default function SubscribeIndexPage() {
               Secure checkout · Cancel anytime
             </p>
             <p style={{ margin: 0, color: T.inkMid, fontSize: 13, lineHeight: 1.5 }}>
-              Payment is completed on a protected checkout page. After you subscribe, download the app and
-              sign in with your email.
+              {loggedIn
+                ? 'Payment is completed on Stripe. Cancel anytime from your customer dashboard.'
+                : 'Payment is completed on a protected checkout page. After you subscribe, download the app and sign in with your email.'}
             </p>
           </div>
         </div>
+
+        {loggedIn ? (
+          <p style={{ marginTop: 24, textAlign: 'center', fontSize: 14 }}>
+            <Link href="/account/billing" style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
+              ← Back to dashboard
+            </Link>
+          </p>
+        ) : null}
+
+        <div style={{ marginTop: 40, textAlign: 'center' }}></div>
 
         <AppDownloadBanner variant="hero" />
       </div>

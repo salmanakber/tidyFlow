@@ -13,6 +13,10 @@ import {
   trialDaysRemaining,
 } from "@/lib/customer-account"
 import AppDownloadBanner from "@/components/AppDownloadBanner"
+import AccountChrome from "@/components/account/AccountChrome"
+import AccountSetupModal from "@/components/account/AccountSetupModal"
+import AccountUpgradeBanner from "@/components/account/AccountUpgradeBanner"
+import { shouldSkipSetupPrompt } from "@/components/account/accountUi"
 
 type Tab = "overview" | "usage" | "plans" | "invoices"
 
@@ -147,6 +151,7 @@ export default function CustomerBillingPage() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null)
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
   const [userEmail, setUserEmail] = useState("")
+  const [showSetup, setShowSetup] = useState(false)
 
   const authHeaders = () => ({ Authorization: `Bearer ${getCustomerToken()}` })
 
@@ -164,11 +169,12 @@ export default function CustomerBillingPage() {
       await axios.post("/api/auth/clear-admin-session").catch(() => null)
       setUserEmail(getCustomerUserEmail())
 
-      const [billingRes, plansRes, usageRes, pricingRes] = await Promise.all([
+      const [billingRes, plansRes, usageRes, pricingRes, meRes] = await Promise.all([
         axios.get("/api/billing", { headers: authHeaders(), params: { limit: 50 } }),
         axios.get("/api/subscription/plans", { headers: authHeaders() }).catch(() => null),
         axios.get("/api/subscription/usage", { headers: authHeaders() }).catch(() => null),
         axios.get("/api/subscription/pricing", { headers: authHeaders() }).catch(() => null),
+        axios.get("/api/auth/me", { headers: authHeaders() }).catch(() => null),
       ])
 
       if (billingRes.data.success) {
@@ -187,6 +193,13 @@ export default function CustomerBillingPage() {
       if (usageRes?.data?.success) setUsage(usageRes.data.data || null)
       const configuredTrial = pricingRes?.data?.data?.pricing?.trialDays
       if (configuredTrial != null) setTrialDaysConfig(Number(configuredTrial))
+      if (meRes?.data?.success) {
+        const meUser = meRes.data.data?.user
+        if (meUser?.email) setUserEmail(meUser.email)
+        if (meRes.data.data?.needsOnboarding && !shouldSkipSetupPrompt()) {
+          setShowSetup(true)
+        }
+      }
     } catch (err: any) {
       if (err?.response?.status === 401) {
         clearCustomerSession()
@@ -206,6 +219,10 @@ export default function CustomerBillingPage() {
   useEffect(() => {
     if (loading) return
     const params = new URLSearchParams(window.location.search)
+    const tabParam = params.get("tab")
+    if (tabParam === "plans" || tabParam === "usage" || tabParam === "invoices" || tabParam === "overview") {
+      setTab(tabParam)
+    }
     const pay = params.get("pay")
     if (!pay) return
     const useTrial = params.get("trial") !== "0"
@@ -395,58 +412,43 @@ export default function CustomerBillingPage() {
     }
   }
 
-  const signOut = () => {
-    clearCustomerSession()
-    window.location.href = "/account/login"
-  }
-
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: `radial-gradient(1000px 400px at 50% 0%, ${T.amberSoft} 0%, transparent 100%), ${T.canvas}`,
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-        padding: "32px 16px 120px",
-      }}
+    <AccountChrome
+      active="billing"
+      title="Account dashboard"
+      subtitle={`${company?.name || "Your account"}${userEmail ? ` · ${userEmail}` : ""}`}
+      extraActions={
+        <>
+          <button type="button" onClick={() => load()} style={secondaryBtn}>
+            Refresh
+          </button>
+          <button type="button" onClick={openPortal} disabled={portalLoading} style={primaryBtn}>
+            {portalLoading ? "Opening…" : "Manage payment"}
+          </button>
+        </>
+      }
     >
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <header
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: 16,
-            marginBottom: 20,
+        <AccountSetupModal
+          open={showSetup}
+          onClose={() => setShowSetup(false)}
+          onComplete={() => {
+            setShowSetup(false)
+            if (needsCheckout) setTab("plans")
+            void load()
           }}
-        >
-          <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: T.amberDeep, margin: 0 }}>
-              TIDYFLOW CUSTOMER
-            </p>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: T.ink, margin: "6px 0 0" }}>
-              Account dashboard
-            </h1>
-            <p style={{ margin: "8px 0 0", fontSize: 14, color: T.inkMid }}>
-              {company?.name || "Your account"}
-              {userEmail ? ` · ${userEmail}` : ""}
-            </p>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button type="button" onClick={() => load()} style={secondaryBtn}>
-              Refresh
-            </button>
-            <button type="button" onClick={openPortal} disabled={portalLoading} style={primaryBtn}>
-              {portalLoading ? "Opening…" : "Manage payment"}
-            </button>
-            <button type="button" onClick={signOut} style={ghostBtn}>
-              Sign out
-            </button>
-          </div>
-        </header>
+        />
 
         <AppDownloadBanner variant="hero" />
+
+        {!loading ? (
+          <AccountUpgradeBanner
+            needsCheckout={needsCheckout}
+            onTrial={onTrial}
+            trialDaysLeft={trialDaysLeft}
+            currentLabel={usage?.label || currentPlan?.label}
+            onChoosePlan={() => setTab("plans")}
+          />
+        ) : null}
 
         {/* Tabs */}
         <div style={tabBar}>
@@ -612,6 +614,9 @@ export default function CustomerBillingPage() {
                       <button type="button" onClick={() => setTab("plans")} style={primaryBtn}>
                         {needsCheckout ? "Choose a plan" : "Upgrade / switch plan"}
                       </button>
+                      <Link href="/account/settings" style={secondaryBtn}>
+                        Edit profile & company
+                      </Link>
                       {canCancel ? (
                         <button
                           type="button"
@@ -663,13 +668,10 @@ export default function CustomerBillingPage() {
                 {needsCheckout && (
                   <div style={card}>
                     <strong style={{ color: T.ink }}>Start subscription</strong>
-                    <p style={{ margin: "6px 0 12px", fontSize: 13, color: T.inkMid }}>
-                      No active Stripe subscription yet. Pick a plan to open secure checkout
-                      {onTrial ? " (trial available)" : ""}.
+                    <p style={{ margin: "6px 0 0", fontSize: 13, color: T.inkMid }}>
+                      Your account is already set up. Pick a plan below to open Stripe checkout
+                      {onTrial ? " (trial available)" : ""} — you will not be asked to create another account.
                     </p>
-                    <Link href="/subscribe" style={{ ...secondaryBtn, display: "inline-flex" }}>
-                      Compare all plans
-                    </Link>
                   </div>
                 )}
 
@@ -855,9 +857,7 @@ export default function CustomerBillingPage() {
             )}
           </>
         )}
-      </div>
-      <AppDownloadBanner variant="sticky" />
-    </main>
+    </AccountChrome>
   )
 }
 

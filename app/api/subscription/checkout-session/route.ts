@@ -172,6 +172,7 @@ export async function POST(request: NextRequest) {
         : 'mobile_external_checkout';
 
     const appOrigin = getAppOrigin();
+    const loggedInWeb = checkoutSource === 'web_account_billing' || checkoutSource === 'web_logged_in_upgrade';
     const session = await createPlanCheckoutSession({
       stripe,
       customerId,
@@ -181,7 +182,9 @@ export async function POST(request: NextRequest) {
       trialDays: resolved.trialDays,
       source: checkoutSource,
       successUrl: `${appOrigin}/subscribe/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${appOrigin}/subscribe/cancel`,
+      cancelUrl: loggedInWeb
+        ? `${appOrigin}/account/billing?tab=plans`
+        : `${appOrigin}/subscribe/cancel`,
     });
 
     if (!session.url) {

@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SUBSCRIBE_THEME as T } from '@/lib/public-plan-scope';
+import { isCustomerLoggedIn } from '@/lib/customer-checkout';
 
 const APP_DEEP_LINK = 'tidyflow://subscribe/cancel';
 
 export default function SubscribeCancelPage() {
   const [autoOpenFailed, setAutoOpenFailed] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
+    setLoggedIn(isCustomerLoggedIn());
     const timer = window.setTimeout(() => {
       window.location.href = APP_DEEP_LINK;
     }, 250);
@@ -82,7 +85,7 @@ export default function SubscribeCancelPage() {
           Open TidyFlow app
         </a>
         <Link
-          href="/subscribe"
+          href={loggedIn ? '/account/billing?tab=plans' : '/subscribe'}
           style={{
             display: 'block',
             color: T.navy,
@@ -92,7 +95,7 @@ export default function SubscribeCancelPage() {
             padding: '8px 0',
           }}
         >
-          Back to plans
+          {loggedIn ? 'Back to dashboard' : 'Back to plans'}
         </Link>
       </div>
     </main>

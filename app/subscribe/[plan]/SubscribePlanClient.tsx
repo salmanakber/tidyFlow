@@ -1,7 +1,7 @@
 
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { normalizePublicPlanSlug, planSlugToTier } from '@/lib/app-store-links';
@@ -12,7 +12,8 @@ import {
 } from '@/lib/public-plan-scope';
 import { evaluatePassword } from '@/lib/password-policy';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
-import { storeCustomerSession } from '@/lib/customer-account';
+import { getCustomerUserEmail, storeCustomerSession } from '@/lib/customer-account';
+import { isCustomerLoggedIn, startCustomerCheckout } from '@/lib/customer-checkout';
 import AppDownloadBanner from '@/components/AppDownloadBanner';
 
 function CheckIcon({ on = true }: { on?: boolean }) {
@@ -53,12 +54,20 @@ export default function PublicSubscribePlanPage() {
     password: '',
     confirmPassword: '',
   });
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [signedInEmail, setSignedInEmail] = useState('');
+  const autoCheckoutRef = useRef(false);
 
   const canceled = searchParams.get('canceled') === '1';
   const passwordCheck = useMemo(() => evaluatePassword(form.password), [form.password]);
   const passwordsMatch =
     form.confirmPassword.length > 0 && form.password === form.confirmPassword;
   const passwordReady = passwordCheck.valid && passwordsMatch;
+
+  useEffect(() => {
+    setLoggedIn(isCustomerLoggedIn());
+    setSignedInEmail(getCustomerUserEmail());
+  }, []);
 
   useEffect(() => {
     if (!tier) {
@@ -80,6 +89,31 @@ export default function PublicSubscribePlanPage() {
     };
     void load();
   }, [tier]);
+
+  const continueLoggedInCheckout = async (trial = useTrial) => {
+    if (!tier) return;
+    setError('');
+    setSubmitting(true);
+    try {
+      const url = await startCustomerCheckout({
+        planTier: tier,
+        useTrial: trial,
+        source: 'web_logged_in_upgrade',
+      });
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err?.message || 'Could not start checkout');
+      setSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!loggedIn || !tier || loadingPlan || !plan || canceled) return;
+    if (autoCheckoutRef.current) return;
+    autoCheckoutRef.current = true;
+    void continueLoggedInCheckout(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn, tier, loadingPlan, plan, canceled]);
 
   const scope = useMemo(() => (plan ? getPublicPlanScopeItems(plan) : []), [plan]);
   const limits = scope.filter((s) => s.kind === 'limit');
@@ -287,13 +321,15 @@ export default function PublicSubscribePlanPage() {
               textTransform: 'uppercase',
             }}
           >
-            Secure signup
+            {loggedIn ? 'Upgrade this account' : 'Secure signup'}
           </p>
           <h1 style={{ margin: '0 0 12px', fontSize: 'clamp(26px, 4.5vw, 36px)', fontWeight: 800, letterSpacing: -0.8, color: T.navy, lineHeight: 1.2 }}>
-            Get started with TidyFlow
+            {loggedIn ? `Continue with ${plan?.label || 'this'} plan` : 'Get started with TidyFlow'}
           </h1>
           <p style={{ margin: 0, color: T.inkMid, fontSize: 15, lineHeight: 1.55 }}>
-            Create your account, complete payment, then download the app and sign in with the same email.
+            {loggedIn
+              ? `You're already signed in${signedInEmail ? ` as ${signedInEmail}` : ''}. Continue to Stripe checkout — no new account is created.`
+              : 'Create your account, complete payment, then download the app and sign in with the same email.'}
           </p>
         </div>
 
@@ -311,7 +347,7 @@ export default function PublicSubscribePlanPage() {
               boxShadow: '0 4px 12px rgba(217,119,6,0.05)',
             }}
           >
-            Checkout was canceled. Update your details and continue whenever you are ready.
+            Checkout was canceled. You can continue to Stripe whenever you are ready.
           </div>
         ) : null}
 
@@ -419,8 +455,70 @@ export default function PublicSubscribePlanPage() {
             )}
           </section>
 
-          {/* Checkout/Registration Form */}
+          {/* Checkout or upgrade */}
           <section className="responsive-panel">
+            {loggedIn === null ? (
+              <p style={{ margin: 0, color: T.inkMid, fontSize: 14 }}>Checking your account…</p>
+            ) : loggedIn ? (
+              <>
+                <h2 style={{ margin: '0 0 6px', fontSize: 22, color: T.navy, fontWeight: 800, letterSpacing: -0.3 }}>
+                  Upgrade your plan
+                </h2>
+                <p style={{ margin: '0 0 20px', color: T.inkMid, fontSize: 13, lineHeight: 1.5 }}>
+                  Signed in as <strong style={{ color: T.navy }}>{signedInEmail || 'your account'}</strong>.
+                  This continues checkout for the existing company — you do not create a second account.
+                </p>
+                {(plan?.trialDays ?? 0) > 0 && (
+                  <label
+                    style={{
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start',
+                      background: T.amberSoft,
+                      border: `1.5px solid rgba(217,119,6,0.18)`,
+                      borderRadius: 12,
+                      padding: '14px 14px',
+                      cursor: 'pointer',
+                      marginBottom: 16,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={useTrial}
+                      onChange={(e) => setUseTrial(e.target.checked)}
+                      style={{ marginTop: 3, accentColor: T.amberDeep, width: 15, height: 15, flexShrink: 0 }}
+                    />
+                    <span style={{ fontSize: 13, color: T.navy, lineHeight: 1.45 }}>
+                      <strong>Include a {plan?.trialDays}-day free trial</strong>
+                      <br />
+                      <span style={{ color: T.inkMid, fontSize: 12 }}>Card required now · billed after trial ends</span>
+                    </span>
+                  </label>
+                )}
+                {error ? (
+                  <p style={{ margin: '0 0 14px', color: T.rose, fontSize: 13, fontWeight: 700 }}>{error}</p>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={submitting || !plan}
+                  className="interactive-btn"
+                  onClick={() => void continueLoggedInCheckout(useTrial)}
+                  style={{
+                    ...primaryBtn,
+                    opacity: submitting || !plan ? 0.75 : 1,
+                    pointerEvents: submitting || !plan ? 'none' : 'auto',
+                  }}
+                >
+                  {submitting ? 'Opening Stripe checkout…' : `Continue to Stripe${plan ? ` for ${plan.label}` : ''}`}
+                </button>
+                <p style={{ margin: '16px 0 0', textAlign: 'center', fontSize: 13 }}>
+                  <Link href="/account/billing" style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
+                    ← Back to dashboard
+                  </Link>
+                </p>
+              </>
+            ) : (
+            <>
             <h2 style={{ margin: '0 0 6px', fontSize: 22, color: T.navy, fontWeight: 800, letterSpacing: -0.3 }}>
               Create your account
             </h2>
@@ -634,14 +732,16 @@ export default function PublicSubscribePlanPage() {
                 <span>App download after</span>
               </div>
             </form>
+            </>
+            )}
           </section>
         </div>
 
         <AppDownloadBanner variant="compact" />
         {/* Page Footer Navigation links */}
         <p style={{ textAlign: 'center', marginTop: 32, color: T.inkMid, fontSize: 13 }}>
-          <Link href="/subscribe" style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
-            ← All plans
+          <Link href={loggedIn ? '/account/billing' : '/subscribe'} style={{ color: T.navy, fontWeight: 800, textDecoration: 'none' }}>
+            {loggedIn ? '← Back to dashboard' : '← All plans'}
           </Link>
         </p>
       </div>
