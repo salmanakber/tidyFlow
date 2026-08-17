@@ -7,7 +7,7 @@ import {
 } from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
 import { cancelTrialReminderJobs } from '@/lib/automation-queue';
-import { notifyBillingOwners } from '@/lib/stripe-webhook-sync';
+import { notifyBillingOwners, stripeSubscriptionPeriodDates } from '@/lib/stripe-webhook-sync';
 
 export interface CancelSubscriptionResult {
   alreadyCanceled: boolean;
@@ -35,7 +35,7 @@ export async function cancelCompanyStripeSubscription(
     where: {
       companyId,
       subscriptionId: { not: null },
-      status: { in: ['active', 'trialing', 'canceling'] },
+      status: { in: ['active', 'trialing', 'canceling', 'past_due'] },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -52,9 +52,8 @@ export async function cancelCompanyStripeSubscription(
   const stripe = createStripeInstance(secretKey);
   const subscription = await stripe.subscriptions.retrieve(billing.subscriptionId);
 
-  const accessUntil = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000)
-    : billing.nextBillingDate;
+  const { currentPeriodEnd } = stripeSubscriptionPeriodDates(subscription);
+  const accessUntil = currentPeriodEnd || billing.nextBillingDate;
 
   if (subscription.cancel_at_period_end) {
     return {
@@ -124,9 +123,8 @@ export async function cancelCompanyStripeSubscription(
 
   const updated = await cancelSubscriptionAtPeriodEnd(billing.subscriptionId, stripe);
 
-  const periodEnd = updated.current_period_end
-    ? new Date(updated.current_period_end * 1000)
-    : accessUntil;
+  const { currentPeriodEnd } = stripeSubscriptionPeriodDates(updated);
+  const periodEnd = currentPeriodEnd || accessUntil;
 
   await prisma.billingRecord.update({
     where: { id: billing.id },

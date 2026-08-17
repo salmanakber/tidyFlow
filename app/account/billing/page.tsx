@@ -258,11 +258,12 @@ export default function CustomerBillingPage() {
   const onTrial = isTrialCurrentlyActive(company?.isTrialActive, company?.trialEndsAt)
   const trialDaysLeft = trialDaysRemaining(company?.trialEndsAt)
   const hasStripeSubscription = Boolean(currentSubscription?.subscriptionId)
-  const isCancelScheduled = Boolean(currentSubscription?.cancelAtPeriodEnd)
+  const isCancelScheduled =
+    Boolean(currentSubscription?.cancelAtPeriodEnd) || subscriptionStatus === "canceling"
   const canCancel =
     hasStripeSubscription &&
     !isCancelScheduled &&
-    ["active", "trialing"].includes(subscriptionStatus)
+    !["canceled", "incomplete", "incomplete_expired"].includes(subscriptionStatus)
   const needsCheckout =
     !hasStripeSubscription &&
     !["active", "trialing"].includes(subscriptionStatus)
@@ -438,6 +439,16 @@ export default function CustomerBillingPage() {
           <button type="button" onClick={() => load()} style={secondaryBtn}>
             Refresh
           </button>
+          {canCancel ? (
+            <button
+              type="button"
+              onClick={cancelSubscription}
+              disabled={canceling}
+              style={{ ...secondaryBtn, color: T.rose, borderColor: "#FECACA", background: "#FEF2F2" }}
+            >
+              {canceling ? "Canceling…" : onTrial ? "Cancel trial" : "Cancel subscription"}
+            </button>
+          ) : null}
           <button type="button" onClick={openPortal} disabled={portalLoading} style={primaryBtn}>
             {portalLoading ? "Opening…" : "Manage payment"}
           </button>
@@ -594,7 +605,23 @@ export default function CustomerBillingPage() {
                       {formatDate(
                         currentSubscription?.cancelEffectiveAt || currentSubscription?.nextBillingDate
                       )}
+                      . You keep access until then.
                     </div>
+                  ) : canCancel ? (
+                    <button
+                      type="button"
+                      onClick={cancelSubscription}
+                      disabled={canceling}
+                      style={{
+                        marginTop: 16,
+                        ...secondaryBtn,
+                        background: "rgba(255,255,255,0.08)",
+                        color: "#FECACA",
+                        borderColor: "rgba(254,202,202,0.45)",
+                      }}
+                    >
+                      {canceling ? "Canceling…" : onTrial ? "Cancel trial" : "Cancel subscription"}
+                    </button>
                   ) : null}
                 </div>
 
@@ -645,7 +672,7 @@ export default function CustomerBillingPage() {
                           type="button"
                           onClick={cancelSubscription}
                           disabled={canceling}
-                          style={{ ...ghostBtn, color: T.rose, justifyContent: "flex-start", paddingLeft: 0 }}
+                          style={{ ...secondaryBtn, color: T.rose, borderColor: "#FECACA", background: "#FEF2F2" }}
                         >
                           {canceling
                             ? "Canceling…"
@@ -793,6 +820,36 @@ export default function CustomerBillingPage() {
                     )
                   })}
                 </div>
+
+                {canCancel ? (
+                  <div style={{ ...card, borderColor: "#FECACA", background: "#FEF2F2" }}>
+                    <strong style={{ color: T.ink }}>Cancel subscription</strong>
+                    <p style={{ margin: "6px 0 12px", fontSize: 13, color: T.inkMid, lineHeight: 1.45 }}>
+                      {onTrial
+                        ? "Cancel now and you will not be charged. Access ends immediately."
+                        : "You keep access until the end of the current billing period. After that, Stripe billing stops."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={cancelSubscription}
+                      disabled={canceling}
+                      style={{ ...primaryBtn, background: T.rose, color: "#fff" }}
+                    >
+                      {canceling ? "Canceling…" : onTrial ? "Cancel trial" : "Cancel subscription"}
+                    </button>
+                  </div>
+                ) : isCancelScheduled ? (
+                  <div style={card}>
+                    <strong style={{ color: T.ink }}>Cancellation scheduled</strong>
+                    <p style={{ margin: "6px 0 0", fontSize: 13, color: T.inkMid }}>
+                      Your plan stays active until{" "}
+                      {formatDate(
+                        currentSubscription?.cancelEffectiveAt || currentSubscription?.nextBillingDate
+                      )}
+                      .
+                    </p>
+                  </div>
+                ) : null}
 
                 {!needsCheckout && (
                   <p style={{ fontSize: 12, color: T.inkFaint, margin: 0 }}>
