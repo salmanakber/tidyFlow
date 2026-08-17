@@ -244,6 +244,7 @@ export async function POST(request: NextRequest) {
         email: result.user.email,
         role: result.user.role,
         companyId: result.company.id,
+        portal: 'customer',
       });
 
       if (!canResume) {

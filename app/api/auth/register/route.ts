@@ -118,7 +118,8 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       email: user.email,
       role: user.role,
-      companyId: user.companyId || undefined
+      companyId: user.companyId || undefined,
+      portal: body.portal === 'customer' ? 'customer' : undefined,
     });
 
     const welcomeName =

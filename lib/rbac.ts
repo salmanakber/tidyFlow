@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { UserRole } from '@prisma/client';
 import { getUserFromRequest, JWTPayload } from '@/lib/auth';
 import prisma from '@/lib/prisma';
+import { getTrialDays } from '@/lib/trial-settings';
 
 // Define role hierarchy from lowest to highest privileges
 const ROLE_ORDER: UserRole[] = [
@@ -32,17 +33,73 @@ export function isManagerPlusRole(role: UserRole | string): boolean {
   return MANAGER_PLUS_ROLES.includes(role as UserRole);
 }
 
+const COMPANY_BILLING_ROLES = new Set([
+  'OWNER',
+  'COMPANY_ADMIN',
+  'SUPER_ADMIN',
+  'DEVELOPER',
+  'ADMIN_UNIQUE',
+]);
+
 export function isCompanyBillingRole(role: unknown): boolean {
-  const normalized = String(role || '')
-    .toUpperCase()
-    .trim();
-  return (
-    normalized === UserRole.OWNER ||
-    normalized === UserRole.COMPANY_ADMIN ||
-    normalized === UserRole.SUPER_ADMIN ||
-    normalized === UserRole.DEVELOPER ||
-    normalized === UserRole.ADMIN_UNIQUE
-  );
+  return COMPANY_BILLING_ROLES.has(String(role || '').toUpperCase().trim());
+}
+
+async function ensureCustomerOwnsCompany(userId: number) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  const select = {
+    id: true,
+    email: true,
+    role: true,
+    companyId: true,
+    isActive: true,
+    firstName: true,
+    lastName: true,
+  } as const;
+
+  let user = await prisma.user.findUnique({ where: { id }, select });
+  if (!user?.isActive) return null;
+
+  if (!user.companyId) {
+    const trialDays = await getTrialDays();
+    const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+    const companyName =
+      [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email.split('@')[0] || 'My company';
+    const company = await prisma.company.create({
+      data: {
+        name: companyName,
+        planTier: 'STARTUP',
+        subscriptionStatus: 'unpaid',
+        isTrialActive: trialDays > 0,
+        trialEndsAt: trialDays > 0 ? trialEndsAt : null,
+      },
+    });
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { companyId: company.id, role: 'OWNER' },
+      select,
+    });
+  } else if (!isCompanyBillingRole(user.role)) {
+    const [ownerCount, memberCount] = await Promise.all([
+      prisma.user.count({
+        where: { companyId: user.companyId, role: 'OWNER', isActive: true },
+      }),
+      prisma.user.count({
+        where: { companyId: user.companyId, isActive: true },
+      }),
+    ]);
+    if (ownerCount === 0 || memberCount <= 1) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { role: 'OWNER' },
+        select,
+      });
+    }
+  }
+
+  return user;
 }
 
 /**
@@ -62,32 +119,43 @@ export async function requireCompanyBillingAccess(request: NextRequest): Promise
   const auth = requireAuth(request);
   if (!auth) return denied('Please sign in to continue.', 401);
 
-  let actor = await resolveAuthenticatedUser(auth.tokenUser);
-  if (!actor) return denied('Please sign in to continue.', 401);
+  const actor = await ensureCustomerOwnsCompany(Number(auth.tokenUser.userId));
+  const resolved =
+    actor ||
+    (await (async () => {
+      const fallback = await resolveAuthenticatedUser(auth.tokenUser);
+      return fallback ? ensureCustomerOwnsCompany(fallback.id) : null;
+    })());
+  if (!resolved) return denied('Please sign in to continue.', 401);
 
-  if (!isCompanyBillingRole(actor.role) && actor.companyId) {
-    const ownerCount = await prisma.user.count({
-      where: { companyId: actor.companyId, role: UserRole.OWNER, isActive: true },
+  const jwtSaysOwner = isCompanyBillingRole(auth.tokenUser.role);
+  if (!isCompanyBillingRole(resolved.role) && jwtSaysOwner && resolved.companyId) {
+    const promoted = await prisma.user.update({
+      where: { id: resolved.id },
+      data: { role: 'OWNER' },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        companyId: true,
+        isActive: true,
+        firstName: true,
+        lastName: true,
+      },
     });
-    if (ownerCount === 0) {
-      actor = await prisma.user.update({
-        where: { id: actor.id },
-        data: { role: UserRole.OWNER },
-        select: { id: true, companyId: true, isActive: true, email: true, role: true },
-      });
-    }
+    Object.assign(resolved, promoted);
   }
 
-  if (!isCompanyBillingRole(actor.role)) {
+  if (!isCompanyBillingRole(resolved.role)) {
     return denied('This account cannot manage billing.', 403);
   }
 
   const tokenUser: JWTPayload = {
     ...auth.tokenUser,
-    userId: actor.id,
-    email: actor.email,
-    role: actor.role,
-    companyId: actor.companyId ?? auth.tokenUser.companyId,
+    userId: resolved.id,
+    email: resolved.email,
+    role: resolved.role,
+    companyId: resolved.companyId ?? (Number(auth.tokenUser.companyId) || undefined),
   };
 
   const companyId = await resolveCompanyIdAsync(request, tokenUser);
@@ -201,7 +269,7 @@ export async function resolveCompanyIdAsync(
   if (fromRequest) return fromRequest;
 
   const user = await prisma.user.findUnique({
-    where: { id: tokenUser.userId },
+    where: { id: Number(tokenUser.userId) },
     select: { companyId: true },
   });
 

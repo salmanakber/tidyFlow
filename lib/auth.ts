@@ -14,6 +14,7 @@ export interface JWTPayload {
   email: string;
   role: string;
   companyId?: number;
+  portal?: 'customer' | 'admin';
 }
 
 export interface User {

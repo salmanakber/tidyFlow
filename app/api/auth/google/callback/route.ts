@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import prisma from '@/lib/prisma';
-import { UserRole } from '@prisma/client';
 import { generateToken, hashPassword } from '@/lib/auth';
 import { getAppOrigin } from '@/lib/domains';
 import { getTrialDays } from '@/lib/trial-settings';
@@ -81,7 +80,7 @@ export async function GET(request: NextRequest) {
             firstName: profile.firstName || null,
             lastName: profile.lastName || null,
             profileImage: profile.picture || null,
-            role: UserRole.OWNER,
+            role: 'OWNER',
             companyId: company.id,
           },
         });
@@ -100,6 +99,43 @@ export async function GET(request: NextRequest) {
       if (profile.picture && !user.profileImage) patch.profileImage = profile.picture;
       if (profile.firstName && !user.firstName) patch.firstName = profile.firstName;
       if (profile.lastName && !user.lastName) patch.lastName = profile.lastName;
+
+      if (state.portal === 'customer') {
+        if (!user.companyId) {
+          const trialDays = await getTrialDays();
+          const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+          const companyName =
+            state.companyName?.trim() ||
+            [profile.firstName || user.firstName, profile.lastName || user.lastName]
+              .filter(Boolean)
+              .join(' ') ||
+            profile.email.split('@')[0];
+          const company = await prisma.company.create({
+            data: {
+              name: companyName,
+              planTier: 'STARTUP',
+              subscriptionStatus: 'unpaid',
+              isTrialActive: trialDays > 0,
+              trialEndsAt: trialDays > 0 ? trialEndsAt : null,
+            },
+          });
+          patch.companyId = company.id;
+          patch.role = 'OWNER';
+        } else if (!['OWNER', 'COMPANY_ADMIN', 'SUPER_ADMIN', 'DEVELOPER', 'ADMIN_UNIQUE'].includes(String(user.role))) {
+          const [ownerCount, memberCount] = await Promise.all([
+            prisma.user.count({
+              where: { companyId: user.companyId, role: 'OWNER', isActive: true },
+            }),
+            prisma.user.count({
+              where: { companyId: user.companyId, isActive: true },
+            }),
+          ]);
+          if (ownerCount === 0 || memberCount <= 1) {
+            patch.role = 'OWNER';
+          }
+        }
+      }
+
       if (Object.keys(patch).length) {
         user = await prisma.user.update({ where: { id: user.id }, data: patch });
       }
@@ -110,6 +146,7 @@ export async function GET(request: NextRequest) {
       email: user.email,
       role: user.role,
       companyId: user.companyId || undefined,
+      portal: state.portal,
     });
 
     const origin = getAppOrigin();

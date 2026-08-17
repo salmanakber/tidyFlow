@@ -240,7 +240,8 @@ const shouldSkipOTP =
       userId: user.id,
       email: user.email,
       role: user.role,
-      companyId: user.companyId || undefined
+      companyId: user.companyId || undefined,
+      portal,
     });
 
     // Create response with token in both JSON and cookie

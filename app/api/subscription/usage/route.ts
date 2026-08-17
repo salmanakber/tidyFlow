@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
 import { getPlanUsageSnapshot, checkPlanLimit } from '@/lib/subscription';
 
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
-  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+  if (!auth) return NextResponse.json({ success: false, message: 'Please sign in to continue.' }, { status: 401 });
 
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
+  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
   if (!companyId) {
     return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
   }
