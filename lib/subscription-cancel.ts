@@ -123,8 +123,8 @@ export async function cancelCompanyStripeSubscription(
 
   const updated = await cancelSubscriptionAtPeriodEnd(billing.subscriptionId, stripe);
 
-  const { currentPeriodEnd } = stripeSubscriptionPeriodDates(updated);
-  const periodEnd = currentPeriodEnd || accessUntil;
+  const { currentPeriodEnd: updatedPeriodEnd } = stripeSubscriptionPeriodDates(updated);
+  const periodEnd = updatedPeriodEnd || accessUntil;
 
   await prisma.billingRecord.update({
     where: { id: billing.id },
