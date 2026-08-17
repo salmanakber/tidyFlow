@@ -1,0 +1,259 @@
+import type Stripe from 'stripe';
+import prisma from '@/lib/prisma';
+import {
+  cancelTrialReminderJobs,
+  enqueueBillingNotification,
+  schedulePendingPlanSwitchReminders,
+  scheduleTrialEndingReminders,
+} from '@/lib/automation-queue';
+
+export function resolveStripeCustomerId(
+  customer: string | Stripe.Customer | Stripe.DeletedCustomer | null
+): string | null {
+  if (!customer) return null;
+  if (typeof customer === 'string') return customer;
+  if ('deleted' in customer && customer.deleted) return null;
+  return customer.id;
+}
+
+export async function findBillingRecordForStripeEvent(input: {
+  customerId?: string | null;
+  subscriptionId?: string | null;
+}) {
+  if (input.subscriptionId) {
+    const bySub = await prisma.billingRecord.findFirst({
+      where: { subscriptionId: input.subscriptionId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (bySub) return bySub;
+  }
+
+  if (input.customerId) {
+    return prisma.billingRecord.findFirst({
+      where: { stripeCustomerId: input.customerId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  return null;
+}
+
+function mapBillingStatus(status: Stripe.Subscription.Status, cancelAtPeriodEnd: boolean) {
+  if (status === 'trialing') return 'trialing';
+  if (status === 'active') return cancelAtPeriodEnd ? 'canceling' : 'active';
+  if (status === 'past_due' || status === 'unpaid') return status;
+  if (status === 'canceled') return 'canceled';
+  return 'inactive';
+}
+
+function mapCompanySubscriptionStatus(
+  status: Stripe.Subscription.Status,
+  cancelAtPeriodEnd: boolean,
+  trialEnd: Date | null
+) {
+  const now = new Date();
+
+  if (status === 'trialing') {
+    return {
+      subscriptionStatus: 'trialing',
+      isTrialActive: !!(trialEnd && trialEnd > now),
+    };
+  }
+
+  if (status === 'active') {
+    return {
+      subscriptionStatus: cancelAtPeriodEnd ? 'canceling' : 'active',
+      isTrialActive: false,
+    };
+  }
+
+  if (status === 'past_due' || status === 'unpaid') {
+    return { subscriptionStatus: status, isTrialActive: false };
+  }
+
+  if (status === 'canceled' || status === 'incomplete_expired') {
+    return { subscriptionStatus: 'canceled', isTrialActive: false };
+  }
+
+  return { subscriptionStatus: 'inactive', isTrialActive: false };
+}
+
+export function stripeSubscriptionPeriodDates(subscription: Stripe.Subscription) {
+  return {
+    currentPeriodStart: subscription.current_period_start
+      ? new Date(subscription.current_period_start * 1000)
+      : null,
+    currentPeriodEnd: subscription.current_period_end
+      ? new Date(subscription.current_period_end * 1000)
+      : null,
+  };
+}
+
+export async function syncStripeSubscriptionToDatabase(subscription: Stripe.Subscription) {
+  const customerId = resolveStripeCustomerId(subscription.customer);
+  const subscriptionId = subscription.id;
+  const trialEnd = subscription.trial_end ? new Date(subscription.trial_end * 1000) : null;
+  const { currentPeriodStart, currentPeriodEnd } = stripeSubscriptionPeriodDates(subscription);
+  const billingStatus = mapBillingStatus(subscription.status, subscription.cancel_at_period_end);
+
+  let billingRecord = await findBillingRecordForStripeEvent({ customerId, subscriptionId });
+
+  // Checkout / external browser flow may create the Stripe customer before the first webhook.
+  // Fall back to companyId in subscription metadata so the company still gets activated.
+  if (!billingRecord) {
+    const metaCompanyId = Number(subscription.metadata?.companyId || 0);
+    if (Number.isFinite(metaCompanyId) && metaCompanyId > 0) {
+      billingRecord = await prisma.billingRecord.findFirst({
+        where: { companyId: metaCompanyId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!billingRecord) {
+        billingRecord = await prisma.billingRecord.create({
+          data: {
+            companyId: metaCompanyId,
+            stripeCustomerId: customerId,
+            subscriptionId,
+            status: billingStatus,
+            amountDue: 0,
+            billingDate: new Date(),
+            currentPeriodStart,
+            nextBillingDate: currentPeriodEnd,
+            trialEndsAt: trialEnd,
+            isTrialPeriod: subscription.status === 'trialing',
+          },
+        });
+      }
+    }
+  }
+
+  if (!billingRecord) {
+    console.error(`No billing record for subscription ${subscriptionId} / customer ${customerId}`);
+    return null;
+  }
+
+  const companyPatch = mapCompanySubscriptionStatus(
+    subscription.status,
+    subscription.cancel_at_period_end,
+    trialEnd
+  );
+
+  const metaTier = String(subscription.metadata?.planTier || '').toUpperCase();
+  const planTierUpdate =
+    metaTier === 'STARTUP' || metaTier === 'STANDARD' || metaTier === 'PREMIUM'
+      ? { planTier: metaTier }
+      : {};
+
+  let basePriceUpdate: { basePrice?: number } = {};
+  if (planTierUpdate.planTier) {
+    const { getPlanLimits } = await import('@/lib/subscription');
+    const limits = await getPlanLimits(planTierUpdate.planTier as 'STARTUP' | 'STANDARD' | 'PREMIUM');
+    basePriceUpdate = { basePrice: limits.monthlyPrice };
+  }
+
+  await prisma.billingRecord.update({
+    where: { id: billingRecord.id },
+    data: {
+      subscriptionId,
+      stripeCustomerId: customerId ?? billingRecord.stripeCustomerId,
+      status: billingStatus,
+      trialEndsAt: trialEnd,
+      isTrialPeriod: subscription.status === 'trialing',
+      currentPeriodStart,
+      nextBillingDate: currentPeriodEnd,
+      ...(basePriceUpdate.basePrice != null ? { amountDue: basePriceUpdate.basePrice } : {}),
+    },
+  });
+
+  await prisma.company.update({
+    where: { id: billingRecord.companyId },
+    data: {
+      ...companyPatch,
+      ...planTierUpdate,
+      ...basePriceUpdate,
+      trialEndsAt: trialEnd,
+      ...(planTierUpdate.planTier
+        ? { pendingPlanTier: null, pendingPlanEffectiveAt: null }
+        : {}),
+    },
+  });
+
+  return {
+    billingRecord,
+    companyId: billingRecord.companyId,
+    trialEnd,
+    currentPeriodStart,
+    currentPeriodEnd,
+    subscriptionId,
+    status: subscription.status,
+  };
+}
+
+export async function notifyBillingOwners(
+  companyId: number,
+  title: string,
+  message: string,
+  metadata?: Record<string, unknown>,
+  options?: { notificationType?: 'billing' | 'trial_ending' | 'plan_switch'; dedupeKey?: string }
+) {
+  const notificationType = options?.notificationType || 'billing';
+  const dedupeKey =
+    options?.dedupeKey ||
+    `${notificationType}-${companyId}-${title}`.replace(/\s+/g, '-').slice(0, 80);
+
+  const enqueued = await enqueueBillingNotification({
+    companyId,
+    title,
+    message,
+    notificationType,
+    metadata: { ...metadata, dedupeKey },
+    screenRoute: 'Billing',
+  });
+
+  if (!enqueued) {
+    const { sendBillingNotificationToOwners } = await import('@/lib/automation-worker');
+    await sendBillingNotificationToOwners({
+      companyId,
+      title,
+      message,
+      notificationType,
+      metadata: { ...metadata, dedupeKey },
+      screenRoute: 'Billing',
+      dedupeKey,
+    });
+  }
+}
+
+export async function afterSubscriptionSynced(input: {
+  companyId: number;
+  subscriptionId: string;
+  status: string;
+  trialEnd: Date | null;
+}) {
+  if (input.status === 'trialing' && input.trialEnd && input.trialEnd.getTime() > Date.now()) {
+    await scheduleTrialEndingReminders(input.companyId, input.trialEnd, input.subscriptionId);
+    return;
+  }
+
+  if (input.trialEnd) {
+    await cancelTrialReminderJobs(input.companyId, input.trialEnd);
+  }
+
+  const company = await prisma.company.findUnique({
+    where: { id: input.companyId },
+    select: {
+      pendingPlanTier: true,
+      pendingPlanEffectiveAt: true,
+    },
+  });
+
+  if (company?.pendingPlanTier && company.pendingPlanEffectiveAt) {
+    const { getPlanLimits } = await import('@/lib/subscription');
+    const limits = await getPlanLimits(company.pendingPlanTier);
+    await schedulePendingPlanSwitchReminders(
+      input.companyId,
+      company.pendingPlanTier,
+      limits.label,
+      company.pendingPlanEffectiveAt
+    );
+  }
+}
