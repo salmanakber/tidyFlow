@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { UserRole } from '@prisma/client';
 import { getUserFromRequest, JWTPayload } from '@/lib/auth';
 import prisma from '@/lib/prisma';
@@ -32,12 +32,78 @@ export function isManagerPlusRole(role: UserRole | string): boolean {
   return MANAGER_PLUS_ROLES.includes(role as UserRole);
 }
 
-export function hasOneOfRoles(role: UserRole | string, allowed: readonly UserRole[]): boolean {
-  return allowed.includes(role as UserRole);
+export function isCompanyBillingRole(role: unknown): boolean {
+  const normalized = String(role || '')
+    .toUpperCase()
+    .trim();
+  return (
+    normalized === UserRole.OWNER ||
+    normalized === UserRole.COMPANY_ADMIN ||
+    normalized === UserRole.SUPER_ADMIN ||
+    normalized === UserRole.DEVELOPER ||
+    normalized === UserRole.ADMIN_UNIQUE
+  );
+}
+
+/**
+ * Company owner/admin access for customer billing, checkout, and payment portal.
+ * Uses the live user record (not only the token) so a new owner can manage their plan.
+ */
+export async function requireCompanyBillingAccess(request: NextRequest): Promise<
+  | { tokenUser: JWTPayload; companyId: number; response: null }
+  | { tokenUser: null; companyId: null; response: NextResponse }
+> {
+  const denied = (message: string, status: number) => ({
+    tokenUser: null as null,
+    companyId: null as null,
+    response: NextResponse.json({ success: false, message }, { status }),
+  });
+
+  const auth = requireAuth(request);
+  if (!auth) return denied('Please sign in to continue.', 401);
+
+  let actor = await resolveAuthenticatedUser(auth.tokenUser);
+  if (!actor) return denied('Please sign in to continue.', 401);
+
+  if (!isCompanyBillingRole(actor.role) && actor.companyId) {
+    const ownerCount = await prisma.user.count({
+      where: { companyId: actor.companyId, role: UserRole.OWNER, isActive: true },
+    });
+    if (ownerCount === 0) {
+      actor = await prisma.user.update({
+        where: { id: actor.id },
+        data: { role: UserRole.OWNER },
+        select: { id: true, companyId: true, isActive: true, email: true, role: true },
+      });
+    }
+  }
+
+  if (!isCompanyBillingRole(actor.role)) {
+    return denied('This account cannot manage billing.', 403);
+  }
+
+  const tokenUser: JWTPayload = {
+    ...auth.tokenUser,
+    userId: actor.id,
+    email: actor.email,
+    role: actor.role,
+    companyId: actor.companyId ?? auth.tokenUser.companyId,
+  };
+
+  const companyId = await resolveCompanyIdAsync(request, tokenUser);
+  if (!companyId) {
+    return denied('No company is linked to this account yet.', 400);
+  }
+
+  return { tokenUser, companyId, response: null };
 }
 
 export function hasAtLeastRole(userRole: UserRole, minRole: UserRole): boolean {
   return ROLE_ORDER.indexOf(userRole) >= ROLE_ORDER.indexOf(minRole);
+}
+
+export function hasOneOfRoles(role: UserRole | string, allowed: readonly UserRole[]): boolean {
+  return allowed.includes(role as UserRole);
 }
 
 export interface AuthContext {

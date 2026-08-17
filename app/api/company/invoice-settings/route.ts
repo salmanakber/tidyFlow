@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireAuth, resolveCompanyIdAsync, requireCompanyBillingAccess } from '@/lib/rbac';
 import {
   getCompanyInvoiceSettings,
   upsertCompanyInvoiceSettings,
   type CompanyInvoiceSettingsDTO,
 } from '@/lib/invoice-settings';
-import { UserRole } from '@prisma/client';
 
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
-  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+  if (!auth) return NextResponse.json({ success: false, message: 'Please sign in to continue.' }, { status: 401 });
 
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
+  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
   if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
+    return NextResponse.json({ success: false, message: 'No company is linked to this account yet.' }, { status: 400 });
   }
 
   const settings = await getCompanyInvoiceSettings(companyId);
@@ -21,21 +20,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-
-  const role = auth.tokenUser.role as UserRole;
-  if (!['OWNER', 'SUPER_ADMIN', 'DEVELOPER'].includes(role)) {
-    return NextResponse.json(
-      { success: false, message: 'Only the company owner can update invoice settings' },
-      { status: 403 }
-    );
-  }
-
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   try {
     const body = (await request.json()) as Partial<CompanyInvoiceSettingsDTO>;

@@ -154,15 +154,15 @@ export default function AccountSetupModal({
       <form
         onSubmit={save}
         style={{
-          width: "100%",
           maxWidth: 560,
-          maxHeight: "92vh",
-          overflow: "auto",
+          width: '100%',
+          maxHeight: '92vh',
+          overflow: 'auto',
           background: T.surface,
           borderRadius: 20,
           border: `1px solid ${T.border}`,
-          boxShadow: "0 24px 60px rgba(6,21,37,0.28)",
-          padding: 24,
+          boxShadow: '0 24px 60px rgba(6,21,37,0.28)',
+          padding: 20,
         }}
       >
         <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 1.3, color: T.amberDeep }}>
@@ -194,7 +194,7 @@ export default function AccountSetupModal({
               </div>
             ) : null}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div className="account-split">
               <Field label="First name" value={form.firstName} onChange={(v) => set("firstName", v)} required />
               <Field label="Last name" value={form.lastName} onChange={(v) => set("lastName", v)} required />
             </div>

@@ -67,16 +67,26 @@ export function clearAdminSession() {
   })
 }
 
-export function getCustomerUserEmail(): string {
-  if (typeof window === "undefined") return ""
+export function getCustomerUser(): {
+  email?: string
+  firstName?: string
+  lastName?: string
+  profileImage?: string
+  role?: string
+} | null {
+  if (typeof window === "undefined") return null
   const stored =
     localStorage.getItem(CUSTOMER_USER_KEY) || sessionStorage.getItem(CUSTOMER_USER_KEY)
-  if (!stored) return ""
+  if (!stored) return null
   try {
-    return JSON.parse(stored)?.email || ""
+    return JSON.parse(stored)
   } catch {
-    return ""
+    return null
   }
+}
+
+export function getCustomerUserEmail(): string {
+  return getCustomerUser()?.email || ""
 }
 
 /** Trial is active only when the flag is set AND the end date is still in the future. */

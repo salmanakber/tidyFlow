@@ -133,7 +133,6 @@ function statusStyle(status: string): CSSProperties {
   return { background: "#FFFBEB", color: "#92400E", border: "1px solid #FDE68A" }
 }
 
-/** Standalone customer billing — mirrors Android BillingScreen capabilities. */
 export default function CustomerBillingPage() {
   const [tab, setTab] = useState<Tab>("overview")
   const [loading, setLoading] = useState(true)
@@ -170,7 +169,10 @@ export default function CustomerBillingPage() {
       setUserEmail(getCustomerUserEmail())
 
       const [billingRes, plansRes, usageRes, pricingRes, meRes] = await Promise.all([
-        axios.get("/api/billing", { headers: authHeaders(), params: { limit: 50 } }),
+        axios.get("/api/billing", { headers: authHeaders(), params: { limit: 50 } }).catch((err) => {
+          if (err?.response?.status === 401) throw err
+          return err?.response || { data: { success: false, message: "Could not load billing" } }
+        }),
         axios.get("/api/subscription/plans", { headers: authHeaders() }).catch(() => null),
         axios.get("/api/subscription/usage", { headers: authHeaders() }).catch(() => null),
         axios.get("/api/subscription/pricing", { headers: authHeaders() }).catch(() => null),
@@ -184,6 +186,7 @@ export default function CustomerBillingPage() {
         setSummary(billingRes.data.summary || { total_transactions: 0, failed_payments: 0 })
       } else {
         setMessage(billingRes.data.message || "Could not load billing")
+        setTab("plans")
       }
 
       if (plansRes?.data?.success) {
@@ -273,7 +276,7 @@ export default function CustomerBillingPage() {
     } catch (err: any) {
       const code = err?.response?.data?.code
       if (code === "NO_CUSTOMER") {
-        setMessage("No billing account yet. Choose a plan below to start checkout.")
+        setMessage("Add a plan first, then you can manage your payment method.")
         setTab("plans")
       } else {
         setMessage(err?.response?.data?.message || err?.message || "Could not open billing portal")
@@ -578,7 +581,7 @@ export default function CustomerBillingPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
                     gap: 14,
                   }}
                 >
@@ -659,8 +662,7 @@ export default function CustomerBillingPage() {
                     <p style={{ margin: "6px 0 0", fontSize: 13, color: T.inkMid, lineHeight: 1.45 }}>
                       You have {trialDaysLeft} day{trialDaysLeft === 1 ? "" : "s"} left
                       {company?.trialEndsAt ? ` (ends ${formatDate(company.trialEndsAt)})` : ""}.
-                      Changing plan ends the trial immediately and starts billing for the new plan — same as
-                      the Android app.
+                      Changing plan ends the trial immediately and starts billing for the new plan.
                     </p>
                   </div>
                 )}
@@ -678,7 +680,7 @@ export default function CustomerBillingPage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
                     gap: 14,
                   }}
                 >

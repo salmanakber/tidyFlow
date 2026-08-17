@@ -327,7 +327,7 @@ export default function CustomerSettingsPage() {
               </div>
             </div>
             <form onSubmit={saveProfile} style={{ display: "grid", gap: 12 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="account-split">
                 <Field
                   label="First name"
                   value={profile.firstName}
@@ -414,7 +414,7 @@ export default function CustomerSettingsPage() {
                 onChange={(v) => setCompany((p) => ({ ...p, address: v }))}
                 multiline
               />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="account-split">
                 <Field
                   label="Company phone"
                   value={company.phone}
@@ -462,7 +462,7 @@ export default function CustomerSettingsPage() {
             <h2 style={sectionTitle}>Preferences & job settings</h2>
             <p style={sectionHint}>Currency, timezone, photo checks, and GPS geofence used by the team.</p>
             <form onSubmit={saveOps} style={{ display: "grid", gap: 12, marginTop: 16 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="account-split">
                 <div>
                   <label style={accountLabel}>Currency</label>
                   <select
@@ -492,7 +492,7 @@ export default function CustomerSettingsPage() {
                   </select>
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div className="account-split account-split-3">
                 <Field
                   label="Required photos"
                   value={String(ops.photoCountRequirement)}

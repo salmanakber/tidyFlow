@@ -1,9 +1,10 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
+import axios from "axios"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
-import { clearCustomerSession } from "@/lib/customer-account"
+import { clearCustomerSession, getCustomerToken, getCustomerUser } from "@/lib/customer-account"
 import AppDownloadBanner from "@/components/AppDownloadBanner"
 import { ghostBtn } from "@/components/account/accountUi"
 
@@ -22,46 +23,129 @@ export default function AccountChrome({
   extraActions?: ReactNode
   children: ReactNode
 }) {
+  const stored = getCustomerUser()
+  const [profileImage, setProfileImage] = useState(stored?.profileImage || "")
+  const [firstName, setFirstName] = useState(stored?.firstName || "")
+  const [lastName, setLastName] = useState(stored?.lastName || "")
+  const [email, setEmail] = useState(stored?.email || "")
+
+  useEffect(() => {
+    const token = getCustomerToken()
+    if (!token) return
+    axios
+      .get("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        const user = res.data?.data?.user
+        if (!user) return
+        setProfileImage(user.profileImage || "")
+        setFirstName(user.firstName || "")
+        setLastName(user.lastName || "")
+        setEmail(user.email || "")
+      })
+      .catch(() => null)
+  }, [])
+
   const signOut = () => {
     clearCustomerSession()
     window.location.href = "/account/login"
   }
 
+  const initials = `${(firstName || email || "T").slice(0, 1)}${(lastName || "").slice(0, 1)}`.toUpperCase()
+  const displayName = [firstName, lastName].filter(Boolean).join(" ") || email || "Your account"
+
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: `radial-gradient(1000px 400px at 50% 0%, ${T.amberSoft} 0%, transparent 100%), ${T.canvas}`,
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-        padding: "32px 16px 120px",
-      }}
-    >
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <header
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: 16,
-            marginBottom: 20,
-          }}
-        >
-          <div>
-            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: T.amberDeep, margin: 0 }}>
-              TIDYFLOW CUSTOMER
-            </p>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: T.ink, margin: "6px 0 0" }}>{title}</h1>
-            {subtitle ? (
-              <p style={{ margin: "8px 0 0", fontSize: 14, color: T.inkMid }}>{subtitle}</p>
-            ) : null}
-            <nav style={{ display: "flex", gap: 8, marginTop: 14 }}>
+    <main className="account-shell">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        .account-shell {
+          min-height: 100vh;
+          background: radial-gradient(1000px 400px at 50% 0%, ${T.amberSoft} 0%, transparent 100%), ${T.canvas};
+          font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+          padding: 18px 12px 120px;
+          box-sizing: border-box;
+        }
+        .account-wrap { max-width: 960px; margin: 0 auto; width: 100%; }
+        .account-header {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+          margin-bottom: 18px;
+        }
+        .account-identity {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+          flex: 1 1 220px;
+        }
+        .account-avatar {
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid ${T.border};
+          background: ${T.amberSoft};
+          color: ${T.navy};
+          display: grid;
+          place-items: center;
+          font-weight: 800;
+          font-size: 16px;
+          flex-shrink: 0;
+        }
+        .account-title { font-size: 22px; font-weight: 800; color: ${T.ink}; margin: 4px 0 0; line-height: 1.2; }
+        .account-sub { margin: 6px 0 0; font-size: 13px; color: ${T.inkMid}; word-break: break-word; }
+        .account-nav { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .account-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          width: 100%;
+        }
+        .account-actions > * { flex: 1 1 auto; justify-content: center; min-height: 42px; }
+        .account-split { display: grid; grid-template-columns: 1fr; gap: 10px; }
+        .account-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        @media (min-width: 640px) {
+          .account-shell { padding: 32px 16px 120px; }
+          .account-title { font-size: 28px; }
+          .account-avatar { width: 56px; height: 56px; }
+          .account-actions { width: auto; }
+          .account-actions > * { flex: 0 0 auto; }
+          .account-split { grid-template-columns: 1fr 1fr; }
+        }
+        @media (min-width: 860px) {
+          .account-split-3 { grid-template-columns: 1fr 1fr 1fr; }
+        }
+      `,
+        }}
+      />
+      <div className="account-wrap">
+        <header className="account-header">
+          <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+            <div className="account-identity">
+              <Link href="/account/settings" aria-label="Open settings" style={{ textDecoration: "none" }}>
+                {profileImage ? (
+                  <img src={profileImage} alt="" className="account-avatar" />
+                ) : (
+                  <span className="account-avatar">{initials}</span>
+                )}
+              </Link>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: T.amberDeep, margin: 0 }}>
+                  TIDYFLOW
+                </p>
+                <h1 className="account-title">{title}</h1>
+                <p className="account-sub">{subtitle || displayName}</p>
+              </div>
+            </div>
+            <nav className="account-nav">
               <NavLink href="/account/billing" label="Dashboard" current={active === "billing"} />
               <NavLink href="/account/settings" label="Settings" current={active === "settings"} />
             </nav>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="account-actions">
             {extraActions}
             <button type="button" onClick={signOut} style={ghostBtn}>
               Sign out

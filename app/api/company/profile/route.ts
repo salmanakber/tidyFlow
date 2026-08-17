@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
-import { UserRole } from '@prisma/client';
+import { requireAuth, resolveCompanyIdAsync, requireCompanyBillingAccess } from '@/lib/rbac';
 import { getCompanyInvoiceSettings, upsertCompanyInvoiceSettings } from '@/lib/invoice-settings';
 import {
   SUPPORTED_ADDRESS_COUNTRIES,
@@ -12,12 +11,12 @@ import {
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ success: false, message: 'Please sign in to continue.' }, { status: 401 });
   }
 
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
+  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
   if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
+    return NextResponse.json({ success: false, message: 'No company is linked to this account yet.' }, { status: 400 });
   }
 
   const company = await prisma.company.findUnique({
@@ -48,22 +47,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
-
-  if (auth.tokenUser.role !== UserRole.OWNER) {
-    return NextResponse.json(
-      { success: false, message: 'Only the company owner can update company details' },
-      { status: 403 }
-    );
-  }
-
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   const body = await request.json();
   const {

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { UserRole } from '@prisma/client';
 import prisma from '@/lib/prisma';
-import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
+import { requireCompanyBillingAccess } from '@/lib/rbac';
 import { type PlanTier } from '@/lib/subscription';
 import { createCustomer } from '@/lib/stripe';
 import { getCompanyCurrency } from '@/lib/company-config';
@@ -14,26 +13,13 @@ import {
 } from '@/lib/stripe-checkout';
 
 /**
- * Creates a Stripe Checkout Session (hosted in the system browser).
- * Used by the mobile apps so subscriptions are not purchased via in-app card entry (Guideline 3.1.1).
+ * Creates a Stripe Checkout session for the signed-in company.
  */
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
-
-  if (auth.tokenUser.role !== UserRole.OWNER && auth.tokenUser.role !== UserRole.COMPANY_ADMIN) {
-    return NextResponse.json(
-      { success: false, message: 'Only the company owner or admin can subscribe.' },
-      { status: 403 }
-    );
-  }
-
-  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
+  const auth = { tokenUser: access.tokenUser };
 
   const body = await request.json().catch(() => ({}));
   const {

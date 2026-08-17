@@ -1,38 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { UserRole } from '@prisma/client';
 import prisma from '@/lib/prisma';
-import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
+import { requireCompanyBillingAccess } from '@/lib/rbac';
 import { createStripeInstance } from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
 import { getAppOrigin } from '@/lib/domains';
 
 /**
- * Stripe Customer Portal — manage/upgrade/cancel subscription in the browser (iOS Guideline 3.1.1).
+ * Stripe Customer Portal — manage payment method and subscription.
  */
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
-
-  if (
-    auth.tokenUser.role !== UserRole.OWNER &&
-    auth.tokenUser.role !== UserRole.COMPANY_ADMIN &&
-    auth.tokenUser.role !== UserRole.DEVELOPER &&
-    auth.tokenUser.role !== UserRole.SUPER_ADMIN
-  ) {
-    return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
-  }
-
-  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   const secretKey = await getStripeSecretKey();
   if (!secretKey) {
     return NextResponse.json(
-      { success: false, message: 'Stripe is not configured. Contact support.' },
+        { success: false, message: 'Payments are temporarily unavailable. Please try again shortly.' },
       { status: 500 }
     );
   }
@@ -50,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        message: 'No billing account found. Start a subscription first.',
+        message: 'Add a plan first to open payment settings.',
         code: 'NO_CUSTOMER',
       },
       { status: 400 }
@@ -65,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: 'No billing account found. Start a subscription first.',
+          message: 'Add a plan first to open payment settings.',
           code: 'NO_CUSTOMER',
         },
         { status: 400 }
@@ -83,7 +67,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: 'No billing account found. Start a subscription first.',
+          message: 'Add a plan first to open payment settings.',
           code: 'NO_CUSTOMER',
         },
         { status: 400 }
@@ -94,7 +78,7 @@ export async function POST(request: NextRequest) {
 
   const session = await stripe.billingPortal.sessions.create({
     customer: customerId!,
-    return_url: `${getAppOrigin()}/subscribe/success`,
+    return_url: `${getAppOrigin()}/account/billing`,
   });
 
   return NextResponse.json({

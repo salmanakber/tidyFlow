@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope, resolveCompanyIdAsync } from '@/lib/rbac';
-import { UserRole } from '@prisma/client';
+import { requireAuth, resolveCompanyIdAsync, requireCompanyBillingAccess } from '@/lib/rbac';
 import { isStripeCurrency, normalizeCurrencyCode, DEFAULT_CURRENCY } from '@/lib/stripe-currencies';
 import { createStripeInstance } from '@/lib/stripe';
 import { getStripeSecretKey, getStripePriceIdForTier } from '@/lib/stripe-settings';
@@ -78,23 +77,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
-
-  const role = auth.tokenUser.role;
-  if (role !== UserRole.OWNER) {
-    return NextResponse.json(
-      { success: false, message: 'Only the company owner can change currency settings' },
-      { status: 403 }
-    );
-  }
-
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   const body = await request.json();
   const raw = String(body.currency || '').toUpperCase();

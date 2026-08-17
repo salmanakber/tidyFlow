@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { UserRole } from '@prisma/client';
 import prisma from '@/lib/prisma';
-import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
+import { requireCompanyBillingAccess } from '@/lib/rbac';
 import { getPlanLimits } from '@/lib/subscription';
 import { createStripeInstance } from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
 import { stripeSubscriptionPeriodDates } from '@/lib/stripe-webhook-sync';
-
-const BILLING_ROLES: UserRole[] = [
-  UserRole.OWNER,
-  UserRole.COMPANY_ADMIN,
-  UserRole.SUPER_ADMIN,
-  UserRole.DEVELOPER,
-];
 
 function serializeBillingRecord(record: {
   id: number;
@@ -47,22 +39,9 @@ function serializeBillingRecord(record: {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-  }
-
-  if (!BILLING_ROLES.includes(auth.tokenUser.role as UserRole)) {
-    return NextResponse.json(
-      { success: false, message: 'You do not have permission to view billing.' },
-      { status: 403 }
-    );
-  }
-
-  const companyId = await resolveCompanyIdAsync(request, auth.tokenUser);
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));

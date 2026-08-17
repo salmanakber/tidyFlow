@@ -166,7 +166,7 @@ export default function CustomerAccountLoginPage() {
             {mode === "register" ? "Create your account" : "Customer sign in"}
           </h1>
           <p style={{ marginTop: 8, fontSize: 14, color: T.inkMid, lineHeight: 1.45 }}>
-            Manage subscription, billing reports, and invoices. This is not the admin console.
+            Manage your plan, usage, invoices, and payment.
           </p>
         </div>
 

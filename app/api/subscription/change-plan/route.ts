@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
-import { UserRole } from '@prisma/client';
+import { requireCompanyBillingAccess } from '@/lib/rbac';
 import { getPlanLimits } from '@/lib/subscription';
 import { changeCompanyPlanTier } from '@/lib/plan-change';
 
 /** Owner changes subscription tier — upgrades immediately; downgrades at period end. */
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
-
-  const role = auth.tokenUser.role as UserRole;
-  if (!['OWNER', 'COMPANY_ADMIN', 'DEVELOPER', 'SUPER_ADMIN'].includes(role)) {
-    return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
-  }
-
-  const companyId = requireCompanyScope(auth.tokenUser) || auth.tokenUser.companyId;
-  if (!companyId) {
-    return NextResponse.json({ success: false, message: 'Company required' }, { status: 400 });
-  }
+  const access = await requireCompanyBillingAccess(request);
+  if (access.response) return access.response;
+  const companyId = access.companyId;
 
   try {
     const { planTier } = await request.json();

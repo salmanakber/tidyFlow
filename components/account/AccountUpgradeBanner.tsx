@@ -56,6 +56,9 @@ export default function AccountUpgradeBanner({
         style={{
           ...(needsCheckout ? { ...primaryBtn, background: T.amber, color: T.navy } : secondaryBtn),
           minWidth: 140,
+          width: "100%",
+          maxWidth: 280,
+          justifyContent: "center",
         }}
       >
         {needsCheckout ? "View plans" : "Upgrade"}
