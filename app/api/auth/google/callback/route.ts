@@ -122,17 +122,7 @@ export async function GET(request: NextRequest) {
           patch.companyId = company.id;
           patch.role = 'OWNER';
         } else if (!['OWNER', 'COMPANY_ADMIN', 'SUPER_ADMIN', 'DEVELOPER', 'ADMIN_UNIQUE'].includes(String(user.role))) {
-          const [ownerCount, memberCount] = await Promise.all([
-            prisma.user.count({
-              where: { companyId: user.companyId, role: 'OWNER', isActive: true },
-            }),
-            prisma.user.count({
-              where: { companyId: user.companyId, isActive: true },
-            }),
-          ]);
-          if (ownerCount === 0 || memberCount <= 1) {
-            patch.role = 'OWNER';
-          }
+          patch.role = 'OWNER';
         }
       }
 

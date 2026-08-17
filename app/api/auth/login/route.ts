@@ -4,6 +4,7 @@ import { comparePassword, generateToken, isValidEmail } from '../../../../lib/au
 import { generateOTP, storeOTP, verifyOTP, getOTPStats } from '../../../../lib/otp';
 import { sendEmail } from '../../../../lib/email';
 import { UserRole } from '@prisma/client';
+import { ensureCustomerOwnsCompany, isCompanyBillingRole } from '@/lib/rbac';
 
 /**
  * POST /api/auth/login
@@ -235,12 +236,31 @@ const shouldSkipOTP =
       data: { updatedAt: new Date() }
     });
 
+    let billingUser = user;
+    if (portal === 'customer') {
+      const owned = await ensureCustomerOwnsCompany(user.id);
+      if (owned) {
+        billingUser = {
+          ...user,
+          role: owned.role,
+          companyId: owned.companyId,
+        };
+      } else if (!isCompanyBillingRole(user.role)) {
+        const promoted = await prisma.user.update({
+          where: { id: user.id },
+          data: { role: 'OWNER' },
+          select: { role: true, companyId: true },
+        });
+        billingUser = { ...user, role: promoted.role, companyId: promoted.companyId };
+      }
+    }
+
     // Generate JWT token
     const token = generateToken({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      companyId: user.companyId || undefined,
+      userId: billingUser.id,
+      email: billingUser.email,
+      role: billingUser.role,
+      companyId: billingUser.companyId || undefined,
       portal,
     });
 
@@ -255,8 +275,8 @@ const shouldSkipOTP =
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-          role: user.role,
-          companyId: user.companyId,
+          role: billingUser.role,
+          companyId: billingUser.companyId,
           isHeadSuperAdmin: user.isHeadSuperAdmin
         },
         portal,

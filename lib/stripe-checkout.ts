@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { createStripeInstance } from '@/lib/stripe';
+import { createStripeInstance, stripeRequestOptions } from '@/lib/stripe';
 import { getStripeSecretKey, getStripePriceIdForTier } from '@/lib/stripe-settings';
 import { getTrialDays } from '@/lib/trial-settings';
 import { getAppOrigin } from '@/lib/domains';
@@ -138,13 +138,13 @@ export async function createPlanCheckoutSession(opts: {
   };
 
   try {
-    return await opts.stripe.checkout.sessions.create(params);
+    return await opts.stripe.checkout.sessions.create(params, stripeRequestOptions);
   } catch (err) {
     const msg = String((err as any)?.message || '').toLowerCase();
     if (opts.trialDays > 0 && (msg.includes('trial_period_days') || msg.includes('already has a trial'))) {
       const retry = { ...params, subscription_data: { ...params.subscription_data } };
       delete (retry.subscription_data as { trial_period_days?: number }).trial_period_days;
-      return opts.stripe.checkout.sessions.create(retry);
+      return opts.stripe.checkout.sessions.create(retry, stripeRequestOptions);
     }
     throw err;
   }

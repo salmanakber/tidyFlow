@@ -45,7 +45,7 @@ export function isCompanyBillingRole(role: unknown): boolean {
   return COMPANY_BILLING_ROLES.has(String(role || '').toUpperCase().trim());
 }
 
-async function ensureCustomerOwnsCompany(userId: number) {
+export async function ensureCustomerOwnsCompany(userId: number) {
   const id = Number(userId);
   if (!Number.isFinite(id) || id <= 0) return null;
 
@@ -82,21 +82,11 @@ async function ensureCustomerOwnsCompany(userId: number) {
       select,
     });
   } else if (!isCompanyBillingRole(user.role)) {
-    const [ownerCount, memberCount] = await Promise.all([
-      prisma.user.count({
-        where: { companyId: user.companyId, role: 'OWNER', isActive: true },
-      }),
-      prisma.user.count({
-        where: { companyId: user.companyId, isActive: true },
-      }),
-    ]);
-    if (ownerCount === 0 || memberCount <= 1) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { role: 'OWNER' },
-        select,
-      });
-    }
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { role: 'OWNER' },
+      select,
+    });
   }
 
   return user;
@@ -128,8 +118,8 @@ export async function requireCompanyBillingAccess(request: NextRequest): Promise
     })());
   if (!resolved) return denied('Please sign in to continue.', 401);
 
-  const jwtSaysOwner = isCompanyBillingRole(auth.tokenUser.role);
-  if (!isCompanyBillingRole(resolved.role) && jwtSaysOwner && resolved.companyId) {
+  // Customer dashboard: the signed-in user manages billing for their own company.
+  if (resolved.companyId && !isCompanyBillingRole(resolved.role)) {
     const promoted = await prisma.user.update({
       where: { id: resolved.id },
       data: { role: 'OWNER' },
@@ -146,8 +136,8 @@ export async function requireCompanyBillingAccess(request: NextRequest): Promise
     Object.assign(resolved, promoted);
   }
 
-  if (!isCompanyBillingRole(resolved.role)) {
-    return denied('This account cannot manage billing.', 403);
+  if (!resolved.companyId) {
+    return denied('No company is linked to this account yet.', 400);
   }
 
   const tokenUser: JWTPayload = {
@@ -155,10 +145,15 @@ export async function requireCompanyBillingAccess(request: NextRequest): Promise
     userId: resolved.id,
     email: resolved.email,
     role: resolved.role,
-    companyId: resolved.companyId ?? (Number(auth.tokenUser.companyId) || undefined),
+    companyId: resolved.companyId,
   };
 
-  const companyId = await resolveCompanyIdAsync(request, tokenUser);
+  const privileged = ['SUPER_ADMIN', 'DEVELOPER', 'ADMIN_UNIQUE'].includes(
+    String(resolved.role || '').toUpperCase()
+  );
+  const companyId = privileged
+    ? (await resolveCompanyIdAsync(request, tokenUser)) || resolved.companyId
+    : resolved.companyId;
   if (!companyId) {
     return denied('No company is linked to this account yet.', 400);
   }
@@ -206,7 +201,10 @@ export async function resolveAuthenticatedUser(tokenUser: JWTPayload) {
 
   if ((!actor || !actor.isActive) && tokenUser.email) {
     actor = await prisma.user.findFirst({
-      where: { email: tokenUser.email, isActive: true },
+      where: {
+        email: { equals: tokenUser.email, mode: 'insensitive' },
+        isActive: true,
+      },
       select: userSelect,
     });
   }

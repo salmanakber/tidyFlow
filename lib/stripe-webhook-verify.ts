@@ -1,9 +1,9 @@
 import Stripe from 'stripe';
 import prisma from '@/lib/prisma';
-import { decrypt } from '@/lib/stripe';
+import { decrypt, STRIPE_API_VERSION } from '@/lib/stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_placeholder', {
-  apiVersion: '2023-10-16',
+  apiVersion: STRIPE_API_VERSION as any,
 });
 
 export async function getStripeWebhookSecrets(): Promise<string[]> {

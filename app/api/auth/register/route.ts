@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { hashPassword, generateToken, isValidEmail, isValidPassword } from '@/lib/auth';
-import { UserRole } from '@prisma/client';
 import { sendSubscribeWelcomeEmail } from '@/lib/email';
 import { attributeCompanyToPartner, findPartnerByReferralCode } from '@/lib/partners';
 import { getTrialDays } from '@/lib/trial-settings';
@@ -13,7 +12,7 @@ import { getTrialDays } from '@/lib/trial-settings';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, firstName, lastName, companyName, role = 'OWNER', referralCode } = body;
+    const { email, password, firstName, lastName, companyName, referralCode } = body;
 
     // Validate input
     if (!email || !password) {
@@ -63,14 +62,8 @@ export async function POST(request: NextRequest) {
     // Hash password
     const passwordHash = await hashPassword(password);
 
-    // Validate role - new registrations should be OWNER (default) to manage their company
-    const userRole = (role.toUpperCase() as UserRole) || UserRole.OWNER;
-    if (!Object.values(UserRole).includes(userRole)) {
-      return NextResponse.json({
-        success: false,
-        message: 'Invalid role'
-      }, { status: 400 });
-    }
+    // Customer / self-serve signup is always the company owner so they can manage billing.
+    const userRole = 'OWNER' as const;
 
     // Create company with backend free trial (same model as Stripe trialing accounts)
     const trialDays = await getTrialDays();
@@ -119,7 +112,7 @@ export async function POST(request: NextRequest) {
       email: user.email,
       role: user.role,
       companyId: user.companyId || undefined,
-      portal: body.portal === 'customer' ? 'customer' : undefined,
+      portal: body.portal === 'admin' ? 'admin' : 'customer',
     });
 
     const welcomeName =

@@ -79,13 +79,17 @@ function mapCompanySubscriptionStatus(
 }
 
 export function stripeSubscriptionPeriodDates(subscription: Stripe.Subscription) {
+  const raw = subscription as Stripe.Subscription & {
+    current_period_start?: number;
+    current_period_end?: number;
+    items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
+  };
+  const item = raw.items?.data?.[0];
+  const start = raw.current_period_start ?? item?.current_period_start;
+  const end = raw.current_period_end ?? item?.current_period_end;
   return {
-    currentPeriodStart: subscription.current_period_start
-      ? new Date(subscription.current_period_start * 1000)
-      : null,
-    currentPeriodEnd: subscription.current_period_end
-      ? new Date(subscription.current_period_end * 1000)
-      : null,
+    currentPeriodStart: start ? new Date(start * 1000) : null,
+    currentPeriodEnd: end ? new Date(end * 1000) : null,
   };
 }
 

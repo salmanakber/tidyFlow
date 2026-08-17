@@ -26,16 +26,23 @@ function getStripeSecretKey(): string {
 // Initialize Stripe with secret key from env (fallback)
 // Route handlers that use SystemSetting should create their own Stripe instance
 const stripeSecretKey = getStripeSecretKey();
+/** Managed Payments / Customer Portal require Stripe API 2025-03-31.basil or later. */
+export const STRIPE_API_VERSION = '2025-03-31.basil';
+
 const stripe = new Stripe(stripeSecretKey || 'dummy-key-for-initialization', {
-  apiVersion: '2023-10-16',
+  // Managed Payments / Customer Portal require 2025-03-31.basil or later.
+  apiVersion: STRIPE_API_VERSION as any,
 });
 
-// Export a function to create Stripe instance with custom key (for route handlers)
 export function createStripeInstance(secretKey: string): Stripe {
   return new Stripe(secretKey, {
-    apiVersion: '2023-10-16',
+    apiVersion: STRIPE_API_VERSION as any,
   });
 }
+
+export const stripeRequestOptions = {
+  apiVersion: STRIPE_API_VERSION as any,
+};
 
 export interface BillingCalculation {
   basePrice: number;

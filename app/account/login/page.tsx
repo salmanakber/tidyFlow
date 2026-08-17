@@ -348,10 +348,6 @@ export default function CustomerAccountLoginPage() {
           <Link href="/subscribe" style={{ color: T.amberDeep, fontWeight: 600, textDecoration: "none" }}>
             View plans
           </Link>
-          <span style={{ color: T.inkFaint }}> · </span>
-          <Link href="/login" style={{ color: T.inkFaint, textDecoration: "none" }}>
-            Admin login
-          </Link>
         </p>
         <AppDownloadBanner variant="compact" />
       </div>

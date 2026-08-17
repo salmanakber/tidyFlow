@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requireCompanyBillingAccess } from '@/lib/rbac';
-import { createStripeInstance } from '@/lib/stripe';
+import { createStripeInstance, stripeRequestOptions } from '@/lib/stripe';
 import { getStripeSecretKey } from '@/lib/stripe-settings';
 import { getAppOrigin } from '@/lib/domains';
 
@@ -76,10 +76,13 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 
-  const session = await stripe.billingPortal.sessions.create({
-    customer: customerId!,
-    return_url: `${getAppOrigin()}/account/billing`,
-  });
+  const session = await stripe.billingPortal.sessions.create(
+    {
+      customer: customerId!,
+      return_url: `${getAppOrigin()}/account/billing`,
+    },
+    stripeRequestOptions
+  );
 
   return NextResponse.json({
     success: true,

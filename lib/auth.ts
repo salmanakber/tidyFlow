@@ -110,7 +110,15 @@ export function getUserFromRequest(request: NextRequest): JWTPayload | null {
   if (!token) {
     return null;
   }
-  return verifyToken(token);
+  const payload = verifyToken(token);
+  if (!payload) return null;
+  const userId = Number(payload.userId);
+  const companyId = Number(payload.companyId);
+  return {
+    ...payload,
+    userId: Number.isFinite(userId) ? userId : payload.userId,
+    companyId: Number.isFinite(companyId) && companyId > 0 ? companyId : payload.companyId,
+  };
 }
 
 /**
