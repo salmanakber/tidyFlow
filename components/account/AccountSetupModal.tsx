@@ -30,14 +30,18 @@ export default function AccountSetupModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [countries, setCountries] = useState<Country[]>([])
+  const [userEmail, setUserEmail] = useState("")
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
     phone: "",
     companyName: "",
+    companyDisplayName: "",
     address: "",
     companyPhone: "",
+    companyEmail: "",
     website: "",
+    taxRegistrationNumber: "",
     addressCountry: "GB",
     currency: "USD",
     timezone: "UTC",
@@ -53,26 +57,34 @@ export default function AccountSetupModal({
       setLoading(true)
       setError("")
       try {
-        const [meRes, profileRes, configRes] = await Promise.all([
+        const [meRes, profileRes, configRes, invoiceRes] = await Promise.all([
           axios.get("/api/auth/me", { headers: authHeaders() }),
           axios.get("/api/company/profile", { headers: authHeaders() }).catch(() => null),
           axios.get("/api/company/admin-config", { headers: authHeaders() }).catch(() => null),
+          axios.get("/api/company/invoice-settings", { headers: authHeaders() }).catch(() => null),
         ])
         if (cancelled) return
         const me = meRes.data?.data
         const user = me?.user || {}
         const profile = profileRes?.data?.data || {}
         const config = configRes?.data?.data || {}
+        const invoice = invoiceRes?.data?.data || {}
         const placeholder = !!me?.placeholderCompanyName
+        const email = user.email || ""
+        setUserEmail(email)
+        const companyName = placeholder ? "" : profile.companyName || me?.company?.name || ""
         setCountries(profile.countries || [])
         setForm({
           firstName: user.firstName || "",
           lastName: user.lastName || "",
           phone: user.phone || "",
-          companyName: placeholder ? "" : profile.companyName || me?.company?.name || "",
-          address: profile.address || "",
-          companyPhone: profile.phone || "",
-          website: profile.website || "",
+          companyName,
+          companyDisplayName: profile.companyDisplayName || invoice.companyDisplayName || companyName,
+          address: profile.address || invoice.address || "",
+          companyPhone: profile.phone || invoice.phone || "",
+          companyEmail: profile.email || invoice.email || email,
+          website: profile.website || invoice.website || "",
+          taxRegistrationNumber: invoice.taxRegistrationNumber || "",
           addressCountry: profile.addressCountry || "GB",
           currency: config.currency || "USD",
           timezone: config.timezone || "UTC",
@@ -93,8 +105,20 @@ export default function AccountSetupModal({
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.companyName.trim()) {
-      setError("Please enter your name and company name.")
+    if (!form.firstName.trim() || !form.lastName.trim()) {
+      setError("Please enter your first and last name.")
+      return
+    }
+    if (!form.companyName.trim()) {
+      setError("Please enter your company name.")
+      return
+    }
+    if (!form.companyDisplayName.trim()) {
+      setError("Please enter the name that should appear on invoices.")
+      return
+    }
+    if (!form.address.trim() || !form.companyPhone.trim() || !form.companyEmail.trim()) {
+      setError("Please enter company address, phone, and email.")
       return
     }
     setSaving(true)
@@ -112,14 +136,22 @@ export default function AccountSetupModal({
         "/api/company/profile",
         {
           companyName: form.companyName.trim(),
-          companyDisplayName: form.companyName.trim(),
+          companyDisplayName: form.companyDisplayName.trim(),
           address: form.address.trim(),
           phone: form.companyPhone.trim(),
+          email: form.companyEmail.trim(),
           website: form.website.trim(),
           addressCountry: form.addressCountry,
         },
         { headers: authHeaders() }
       )
+      await axios
+        .patch(
+          "/api/company/invoice-settings",
+          { taxRegistrationNumber: form.taxRegistrationNumber.trim() || null },
+          { headers: authHeaders() }
+        )
+        .catch(() => null)
       await axios.patch(
         "/api/company/admin-config",
         { timezone: form.timezone },
@@ -155,13 +187,13 @@ export default function AccountSetupModal({
         onSubmit={save}
         style={{
           maxWidth: 560,
-          width: '100%',
-          maxHeight: '92vh',
-          overflow: 'auto',
+          width: "100%",
+          maxHeight: "92vh",
+          overflow: "auto",
           background: T.surface,
           borderRadius: 20,
           border: `1px solid ${T.border}`,
-          boxShadow: '0 24px 60px rgba(6,21,37,0.28)',
+          boxShadow: "0 24px 60px rgba(6,21,37,0.28)",
           padding: 20,
         }}
       >
@@ -172,7 +204,7 @@ export default function AccountSetupModal({
           Set up your company
         </h2>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: T.inkMid, lineHeight: 1.5 }}>
-          Add the details your team, invoices, and jobs will use. You can change these later in Settings.
+          Add the details that appear on invoices and in the app. Next you will choose a plan — nothing is billed yet.
         </p>
 
         {loading ? (
@@ -194,11 +226,18 @@ export default function AccountSetupModal({
               </div>
             ) : null}
 
+            <p style={{ margin: "4px 0 0", fontSize: 11, fontWeight: 800, letterSpacing: 1, color: T.inkFaint }}>
+              YOUR DETAILS
+            </p>
             <div className="account-split">
               <Field label="First name" value={form.firstName} onChange={(v) => set("firstName", v)} required />
               <Field label="Last name" value={form.lastName} onChange={(v) => set("lastName", v)} required />
             </div>
             <Field label="Your phone" value={form.phone} onChange={(v) => set("phone", v)} />
+
+            <p style={{ margin: "8px 0 0", fontSize: 11, fontWeight: 800, letterSpacing: 1, color: T.inkFaint }}>
+              COMPANY INFORMATION
+            </p>
             <Field
               label="Company name"
               value={form.companyName}
@@ -206,18 +245,44 @@ export default function AccountSetupModal({
               required
               hint="Use your cleaning business name, not your personal name."
             />
-            <Field label="Company phone" value={form.companyPhone} onChange={(v) => set("companyPhone", v)} />
+            <Field
+              label="Invoice display name"
+              value={form.companyDisplayName}
+              onChange={(v) => set("companyDisplayName", v)}
+              required
+              hint="Shown at the top of customer invoices."
+            />
             <Field
               label="Business address"
               value={form.address}
               onChange={(v) => set("address", v)}
+              required
               multiline
             />
+            <div className="account-split">
+              <Field
+                label="Company phone"
+                value={form.companyPhone}
+                onChange={(v) => set("companyPhone", v)}
+                required
+              />
+              <Field
+                label="Company email"
+                value={form.companyEmail}
+                onChange={(v) => set("companyEmail", v)}
+                required
+              />
+            </div>
             <Field label="Website" value={form.website} onChange={(v) => set("website", v)} />
+            <Field
+              label="Tax / registration number"
+              value={form.taxRegistrationNumber}
+              onChange={(v) => set("taxRegistrationNumber", v)}
+            />
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
               <div>
-                <label style={accountLabel}>Country</label>
+                <label style={accountLabel}>Country *</label>
                 <select
                   value={form.addressCountry}
                   onChange={(e) => set("addressCountry", e.target.value)}
@@ -234,7 +299,7 @@ export default function AccountSetupModal({
                 </select>
               </div>
               <div>
-                <label style={accountLabel}>Currency</label>
+                <label style={accountLabel}>Currency *</label>
                 <select value={form.currency} onChange={(e) => set("currency", e.target.value)} style={accountInput}>
                   {ACCOUNT_CURRENCIES.map((c) => (
                     <option key={c} value={c}>
@@ -244,7 +309,7 @@ export default function AccountSetupModal({
                 </select>
               </div>
               <div>
-                <label style={accountLabel}>Timezone</label>
+                <label style={accountLabel}>Timezone *</label>
                 <select value={form.timezone} onChange={(e) => set("timezone", e.target.value)} style={accountInput}>
                   {ACCOUNT_TIMEZONES.map((tz) => (
                     <option key={tz} value={tz}>
@@ -254,6 +319,9 @@ export default function AccountSetupModal({
                 </select>
               </div>
             </div>
+            {userEmail ? (
+              <p style={{ margin: 0, fontSize: 12, color: T.inkFaint }}>Signed in as {userEmail}</p>
+            ) : null}
           </div>
         )}
 
@@ -269,7 +337,7 @@ export default function AccountSetupModal({
             Remind me later
           </button>
           <button type="submit" disabled={saving || loading} style={primaryBtn}>
-            {saving ? "Saving…" : "Save and continue"}
+            {saving ? "Saving…" : "Save and choose a plan"}
           </button>
         </div>
       </form>

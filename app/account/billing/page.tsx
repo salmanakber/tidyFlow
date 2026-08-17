@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import Link from "next/link"
 import axios from "axios"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
@@ -151,6 +151,7 @@ export default function CustomerBillingPage() {
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
   const [userEmail, setUserEmail] = useState("")
   const [showSetup, setShowSetup] = useState(false)
+  const pendingCheckout = useRef<{ tier: string; useTrial: boolean } | null>(null)
 
   const authHeaders = () => ({ Authorization: `Bearer ${getCustomerToken()}` })
 
@@ -184,6 +185,11 @@ export default function CustomerBillingPage() {
         setCompany(billingRes.data.company || null)
         setCurrentSubscription(billingRes.data.currentSubscription || null)
         setSummary(billingRes.data.summary || { total_transactions: 0, failed_payments: 0 })
+        const status = String(billingRes.data.company?.subscriptionStatus || "").toLowerCase()
+        const tabParam = new URLSearchParams(window.location.search).get("tab")
+        if (!tabParam && ["unpaid", "incomplete", "incomplete_expired", "canceled", ""].includes(status)) {
+          setTab("plans")
+        }
       } else {
         setMessage(billingRes.data.message || "Could not load billing")
         setTab("plans")
@@ -227,18 +233,21 @@ export default function CustomerBillingPage() {
       setTab(tabParam)
     }
     const pay = params.get("pay")
-    if (!pay) return
-    const useTrial = params.get("trial") !== "0"
-    window.history.replaceState({}, "", "/account/billing")
-    void startCheckout(pay.toUpperCase(), useTrial)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (pay) {
+      pendingCheckout.current = { tier: pay.toUpperCase(), useTrial: params.get("trial") !== "0" }
+      window.history.replaceState({}, "", "/account/billing")
+      setTab("plans")
+    }
   }, [loading])
 
-  const currentTier = (
-    usage?.planTier ||
-    company?.planTier ||
-    "STANDARD"
-  ).toUpperCase()
+  useEffect(() => {
+    if (loading || showSetup || !pendingCheckout.current) return
+    const next = pendingCheckout.current
+    pendingCheckout.current = null
+    void startCheckout(next.tier, next.useTrial)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, showSetup])
+
   const pendingTier = (usage?.pendingPlanTier || company?.pendingPlanTier || "").toUpperCase() || null
   const subscriptionStatus = (
     currentSubscription?.status ||
@@ -257,6 +266,10 @@ export default function CustomerBillingPage() {
   const needsCheckout =
     !hasStripeSubscription &&
     !["active", "trialing"].includes(subscriptionStatus)
+  const assignedTier = [usage?.planTier, company?.planTier]
+    .map((t) => String(t || "").toUpperCase())
+    .find((t) => ["STARTUP", "STANDARD", "PREMIUM"].includes(t))
+  const currentTier = needsCheckout ? "" : assignedTier || ""
 
   const sortedPlans = useMemo(
     () => [...plans].sort((a, b) => Number(a.monthlyPrice) - Number(b.monthlyPrice)),
@@ -433,10 +446,13 @@ export default function CustomerBillingPage() {
     >
         <AccountSetupModal
           open={showSetup}
-          onClose={() => setShowSetup(false)}
-          onComplete={() => {
+          onClose={() => {
             setShowSetup(false)
             if (needsCheckout) setTab("plans")
+          }}
+          onComplete={() => {
+            setShowSetup(false)
+            setTab("plans")
             void load()
           }}
         />
@@ -509,13 +525,17 @@ export default function CustomerBillingPage() {
                   }}
                 >
                   <p style={{ margin: 0, fontSize: 12, opacity: 0.75, fontWeight: 700, letterSpacing: 1 }}>
-                    CURRENT PLAN
+                    {needsCheckout ? "PLAN" : "CURRENT PLAN"}
                   </p>
                   <h2 style={{ margin: "8px 0 0", fontSize: 26, fontWeight: 700 }}>
-                    {usage?.label || currentPlan?.label || currentTier}
+                    {needsCheckout
+                      ? "No plan selected"
+                      : usage?.label || currentPlan?.label || currentTier || "No plan selected"}
                   </h2>
                   <p style={{ margin: "6px 0 0", fontSize: 15, opacity: 0.9 }}>
-                    {formatMoney(currentPlan?.monthlyPrice ?? company?.monthlyCost ?? 0)} / month
+                    {needsCheckout
+                      ? "Choose Startup, Standard, or Premium to start billing"
+                      : `${formatMoney(currentPlan?.monthlyPrice ?? company?.monthlyCost ?? 0)} / month`}
                   </p>
 
                   {onTrial ? (
@@ -669,11 +689,23 @@ export default function CustomerBillingPage() {
 
                 {needsCheckout && (
                   <div style={card}>
-                    <strong style={{ color: T.ink }}>Start subscription</strong>
-                    <p style={{ margin: "6px 0 0", fontSize: 13, color: T.inkMid }}>
-                      Your account is already set up. Pick a plan below to open Stripe checkout
-                      {onTrial ? " (trial available)" : ""} — you will not be asked to create another account.
+                    <strong style={{ color: T.ink }}>Choose a plan</strong>
+                    <p style={{ margin: "6px 0 0", fontSize: 13, color: T.inkMid, lineHeight: 1.45 }}>
+                      Your account is ready. Nothing is billed until you pick a plan and finish checkout.
+                      Trial days are added at checkout when available.
                     </p>
+                    <Link
+                      href="/subscribe"
+                      style={{
+                        display: "inline-block",
+                        marginTop: 10,
+                        color: T.amberDeep,
+                        fontWeight: 700,
+                        fontSize: 13,
+                      }}
+                    >
+                      Compare full plan scope →
+                    </Link>
                   </div>
                 )}
 
@@ -688,8 +720,9 @@ export default function CustomerBillingPage() {
                     const tier = p.tier.toUpperCase()
                     const isCurrent = tier === currentTier
                     const isPending = !!pendingTier && tier === pendingTier
-                    const isUpgrade =
-                      (currentPlan?.monthlyPrice ?? 0) < Number(p.monthlyPrice)
+                    const isUpgrade = needsCheckout
+                      ? false
+                      : (currentPlan?.monthlyPrice ?? 0) < Number(p.monthlyPrice)
                     const busy = changingPlan === tier || checkoutLoading === tier
 
                     return (
@@ -746,7 +779,7 @@ export default function CustomerBillingPage() {
                             {busy
                               ? "Working…"
                               : needsCheckout
-                                ? `Start ${p.label}`
+                                ? `Choose ${p.label}`
                                 : isUpgrade
                                   ? "Upgrade"
                                   : "Switch plan"}
@@ -768,6 +801,10 @@ export default function CustomerBillingPage() {
                     <button type="button" onClick={openPortal} style={linkBtn}>
                       manage payment method in Stripe
                     </button>
+                    {" · "}
+                    <Link href="/subscribe" style={linkBtn}>
+                      Compare full plan scope
+                    </Link>
                     .
                   </p>
                 )}

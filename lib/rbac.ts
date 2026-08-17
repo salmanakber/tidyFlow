@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { UserRole } from '@prisma/client';
 import { getUserFromRequest, JWTPayload } from '@/lib/auth';
 import prisma from '@/lib/prisma';
-import { getTrialDays } from '@/lib/trial-settings';
+import { unpaidCompanyCreateData } from '@/lib/unpaid-company';
 
 // Define role hierarchy from lowest to highest privileges
 const ROLE_ORDER: UserRole[] = [
@@ -63,18 +63,10 @@ export async function ensureCustomerOwnsCompany(userId: number) {
   if (!user?.isActive) return null;
 
   if (!user.companyId) {
-    const trialDays = await getTrialDays();
-    const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
     const companyName =
       [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email.split('@')[0] || 'My company';
     const company = await prisma.company.create({
-      data: {
-        name: companyName,
-        planTier: 'STARTUP',
-        subscriptionStatus: 'unpaid',
-        isTrialActive: trialDays > 0,
-        trialEndsAt: trialDays > 0 ? trialEndsAt : null,
-      },
+      data: unpaidCompanyCreateData(companyName),
     });
     user = await prisma.user.update({
       where: { id: user.id },

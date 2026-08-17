@@ -3,6 +3,10 @@ import crypto from 'crypto';
 
 export type PlanTier = 'STARTUP' | 'STANDARD' | 'PREMIUM';
 
+export function isAssignedPlanTier(tier?: string | null): tier is PlanTier {
+  return ['STARTUP', 'STANDARD', 'PREMIUM'].includes(String(tier || '').toUpperCase());
+}
+
 /** Whether the company currently has access (paid, Apple, or free trial). */
 export function isCompanySubscriptionEntitled(company: {
   subscriptionStatus?: string | null;
@@ -20,12 +24,30 @@ export function isCompanySubscriptionEntitled(company: {
   if (company.isTrialActive && trialStillValid) {
     return true;
   }
-  // Legacy register bug: unpaid + future trialEndsAt but isTrialActive false
-  if (status === 'unpaid' && trialStillValid) {
-    return true;
-  }
   return false;
 }
+
+const NO_PLAN_LIMITS: PlanLimits = {
+  tier: 'STARTUP',
+  label: 'No plan',
+  monthlyPrice: 0,
+  maxCleaners: 0,
+  maxProperties: 0,
+  maxManagers: 0,
+  aiRequestsPerMonth: 0,
+  aiPhotoAnalysis: false,
+  aiInsights: false,
+  aiAssignment: false,
+  aiTaskSuggestions: false,
+  aiSupplyForecast: false,
+  invoicesEnabled: false,
+  maxInvoicesPerMonth: 0,
+  aiInvoiceAssist: false,
+  maxPhotoVerificationsPerMonth: 0,
+  maxPdfGenerationsPerMonth: 0,
+  googleSheetsEnabled: false,
+  quickbooksEnabled: false,
+};
 
 export interface PlanLimits {
   tier: PlanTier;
@@ -386,7 +408,10 @@ export async function upsertSubscriptionPlanTier(
 }
 
 export async function getPlanLimits(tier?: string | null): Promise<PlanLimits> {
-  const key = (tier?.toUpperCase() || 'STANDARD') as PlanTier;
+  const key = (tier?.toUpperCase() || '') as PlanTier;
+  if (!isAssignedPlanTier(key)) {
+    return { ...NO_PLAN_LIMITS };
+  }
   const fallback = DEFAULT_LIMITS[key] || DEFAULT_LIMITS.STANDARD;
 
   const row = await prisma.subscriptionPlanLimit.findUnique({
@@ -780,8 +805,8 @@ export async function getPlanUsageSnapshot(companyId: number): Promise<PlanUsage
   const pdfAtLimit = pdfGenerationsUsed >= limits.maxPdfGenerationsPerMonth;
 
   return {
-    planTier: company.planTier || 'STANDARD',
-    label: limits.label,
+    planTier: isAssignedPlanTier(company.planTier) ? company.planTier : 'NONE',
+    label: isAssignedPlanTier(company.planTier) ? limits.label : 'No plan selected',
     subscriptionActive,
     features: {
       aiPhoto: limits.aiPhotoAnalysis && !photoAtLimit && subscriptionActive,

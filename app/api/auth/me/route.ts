@@ -74,12 +74,25 @@ export async function GET(request: NextRequest) {
     const createdMs = user.createdAt ? new Date(user.createdAt).getTime() : 0;
     const isNewAccount = Number.isFinite(createdMs) && Date.now() - createdMs < 30 * 24 * 60 * 60 * 1000;
 
+    const unpaid =
+      !user.company ||
+      ['unpaid', 'incomplete', 'incomplete_expired', 'canceled', ''].includes(
+        String(user.company.subscriptionStatus || '').toLowerCase()
+      );
+    const hasAssignedPlan = ['STARTUP', 'STANDARD', 'PREMIUM'].includes(
+      String(user.company?.planTier || '').toUpperCase()
+    );
+    const needsPlan = unpaid || !hasAssignedPlan;
+    const requireCompanyDetails = isNewAccount || unpaid;
+
     const missingSetup: string[] = [];
     if (!user.firstName?.trim()) missingSetup.push('firstName');
     if (!user.lastName?.trim()) missingSetup.push('lastName');
     if (placeholderCompanyName) missingSetup.push('companyName');
-    if (isNewAccount && !invoice?.address?.trim()) missingSetup.push('address');
-    if (isNewAccount && !invoice?.phone?.trim()) missingSetup.push('companyPhone');
+    if (requireCompanyDetails && !invoice?.companyDisplayName?.trim()) missingSetup.push('companyDisplayName');
+    if (requireCompanyDetails && !invoice?.address?.trim()) missingSetup.push('address');
+    if (requireCompanyDetails && !invoice?.phone?.trim()) missingSetup.push('companyPhone');
+    if (requireCompanyDetails && !invoice?.email?.trim()) missingSetup.push('companyEmail');
 
     return NextResponse.json({
       success: true,
@@ -109,6 +122,7 @@ export async function GET(request: NextRequest) {
         needsOnboarding: missingSetup.length > 0,
         missingSetup,
         placeholderCompanyName,
+        needsPlan,
       }
     }, { status: 200 });
 

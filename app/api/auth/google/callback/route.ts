@@ -3,13 +3,13 @@ import crypto from 'crypto';
 import prisma from '@/lib/prisma';
 import { generateToken, hashPassword } from '@/lib/auth';
 import { getAppOrigin } from '@/lib/domains';
-import { getTrialDays } from '@/lib/trial-settings';
 import {
   exchangeGoogleCode,
   isGoogleOAuthConfigured,
   verifyGoogleOauthState,
 } from '@/lib/google-oauth';
 import { planSlugToTier } from '@/lib/app-store-links';
+import { unpaidCompanyCreateData } from '@/lib/unpaid-company';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,8 +54,6 @@ export async function GET(request: NextRequest) {
         return failRedirect('/login', 'No TidyFlow admin account exists for this Google email.');
       }
 
-      const trialDays = await getTrialDays();
-      const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
       const companyName =
         state.companyName?.trim() ||
         [profile.firstName, profile.lastName].filter(Boolean).join(' ') ||
@@ -64,13 +62,7 @@ export async function GET(request: NextRequest) {
 
       const created = await prisma.$transaction(async (tx) => {
         const company = await tx.company.create({
-          data: {
-            name: companyName,
-            planTier: 'STARTUP',
-            subscriptionStatus: 'unpaid',
-            isTrialActive: trialDays > 0,
-            trialEndsAt: trialDays > 0 ? trialEndsAt : null,
-          },
+          data: unpaidCompanyCreateData(companyName),
         });
         const createdUser = await tx.user.create({
           data: {
@@ -102,8 +94,6 @@ export async function GET(request: NextRequest) {
 
       if (state.portal === 'customer') {
         if (!user.companyId) {
-          const trialDays = await getTrialDays();
-          const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
           const companyName =
             state.companyName?.trim() ||
             [profile.firstName || user.firstName, profile.lastName || user.lastName]
@@ -111,13 +101,7 @@ export async function GET(request: NextRequest) {
               .join(' ') ||
             profile.email.split('@')[0];
           const company = await prisma.company.create({
-            data: {
-              name: companyName,
-              planTier: 'STARTUP',
-              subscriptionStatus: 'unpaid',
-              isTrialActive: trialDays > 0,
-              trialEndsAt: trialDays > 0 ? trialEndsAt : null,
-            },
+            data: unpaidCompanyCreateData(companyName),
           });
           patch.companyId = company.id;
           patch.role = 'OWNER';

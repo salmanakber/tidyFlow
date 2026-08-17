@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import { hashPassword, generateToken, isValidEmail, isValidPassword } from '@/lib/auth';
 import { sendSubscribeWelcomeEmail } from '@/lib/email';
 import { attributeCompanyToPartner, findPartnerByReferralCode } from '@/lib/partners';
-import { getTrialDays } from '@/lib/trial-settings';
+import { unpaidCompanyCreateData } from '@/lib/unpaid-company';
 
 /**
  * POST /api/auth/register
@@ -22,13 +22,12 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Company name is required for registration (no standalone users)
-    if (!companyName || companyName.trim() === '') {
-      return NextResponse.json({
-        success: false,
-        message: 'Company name is required for registration'
-      }, { status: 400 });
-    }
+    // Company details are completed in first-run onboarding (not used to activate a plan).
+    const seededCompanyName =
+      (companyName && String(companyName).trim()) ||
+      [firstName, lastName].filter(Boolean).join(' ').trim() ||
+      email.split('@')[0] ||
+      'My company';
 
     // Validate email format
     if (!isValidEmail(email)) {
@@ -65,17 +64,8 @@ export async function POST(request: NextRequest) {
     // Customer / self-serve signup is always the company owner so they can manage billing.
     const userRole = 'OWNER' as const;
 
-    // Create company with backend free trial (same model as Stripe trialing accounts)
-    const trialDays = await getTrialDays();
-    const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
     const company = await prisma.company.create({
-      data: {
-        name: companyName.trim(),
-        subscriptionStatus: 'trialing',
-        isTrialActive: true,
-        trialEndsAt,
-        planTier: 'STANDARD',
-      }
+      data: unpaidCompanyCreateData(seededCompanyName),
     });
 
     // Create new user with company

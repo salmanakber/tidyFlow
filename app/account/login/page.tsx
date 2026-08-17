@@ -17,7 +17,6 @@ export default function CustomerAccountLoginPage() {
   const [password, setPassword] = useState("")
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
-  const [companyName, setCompanyName] = useState("")
   const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -69,7 +68,6 @@ export default function CustomerAccountLoginPage() {
           password,
           firstName,
           lastName,
-          companyName,
           portal: "customer",
           referralCode: referralCode || undefined,
         })
@@ -166,7 +164,9 @@ export default function CustomerAccountLoginPage() {
             {mode === "register" ? "Create your account" : "Customer sign in"}
           </h1>
           <p style={{ marginTop: 8, fontSize: 14, color: T.inkMid, lineHeight: 1.45 }}>
-            Manage your plan, usage, invoices, and payment.
+            {mode === "register"
+              ? "Create your login, then add company details and choose a plan. Nothing is billed until checkout."
+              : "Manage your plan, usage, invoices, and payment."}
           </p>
         </div>
 
@@ -223,16 +223,6 @@ export default function CustomerAccountLoginPage() {
                     style={inputStyle}
                   />
                 </div>
-              </div>
-              <div>
-                <label style={labelStyle}>Company name</label>
-                <input
-                  required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  style={inputStyle}
-                  placeholder="Your cleaning company"
-                />
               </div>
               {referralCode ? (
                 <div
@@ -322,7 +312,6 @@ export default function CustomerAccountLoginPage() {
             portal="customer"
             next="/account/billing"
             label={mode === "register" ? "Sign up with Google" : "Sign in with Google"}
-            companyName={companyName}
           />
         </div>
 
