@@ -15,6 +15,8 @@ const PAYROLL_WORKER_TYPES = [
 ] as const;
 export type PayrollWorkerTypeValue = (typeof PAYROLL_WORKER_TYPES)[number];
 
+
+// optional fields
 export const PAYROLL_USER_SELECT = {
   payrollWorkerType: true,
   hireDate: true,
