@@ -109,8 +109,8 @@ export function isCompanyWorkspaceRole(role?: string | null): boolean {
   return COMPANY_WORKSPACE_ROLES.has(String(role || '').toUpperCase())
 }
 
-/** Platform-only roles stay on /admin */
+/** Platform /admin only — never company ops UI */
 export function isPlatformAdminRole(role?: string | null): boolean {
   const r = String(role || '').toUpperCase()
-  return r === 'SUPER_ADMIN' || r === 'ADMIN_UNIQUE' || r === 'DEVELOPER'
+  return r === 'SUPER_ADMIN' || r === 'ADMIN_UNIQUE'
 }

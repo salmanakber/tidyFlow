@@ -1,8 +1,10 @@
 "use client"
 
 /**
- * Post-login destination — company owners/managers → /{companySlug}/dashboard.
- * Platform SUPER_ADMIN stays on /admin.
+ * Post-login routing — strict separation:
+ * - OWNER / MANAGER / COMPANY_ADMIN → /{companySlug}/dashboard
+ * - SUPER_ADMIN / ADMIN_UNIQUE → /admin/control-center
+ * - DEVELOPER with company → company workspace; else platform admin
  */
 import { buildCompanySlug } from "@/lib/company-slug"
 
@@ -24,18 +26,12 @@ export function resolvePostLoginPath(opts: {
       ? buildCompanySlug({ id: opts.companyId, name: opts.companyName })
       : null)
 
-  if (
-    (role === "OWNER" ||
-      role === "MANAGER" ||
-      role === "COMPANY_ADMIN" ||
-      role === "DEVELOPER") &&
-    slug
-  ) {
-    return `/${slug}/dashboard`
+  if (role === "OWNER" || role === "MANAGER" || role === "COMPANY_ADMIN") {
+    return slug ? `/${slug}/dashboard` : "/login"
   }
 
   if (role === "DEVELOPER") {
-    return "/admin/control-center"
+    return slug ? `/${slug}/dashboard` : "/admin/control-center"
   }
 
   return "/login"

@@ -4,16 +4,16 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import axios from "axios"
 import { CompanyWorkspaceProvider } from "@/contexts/CompanyWorkspaceContext"
+import CompanyShell from "@/components/CompanyShell"
 import {
   isCompanyWorkspaceRole,
-  isPlatformAdminRole,
   isReservedPathSegment,
   parseCompanyIdFromSlug,
 } from "@/lib/company-slug"
 
 /**
- * Company workspace layout: app.tidyflowapp.com/{company-name-id}/…
- * For subscription owners & managers — NOT the platform /admin panel.
+ * Company owner/manager workspace ONLY.
+ * Platform SUPER_ADMIN is blocked and sent to /admin.
  */
 export default function CompanySlugLayout({
   children,
@@ -60,25 +60,22 @@ export default function CompanySlugLayout({
 
         const user = res.data.data.user
         const company = res.data.data.company
-        const role = user?.role
+        const role = String(user?.role || "").toUpperCase()
 
-        // Platform-only admins should use /admin
-        if (isPlatformAdminRole(role) && !isCompanyWorkspaceRole(role) && role !== "DEVELOPER") {
-          if (role === "SUPER_ADMIN" || role === "ADMIN_UNIQUE") {
-            router.replace("/admin/control-center")
-            return
-          }
+        // Platform admins do NOT use company workspace
+        if (role === "SUPER_ADMIN" || role === "ADMIN_UNIQUE") {
+          router.replace("/admin/control-center")
+          return
         }
 
         if (!isCompanyWorkspaceRole(role) && role !== "DEVELOPER") {
-          setDenied("This workspace is for company owners and managers.")
+          setDenied("This workspace is for company owners and managers only.")
           return
         }
 
         const userCompanyId = Number(user?.companyId || company?.id)
         if (!userCompanyId || userCompanyId !== companyId) {
-          // Allow DEVELOPER / SUPER_ADMIN with selected company? For now require match.
-          if (role === "DEVELOPER" || role === "SUPER_ADMIN") {
+          if (role === "DEVELOPER") {
             localStorage.setItem("selectedCompanyId", String(companyId))
           } else {
             setDenied("You do not have access to this company workspace.")
@@ -124,7 +121,7 @@ export default function CompanySlugLayout({
 
   return (
     <CompanyWorkspaceProvider companySlug={companySlug}>
-      {children}
+      <CompanyShell>{children}</CompanyShell>
     </CompanyWorkspaceProvider>
   )
 }

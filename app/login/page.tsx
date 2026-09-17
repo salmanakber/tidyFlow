@@ -96,7 +96,7 @@ export default function LoginPage() {
               Tidy<span className="text-amber-600">Flow</span>
             </h1>
             <p className="text-slate-500 mt-2 text-sm font-medium">
-              Company workspace · Owner &amp; manager sign in
+              Sign in to your company workspace
             </p>
           </div>
 
