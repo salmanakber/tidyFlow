@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { requireAuth, requireCompanyScope } from "@/lib/rbac"
+import { requireAuth, resolveCompanyId } from "@/lib/rbac"
 import { UserRole } from "@prisma/client"
 
 // GET /api/dashboard/analytics
@@ -15,10 +15,10 @@ export async function GET(request: NextRequest) {
   const days = Number.parseInt(searchParams.get("days") || "30")
 
   try {
-    let companyId: number | null = null
-    if ( role === UserRole.DEVELOPER || role === UserRole.OWNER) {
-      companyId = requireCompanyScope(tokenUser)
-      if (!companyId) return NextResponse.json({ success: false, message: "No company scope" }, { status: 403 })
+    const companyId = resolveCompanyId(request, tokenUser)
+    const isGlobal = [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.DEVELOPER].includes(role)
+    if (!companyId && !isGlobal) {
+      return NextResponse.json({ success: false, message: "No company scope" }, { status: 403 })
     }
 
     const startDate = new Date()

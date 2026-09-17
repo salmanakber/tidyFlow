@@ -32,6 +32,15 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   
   // Reports
   '/admin/reporting': PERMISSIONS.REPORTS_VIEW,
+  '/admin/qa': null,
+
+  // Finance & HR (role-gated in AdminLayout; APIs enforce manager+)
+  '/admin/payroll': null,
+  '/admin/working-hours': null,
+  '/admin/expenses': null,
+  '/admin/client-invoices': null,
+  '/admin/leave': null,
+  '/admin/supplies': null,
   
   // System
   '/admin/sheets-sync': PERMISSIONS.SYSTEM_ADMIN,

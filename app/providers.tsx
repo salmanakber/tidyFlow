@@ -2,12 +2,13 @@
 
 import { useEffect } from 'react';
 import { configureAdminApiClient } from '@/lib/admin-api-client';
+import { CompanyWorkspaceProvider } from '@/contexts/CompanyWorkspaceContext';
 
-/** Configure axios for admin pages — runs on /login and all /admin routes. */
+/** Configure axios — runs on login, /admin, and /{companySlug} workspaces. */
 export default function RootClientProviders({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     configureAdminApiClient();
   }, []);
 
-  return <>{children}</>;
+  return <CompanyWorkspaceProvider>{children}</CompanyWorkspaceProvider>;
 }

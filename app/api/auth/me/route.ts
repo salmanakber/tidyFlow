@@ -3,6 +3,7 @@ import prisma from '../../../../lib/prisma';
 import { getUserFromRequest, hashPassword, comparePassword } from '../../../../lib/auth';
 import { isStrongPassword } from '@/lib/password-policy';
 import { getCompanyInvoiceSettings } from '@/lib/invoice-settings';
+import { buildCompanySlug } from '@/lib/company-slug';
 
 /**
  * GET /api/auth/me
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
         googleId: true,
         company: {
           select: {
+            id: true,
             name: true,
             planTier: true,
             subscriptionStatus: true,
@@ -112,11 +114,15 @@ export async function GET(request: NextRequest) {
         },
         company: user.company
           ? {
+              id: user.companyId,
               name: user.company.name,
               planTier: user.company.planTier,
               subscriptionStatus: user.company.subscriptionStatus,
               isTrialActive: user.company.isTrialActive,
               trialEndsAt: user.company.trialEndsAt,
+              slug: user.companyId
+                ? buildCompanySlug({ id: user.companyId, name: user.company.name })
+                : null,
             }
           : null,
         needsOnboarding: missingSetup.length > 0,

@@ -16,7 +16,13 @@ export async function GET(request: NextRequest) {
   const role = tokenUser.role as UserRole;
 
   // Only managers, owners, and admins can view performance
-  if (role !== UserRole.OWNER && role !== UserRole.DEVELOPER && role !== UserRole.MANAGER && role !== UserRole.COMPANY_ADMIN) {
+  if (
+    role !== UserRole.OWNER &&
+    role !== UserRole.DEVELOPER &&
+    role !== UserRole.MANAGER &&
+    role !== UserRole.COMPANY_ADMIN &&
+    role !== UserRole.SUPER_ADMIN
+  ) {
     return NextResponse.json({ success: false, message: 'Not authorized' }, { status: 403 });
   }
 

@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TidyFlow Fleet & Dispatch Console — Cleaning Business Control Panel</title>
+  
+  <!-- Modern SaaS Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            // Brand Color 1: Deep Amber (Action & Priority)
+            amber: {
+              50: '#FFFDF5',
+              100: '#FEF3C7',
+              200: '#FDE68A',
+              300: '#FCD34D',
+              400: '#FBBF24',
+              500: '#F59E0B',
+              600: '#D97706', // Primary Brand Amber
+              700: '#B45309', // Hover Amber
+              800: '#92400E',
+              900: '#78350F',
+            },
+            // Brand Color 2: Deep Navy (Structure & Authority)
+            navy: {
+              50: '#F0F4FA',
+              100: '#DCE6F5',
+              200: '#BDCEEB',
+              700: '#1C3364',
+              800: '#132347',
+              900: '#0E1B38', // Structural Navy
+              950: '#070E1E', // Canvas Base Deep Navy
+            },
+            control: {
+              canvas: '#F4F6F9',
+              card: '#FFFFFF',
+              border: '#E2E8F0',
+              hover: '#F8FAFC',
+              darkCanvas: '#050A15',
+              darkCard: '#0A1324',
+              darkBorder: '#16233B',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Control Panel Data Density Styling */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-thumb { background: #1E293B; }
+    
+    .pulsing-dot {
+      box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.6);
+      animation: pulse-ring 2s infinite cubic-bezier(0.66, 0, 0, 1);
+    }
+    @keyframes pulse-ring {
+      to { box-shadow: 0 0 0 8px rgba(217, 119, 6, 0); }
+    }
+    .active-nav-tab {
+      color: #D97706 !important;
+      border-bottom-color: #D97706 !important;
+    }
+  </style>
+</head>
+<body class="bg-control-canvas dark:bg-control-darkCanvas text-slate-800 dark:text-slate-100 antialiased font-sans flex h-screen overflow-hidden selection:bg-amber-600 selection:text-white transition-colors duration-150">
+
+  <!-- ========================================================= -->
+  <!-- 1. LEFT ENTERPRISE SIDEBAR (HIGH-DENSITY CONTROL TREE)    -->
+  <!-- ========================================================= -->
+  <aside class="w-64 bg-navy-950 text-slate-300 border-r border-navy-900 flex flex-col flex-shrink-0 z-30 select-none">
+    
+    <!-- Workspace Head -->
+    <div class="h-16 px-4 border-b border-navy-900 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5 overflow-hidden">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-navy-950 font-black shadow-lg shadow-amber-600/30 flex-shrink-0">
+          <i data-lucide="layers" class="w-5 h-5 text-navy-950 stroke-[2.5]"></i>
+        </div>
+        <div class="leading-tight truncate">
+          <div class="flex items-center space-x-1.5">
+            <span class="font-black text-sm tracking-tight text-white">Tidy<span class="text-amber-500">Flow</span></span>
+            <span class="text-[9px] font-mono font-bold px-1 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded">OS</span>
+          </div>
+          <p class="text-[11px] text-slate-400 font-medium truncate">Metropolitan Fleet HQ</p>
+        </div>
+      </div>
+      <button class="text-slate-400 hover:text-white p-1 hover:bg-navy-900 rounded transition">
+        <i data-lucide="chevrons-up-down" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Live Telemetry Status Strip -->
+    <div class="px-4 py-2 bg-navy-900/80 border-b border-navy-900 flex items-center justify-between text-[11px] font-mono">
+      <div class="flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span class="text-slate-300">WEBSOCKET 24ms</span>
+      </div>
+      <span class="text-amber-400 font-bold">34 CLEANERS SYNCED</span>
+    </div>
+
+    <!-- Navigation Tree -->
+    <div class="flex-1 overflow-y-auto px-3 py-4 space-y-5 text-xs font-medium">
+      
+      <!-- Critical Operations Group -->
+      <div>
+        <div class="px-2.5 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Mission Control
+        </div>
+        <div class="space-y-0.5">
+          <a href="#" onclick="switchMainTab('dispatch')" class="flex items-center justify-between px-2.5 py-2 rounded-lg bg-amber-600 text-white font-bold transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="layout-grid" class="w-4 h-4"></i>
+              <span>Dispatch Board</span>
+            </div>
+            <span class="text-[10px] font-mono font-bold bg-navy-950 text-amber-300 px-1.5 py-0.2 rounded">54</span>
+          </a>
+          
+          <a href="#" onclick="switchMainTab('rota')" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="calendar-clock" class="w-4 h-4 text-slate-400"></i>
+              <span>Fleet Rota Matrix</span>
+            </div>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-navy-800 text-slate-300">Today</span>
+          </a>
+
+          <a href="#" onclick="switchMainTab('qa')" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="shield-check" class="w-4 h-4 text-amber-500"></i>
+              <span>QA & Photo Proofs</span>
+            </div>
+            <span class="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/20 px-1.5 rounded">2 Flags</span>
+          </a>
+
+          <a href="#" onclick="switchMainTab('finance')" class="flex items-center space-x-2.5 px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <i data-lucide="badge-dollar-sign" class="w-4 h-4 text-slate-400"></i>
+            <span>Margin & Billing Run-Rate</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Fleet & Accounts -->
+      <div>
+        <div class="px-2.5 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Fleet & Facility Assets
+        </div>
+        <div class="space-y-0.5">
+          <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="users" class="w-4 h-4 text-slate-400"></i>
+              <span>Cleaners & Van Crews</span>
+            </div>
+            <span class="text-[10px] text-emerald-400 font-bold font-mono">31 On-Site</span>
+          </a>
+          <a href="#" class="flex items-center space-x-2.5 px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <i data-lucide="building" class="w-4 h-4 text-slate-400"></i>
+            <span>Properties (184 Facilities)</span>
+          </a>
+          <a href="#" class="flex items-center space-x-2.5 px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <i data-lucide="briefcase" class="w-4 h-4 text-slate-400"></i>
+            <span>Commercial Accounts</span>
+          </a>
+          <a href="#" class="flex items-center space-x-2.5 px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <i data-lucide="map-pinned" class="w-4 h-4 text-slate-400"></i>
+            <span>GPS Geofence Polygons</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Financial Integrations -->
+      <div>
+        <div class="px-2.5 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          ERP & Integrations
+        </div>
+        <div class="space-y-0.5">
+          <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="landmark" class="w-4 h-4 text-slate-400"></i>
+              <span>QuickBooks Ledger</span>
+            </div>
+            <span class="w-2 h-2 rounded-full bg-emerald-500" title="Live Synced"></span>
+          </a>
+          <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <div class="flex items-center space-x-2.5">
+              <i data-lucide="sheet" class="w-4 h-4 text-slate-400"></i>
+              <span>Google Sheets Sync</span>
+            </div>
+            <span class="text-[10px] font-mono text-slate-400">2m ago</span>
+          </a>
+          <a href="#" class="flex items-center space-x-2.5 px-2.5 py-2 rounded-lg text-slate-300 hover:bg-navy-900 hover:text-white transition">
+            <i data-lucide="settings" class="w-4 h-4 text-slate-400"></i>
+            <span>Fleet Configurations</span>
+          </a>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Operator Footprint & Theme Switcher -->
+    <div class="p-3 border-t border-navy-900 bg-navy-950/60">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2.5 overflow-hidden">
+          <div class="w-8 h-8 rounded bg-navy-800 border border-navy-700 flex items-center justify-center font-bold text-amber-400 text-xs">
+            OP
+          </div>
+          <div class="leading-tight truncate">
+            <p class="text-xs font-bold text-white truncate">Marcus Vance</p>
+            <p class="text-[10px] text-slate-400 font-mono truncate">Chief Dispatcher</p>
+          </div>
+        </div>
+        
+        <button id="themeBtn" class="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-navy-900 transition" title="Toggle Light / Dark Mode">
+          <i data-lucide="sun" class="w-4 h-4 block dark:hidden"></i>
+          <i data-lucide="moon" class="w-4 h-4 hidden dark:block"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========================================================= -->
+  <!-- 2. PRIMARY CONTROL SURFACE                                -->
+  <!-- ========================================================= -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    
+    <!-- Top Operations Strip -->
+    <header class="h-16 bg-white dark:bg-control-darkCard border-b border-control-border dark:border-control-darkBorder px-6 flex items-center justify-between flex-shrink-0 z-20">
+      
+      <!-- Left: Zone Filter + Command Input -->
+      <div class="flex items-center space-x-3">
+        <div class="relative">
+          <button class="flex items-center space-x-2 px-3 py-1.5 text-xs font-bold bg-navy-900 text-white rounded-lg border border-navy-800 hover:bg-navy-800 transition">
+            <i data-lucide="crosshair" class="w-3.5 h-3.5 text-amber-500"></i>
+            <span>All 4 Hub Zones (North, CBD, Tech, Coastal)</span>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
+          </button>
+        </div>
+
+        <div class="h-4 w-px bg-slate-200 dark:bg-slate-800"></div>
+
+        <!-- Global Search -->
+        <div class="relative w-80 hidden md:block">
+          <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input 
+            type="text" 
+            placeholder="Command Jump: Search cleaner, job ID, or geofence..." 
+            class="w-full pl-9 pr-12 py-1.5 text-xs bg-slate-50 dark:bg-navy-950 border border-slate-200 dark:border-navy-900 rounded-lg text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-600 font-medium transition"
+          />
+          <span class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-400 bg-white dark:bg-navy-900 px-1 rounded border border-slate-200 dark:border-navy-800">⌘K</span>
+        </div>
+      </div>
+
+      <!-- Right: Live Indicator & Urgent CTAs -->
+      <div class="flex items-center space-x-3">
+        <!-- Live Geofence Telemetry Tag -->
+        <div class="hidden xl:flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-navy-950 border border-slate-200 dark:border-navy-900 font-mono text-xs text-slate-600 dark:text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 pulsing-dot"></span>
+          <span>GPS FENCE: 31 LOCKS</span>
+          <span class="text-slate-300 dark:text-slate-700">|</span>
+          <span class="text-amber-600 font-bold">3 DRIFT WARNINGS</span>
+        </div>
+
+        <!-- Dispatch Shift CTA -->
+        <button onclick="toggleInspector()" class="flex items-center space-x-2 bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-1.5 rounded-lg font-bold text-xs shadow-md shadow-amber-600/25 transition transform active:scale-95">
+          <i data-lucide="plus-circle" class="w-4 h-4 stroke-[2.5]"></i>
+          <span>Dispatch Shift</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Sub-Navbar Control Tabs (Instant SaaS View Switching) -->
+    <div class="h-11 bg-white dark:bg-control-darkCard border-b border-control-border dark:border-control-darkBorder px-6 flex items-center justify-between flex-shrink-0">
+      <nav class="flex space-x-6 text-xs font-bold font-mono">
+        <button onclick="switchMainTab('dispatch')" id="tab-dispatch" class="h-11 border-b-2 active-nav-tab border-amber-600 text-amber-600 flex items-center space-x-2">
+          <i data-lucide="table" class="w-3.5 h-3.5"></i>
+          <span>LIVE DISPATCH BOARD</span>
+        </button>
+        <button onclick="switchMainTab('rota')" id="tab-rota" class="h-11 border-b-2 border-transparent text-slate-400 hover:text-navy-900 dark:hover:text-white flex items-center space-x-2">
+          <i data-lucide="gantt-chart" class="w-3.5 h-3.5"></i>
+          <span>GANTT SHIFT ROTA</span>
+        </button>
+        <button onclick="switchMainTab('qa')" id="tab-qa" class="h-11 border-b-2 border-transparent text-slate-400 hover:text-navy-900 dark:hover:text-white flex items-center space-x-2">
+          <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+          <span>PHOTO PROOF INSPECTOR (18)</span>
+        </button>
+        <button onclick="switchMainTab('finance')" id="tab-finance" class="h-11 border-b-2 border-transparent text-slate-400 hover:text-navy-900 dark:hover:text-white flex items-center space-x-2">
+          <i data-lucide="pie-chart" class="w-3.5 h-3.5"></i>
+          <span>MARGIN & FINANCIAL RUN-RATE</span>
+        </button>
+      </nav>
+
+      <div class="flex items-center space-x-2 text-xs font-mono text-slate-400">
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span>AUTO-REFRESH: 15s</span>
+      </div>
+    </div>
+
+    <!-- Scrollable Control Center Body -->
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <!-- ========================================================= -->
+      <!-- TAB 1: LIVE DISPATCH BOARD                                -->
+      <!-- ========================================================= -->
+      <div id="content-dispatch" class="space-y-6">
+        
+        <!-- Actionable AI Operations Directive Bar -->
+        <section class="bg-navy-900 text-white rounded-xl p-4 border border-navy-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="sparkles" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2 text-xs">
+                <span class="font-bold text-amber-400 font-mono">AUTONOMOUS DISPATCH SENTINEL</span>
+                <span class="text-slate-400">•</span>
+                <span class="text-slate-200">2 critical shift conflicts require immediate reassignment</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">BioTech Cleanroom #4 starts in 50 minutes without an allocated level-3 certified technician.</p>
+            </div>
+          </div>
+          
+          <div class="flex items-center space-x-2 flex-shrink-0">
+            <button class="px-3 py-1.5 bg-navy-800 hover:bg-navy-700 text-white text-xs font-bold rounded-lg border border-navy-700 transition">Dismiss</button>
+            <button onclick="openJobDetails('JOB-1042')" class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold font-mono rounded-lg shadow-sm transition">AUTO-REASSIGN (1-CLICK)</button>
+          </div>
+        </section>
+
+        <!-- Fleet Telemetry High-Density Strip -->
+        <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>Scheduled Today</span>
+              <i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-navy-950 dark:text-white font-mono">54</span>
+              <span class="text-[10px] font-bold text-slate-500 font-mono">42 Recurring</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-navy-900 dark:bg-amber-500 h-1.5 rounded-full" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>GPS Verified Active</span>
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 text-emerald-500"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-navy-950 dark:text-white font-mono">31</span>
+              <span class="text-[10px] font-bold text-emerald-600 font-mono">91% In-Fence</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-emerald-500 h-1.5 rounded-full" style="width: 91%"></div>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border-l-4 border-l-amber-600 border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>Shift At-Risk</span>
+              <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-500"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-amber-600 font-mono">3</span>
+              <span class="text-[10px] font-bold text-amber-600 font-mono">Action Needed</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-amber-600 h-1.5 rounded-full" style="width: 60%"></div>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>Invoiced Today</span>
+              <i data-lucide="trending-up" class="w-3.5 h-3.5 text-navy-800 dark:text-amber-400"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-navy-950 dark:text-white font-mono">$11,840</span>
+              <span class="text-[10px] font-bold text-emerald-600 font-mono">+14.2%</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-navy-900 dark:bg-amber-500 h-1.5 rounded-full" style="width: 78%"></div>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>Labor Cost Rate</span>
+              <i data-lucide="wallet" class="w-3.5 h-3.5 text-slate-400"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-navy-950 dark:text-white font-mono">$4,789</span>
+              <span class="text-[10px] font-mono text-slate-400">184.2h Logged</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-navy-700 h-1.5 rounded-full" style="width: 52%"></div>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-3.5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between text-slate-400 text-[10px] font-mono font-bold uppercase">
+              <span>QA Audit Score</span>
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-500"></i>
+            </div>
+            <div class="mt-2 flex items-baseline justify-between">
+              <span class="text-2xl font-black text-navy-950 dark:text-white font-mono">98.2%</span>
+              <span class="text-[10px] font-bold text-emerald-600 font-mono">PASSED</span>
+            </div>
+            <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-emerald-500 h-1.5 rounded-full" style="width: 98%"></div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- High-Density Operations Control Matrix -->
+        <section class="bg-white dark:bg-control-darkCard rounded-xl border border-control-border dark:border-control-darkBorder shadow-xs overflow-hidden">
+          
+          <!-- Matrix Toolbelt -->
+          <div class="p-4 border-b border-control-border dark:border-control-darkBorder flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50 dark:bg-navy-950/40">
+            <div class="flex items-center space-x-3">
+              <span class="text-xs font-mono font-bold text-navy-950 dark:text-white uppercase tracking-tight">Active Dispatch Queue</span>
+              <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-navy-900 text-amber-400">54 CONTRACTS</span>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <div class="inline-flex rounded-lg border border-slate-200 dark:border-navy-800 p-0.5 bg-white dark:bg-navy-900 text-xs font-mono font-semibold">
+                <button class="px-2.5 py-1 rounded bg-navy-900 text-white dark:bg-navy-800">All (54)</button>
+                <button class="px-2.5 py-1 text-slate-500 hover:text-navy-900 dark:hover:text-white">Active (31)</button>
+                <button class="px-2.5 py-1 text-amber-600 font-bold">Exceptions (3)</button>
+                <button class="px-2.5 py-1 text-slate-500 hover:text-navy-900 dark:hover:text-white">Completed (20)</button>
+              </div>
+
+              <button class="p-1.5 border border-slate-200 dark:border-navy-800 rounded-lg text-slate-500 hover:text-navy-900 dark:hover:text-white">
+                <i data-lucide="sliders" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- The Table -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-100/70 dark:bg-navy-950 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider font-bold border-b border-control-border dark:border-control-darkBorder font-mono">
+                <tr>
+                  <th class="py-2.5 px-4 w-8"><input type="checkbox" onchange="toggleSelectAll(this)" class="rounded text-amber-600 border-slate-300"></th>
+                  <th class="py-2.5 px-4">Shift ID & Client Facility</th>
+                  <th class="py-2.5 px-4">Assigned Crew / Vehicle</th>
+                  <th class="py-2.5 px-4">Schedule & GPS Fence Status</th>
+                  <th class="py-2.5 px-4">SOP Checklist Execution</th>
+                  <th class="py-2.5 px-4">Photo Proofs</th>
+                  <th class="py-2.5 px-4 font-mono">Billable Gross / Net</th>
+                  <th class="py-2.5 px-4 text-right">Dispatch Action</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-control-border dark:divide-control-darkBorder font-medium">
+                
+                <!-- Row 1: IN PROGRESS & GEOFENCE LOCKED -->
+                <tr class="hover:bg-slate-50/90 dark:hover:bg-navy-900/40 cursor-pointer transition" onclick="openJobDetails('JOB-1040')">
+                  <td class="py-3.5 px-4" onclick="event.stopPropagation()"><input type="checkbox" class="job-checkbox rounded text-amber-600 border-slate-300" onchange="updateBatchBar()"></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center space-x-2">
+                      <span class="font-mono font-bold text-navy-950 dark:text-white">#JOB-1040</span>
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    </div>
+                    <div class="text-slate-500 text-[11px] truncate max-w-xs font-semibold">Deloitte Regional HQ • Floors 12–14</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center space-x-2">
+                      <div class="w-6 h-6 rounded bg-navy-900 text-amber-400 font-bold flex items-center justify-center text-[10px] font-mono">
+                        TA
+                      </div>
+                      <div>
+                        <div class="text-slate-900 dark:text-white font-bold">Team Alpha (Van 02)</div>
+                        <div class="text-[10px] text-slate-400 font-mono">Marcus & Sarah</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="font-mono text-slate-800 dark:text-slate-200">08:00 – 12:30</div>
+                    <div class="flex items-center text-[10px] text-emerald-600 font-bold font-mono">
+                      <i data-lucide="crosshair" class="w-3 h-3 mr-1"></i> Geofence Locked (±1.4m)
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="w-24">
+                      <div class="flex justify-between text-[10px] font-mono text-slate-500 mb-1">
+                        <span>22/26</span>
+                        <span class="font-bold text-navy-950 dark:text-white">85%</span>
+                      </div>
+                      <div class="w-full bg-slate-200 dark:bg-navy-800 h-1.5 rounded-full overflow-hidden">
+                        <div class="bg-amber-600 h-1.5 rounded-full" style="width: 85%"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 dark:bg-navy-800 text-slate-700 dark:text-slate-300 font-mono text-[11px]">
+                      <i data-lucide="camera" class="w-3 h-3 mr-1 text-amber-600"></i> 14 Proofs
+                    </span>
+                  </td>
+                  <td class="py-3.5 px-4 font-mono">
+                    <div class="text-slate-900 dark:text-white font-bold">$920.00</div>
+                    <div class="text-[10px] text-emerald-600 font-bold">54.2% Margin</div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                      ON-SITE LIVE
+                    </span>
+                  </td>
+                </tr>
+
+                <!-- Row 2: URGENT / MISSING CLEANER -->
+                <tr class="hover:bg-amber-50/40 dark:hover:bg-navy-900/40 cursor-pointer transition bg-amber-50/25 dark:bg-amber-950/10" onclick="openJobDetails('JOB-1042')">
+                  <td class="py-3.5 px-4" onclick="event.stopPropagation()"><input type="checkbox" class="job-checkbox rounded text-amber-600 border-slate-300" onchange="updateBatchBar()"></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center space-x-2">
+                      <span class="font-mono font-bold text-amber-600">#JOB-1042</span>
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                    </div>
+                    <div class="text-slate-900 dark:text-white text-[11px] font-bold">BioTech Tower • Cleanroom 4</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="text-amber-600 font-bold flex items-center space-x-1">
+                      <i data-lucide="user-x" class="w-3.5 h-3.5"></i>
+                      <span>Unassigned Shift</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 font-mono">Lead call-out (Illness)</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="font-mono text-slate-800 dark:text-slate-200">13:30 (Starts in 50m)</div>
+                    <div class="text-[10px] text-amber-600 font-bold font-mono">SLA Violation Danger</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span class="text-slate-400 text-[10px] font-mono">0/18 Not Started</span>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span class="text-slate-400 text-[10px] font-mono">0 Proofs</span>
+                  </td>
+                  <td class="py-3.5 px-4 font-mono">
+                    <div class="text-slate-900 dark:text-white font-bold">$1,450.00</div>
+                    <div class="text-[10px] text-slate-400 font-mono">Est. Margin: 61%</div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right">
+                    <button class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] font-mono shadow-xs">
+                      DISPATCH NOW
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 3: COMPLETED & AUDITED -->
+                <tr class="hover:bg-slate-50/90 dark:hover:bg-navy-900/40 cursor-pointer transition" onclick="openJobDetails('JOB-1038')">
+                  <td class="py-3.5 px-4" onclick="event.stopPropagation()"><input type="checkbox" class="job-checkbox rounded text-amber-600 border-slate-300" onchange="updateBatchBar()"></td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center space-x-2">
+                      <span class="font-mono font-bold text-slate-500">#JOB-1038</span>
+                      <i data-lucide="check-check" class="w-3.5 h-3.5 text-emerald-500"></i>
+                    </div>
+                    <div class="text-slate-600 dark:text-slate-400 text-[11px] truncate max-w-xs font-semibold">Apex Law Center • Suites 400–408</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center space-x-2">
+                      <div class="w-6 h-6 rounded bg-navy-900 text-slate-200 font-bold flex items-center justify-center text-[10px] font-mono">
+                        MG
+                      </div>
+                      <div>
+                        <div class="text-slate-900 dark:text-white font-bold">Maria Gonzales</div>
+                        <div class="text-[10px] text-emerald-600 font-bold">Supervisor Signed</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="font-mono text-slate-500">06:00 – 09:30</div>
+                    <div class="text-[10px] text-slate-400 font-mono">3.5h Verified (No Overtime)</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <div class="text-[10px] font-mono text-emerald-600 font-bold">32/32 Passed (100%)</div>
+                    <div class="w-full bg-slate-200 dark:bg-navy-800 h-1.5 rounded-full overflow-hidden mt-1">
+                      <div class="bg-emerald-500 h-1.5 rounded-full" style="width: 100%"></div>
+                    </div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded bg-emerald-50 dark:bg-navy-800 text-emerald-700 dark:text-emerald-300 font-mono text-[11px]">
+                      <i data-lucide="check" class="w-3 h-3 mr-1"></i> 8 Signed Proofs
+                    </span>
+                  </td>
+                  <td class="py-3.5 px-4 font-mono">
+                    <div class="text-slate-900 dark:text-white font-bold">$780.00</div>
+                    <div class="text-[10px] text-emerald-600 font-bold">58.0% Margin</div>
+                  </td>
+                  <td class="py-3.5 px-4 text-right">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-slate-100 dark:bg-navy-800 text-slate-600 dark:text-slate-300">
+                      CLOSED & BILLED
+                    </span>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Bottom Telemetry Status -->
+          <div class="p-3 bg-slate-50 dark:bg-navy-950 border-t border-control-border dark:border-control-darkBorder flex items-center justify-between text-xs text-slate-500 font-mono">
+            <span>SHOWING 3 OF 54 CONTRACTED JOBS</span>
+            <div class="flex items-center space-x-3">
+              <span>GEOFENCE DRIFT THRESHOLD: 15.0m</span>
+              <span class="text-slate-300 dark:text-slate-800">|</span>
+              <span class="text-emerald-600 font-bold">QUICKBOOKS: READY FOR BATCH (19)</span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- TAB 2: GANTT SHIFT ROTA                                   -->
+      <!-- ========================================================= -->
+      <div id="content-rota" class="hidden space-y-4">
+        <div class="bg-white dark:bg-control-darkCard p-4 rounded-xl border border-control-border dark:border-control-darkBorder flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-extrabold text-navy-950 dark:text-white uppercase font-mono tracking-tight">Fleet Shift Matrix & Hour Allocation</h2>
+            <p class="text-xs text-slate-400 font-medium">Real-time cleaner Gantt view with overtime conflict indicators.</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button class="px-3 py-1.5 bg-navy-900 text-white rounded-lg text-xs font-mono font-bold">Export PDF Rota</button>
+            <button class="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-mono font-bold">Auto-Optimize Shifts</button>
+          </div>
+        </div>
+
+        <div class="bg-white dark:bg-control-darkCard rounded-xl border border-control-border dark:border-control-darkBorder overflow-x-auto p-4">
+          <div class="min-w-[840px] space-y-3">
+            <div class="grid grid-cols-12 text-[10px] font-mono text-slate-400 border-b border-control-border dark:border-control-darkBorder pb-2">
+              <div class="col-span-3 font-bold text-navy-950 dark:text-white uppercase">Cleaner Crew & Vehicle</div>
+              <div>06:00</div>
+              <div>08:00</div>
+              <div>10:00</div>
+              <div>12:00</div>
+              <div>14:00</div>
+              <div>16:00</div>
+              <div>18:00</div>
+              <div>20:00</div>
+              <div>22:00</div>
+            </div>
+
+            <!-- Rota Row 1 -->
+            <div class="grid grid-cols-12 items-center py-2.5 border-b border-slate-100 dark:border-navy-900 text-xs">
+              <div class="col-span-3 flex items-center space-x-2">
+                <div class="w-7 h-7 rounded bg-navy-900 text-amber-400 font-mono font-bold flex items-center justify-center text-xs">01</div>
+                <div>
+                  <p class="font-bold text-slate-900 dark:text-white">Team Alpha (Van 01)</p>
+                  <p class="text-[10px] text-slate-400 font-mono">Marcus & Sarah • 7.5h / 8.0h</p>
+                </div>
+              </div>
+              <div class="col-span-9 relative h-8 bg-slate-50 dark:bg-navy-950 rounded border border-slate-200 dark:border-navy-800">
+                <div class="absolute left-[10%] w-[35%] top-1 bottom-1 bg-navy-900 text-amber-400 rounded px-2 flex items-center justify-between text-[10px] font-mono font-bold shadow-xs">
+                  <span>#JOB-1040 • Deloitte (08:00–12:30)</span>
+                  <span class="text-emerald-400">GPS ON</span>
+                </div>
+                <div class="absolute left-[50%] w-[25%] top-1 bottom-1 bg-amber-600 text-white rounded px-2 flex items-center justify-between text-[10px] font-mono font-bold shadow-xs">
+                  <span>#JOB-1048 • Tech Center</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rota Row 2 -->
+            <div class="grid grid-cols-12 items-center py-2.5 border-b border-slate-100 dark:border-navy-900 text-xs">
+              <div class="col-span-3 flex items-center space-x-2">
+                <div class="w-7 h-7 rounded bg-navy-900 text-slate-300 font-mono font-bold flex items-center justify-center text-xs">03</div>
+                <div>
+                  <p class="font-bold text-slate-900 dark:text-white">Maria Gonzales (Solo Lead)</p>
+                  <p class="text-[10px] text-slate-400 font-mono">Van 03 • 8.6h (Overtime Warning)</p>
+                </div>
+              </div>
+              <div class="col-span-9 relative h-8 bg-slate-50 dark:bg-navy-950 rounded border border-slate-200 dark:border-navy-800">
+                <div class="absolute left-[0%] w-[28%] top-1 bottom-1 bg-slate-700 text-slate-200 rounded px-2 flex items-center justify-between text-[10px] font-mono font-bold">
+                  <span>#JOB-1038 • Apex Law (DONE)</span>
+                </div>
+                <div class="absolute left-[35%] w-[45%] top-1 bottom-1 bg-amber-700 text-white rounded px-2 flex items-center justify-between text-[10px] font-mono font-bold shadow-xs">
+                  <span>#JOB-1052 • Surgery Clinic (OT +0.6h)</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- TAB 3: QA & PHOTO PROOF AUDITOR                           -->
+      <!-- ========================================================= -->
+      <div id="content-qa" class="hidden space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          
+          <!-- Photo Proof Card 1 -->
+          <div class="bg-white dark:bg-control-darkCard p-4 rounded-xl border border-control-border dark:border-control-darkBorder shadow-xs">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <span class="text-[10px] font-mono font-bold uppercase text-amber-600">Surgery Suite 4A</span>
+                <h4 class="text-xs font-extrabold text-navy-950 dark:text-white">Hospital Grade Disinfection</h4>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-600">PASSED QA (99.8%)</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <div class="relative rounded-lg overflow-hidden border border-slate-200 dark:border-navy-800">
+                <img src="https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=400&h=300&fit=crop" class="w-full h-28 object-cover">
+                <span class="absolute top-1.5 left-1.5 bg-navy-950 text-white font-mono text-[9px] px-1 rounded">BEFORE 08:02</span>
+              </div>
+              <div class="relative rounded-lg overflow-hidden border border-amber-500">
+                <img src="https://images.unsplash.com/photo-1585421514738-01798e348b17?w=400&h=300&fit=crop" class="w-full h-28 object-cover">
+                <span class="absolute top-1.5 left-1.5 bg-amber-600 text-white font-mono text-[9px] px-1 rounded font-bold">AFTER 11:15</span>
+              </div>
+            </div>
+
+            <div class="text-[11px] font-mono text-slate-500 space-y-1">
+              <div class="flex justify-between">
+                <span>Cleaner:</span>
+                <span class="font-bold text-navy-950 dark:text-white">Marcus Vance (ID #492)</span>
+              </div>
+              <div class="flex justify-between">
+                <span>GPS Hash:</span>
+                <span class="text-emerald-600 font-bold">VERIFIED ON-SITE</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Photo Proof Card 2 -->
+          <div class="bg-white dark:bg-control-darkCard p-4 rounded-xl border border-control-border dark:border-control-darkBorder shadow-xs">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <span class="text-[10px] font-mono font-bold uppercase text-amber-600">Penthouse Restrooms</span>
+                <h4 class="text-xs font-extrabold text-navy-950 dark:text-white">Deloitte Regional HQ</h4>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-950 text-amber-600">SUPERVISOR PENDING</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <div class="relative rounded-lg overflow-hidden border border-slate-200 dark:border-navy-800">
+                <img src="https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400&h=300&fit=crop" class="w-full h-28 object-cover">
+                <span class="absolute top-1.5 left-1.5 bg-navy-950 text-white font-mono text-[9px] px-1 rounded">BEFORE 07:45</span>
+              </div>
+              <div class="relative rounded-lg overflow-hidden border border-amber-500">
+                <img src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=400&h=300&fit=crop" class="w-full h-28 object-cover">
+                <span class="absolute top-1.5 left-1.5 bg-amber-600 text-white font-mono text-[9px] px-1 rounded font-bold">AFTER 10:20</span>
+              </div>
+            </div>
+
+            <div class="text-[11px] font-mono text-slate-500 space-y-1">
+              <div class="flex justify-between">
+                <span>Cleaner:</span>
+                <span class="font-bold text-navy-950 dark:text-white">Sarah Jenkins (ID #318)</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Action:</span>
+                <button class="text-amber-600 font-bold hover:underline">Approve Sign-Off</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- TAB 4: MARGIN & FINANCIAL RUN-RATE                        -->
+      <!-- ========================================================= -->
+      <div id="content-finance" class="hidden space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 bg-white dark:bg-control-darkCard p-5 rounded-xl border border-control-border dark:border-control-darkBorder">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="text-xs font-bold font-mono text-navy-950 dark:text-white uppercase">Real-Time Invoiced Billings vs Direct Cleaner Payroll</h3>
+                <p class="text-xs text-slate-400">P&L correlation between client service contracts and time-clock hours</p>
+              </div>
+              <span class="text-xs font-mono font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-2 py-1 rounded">WEEK 38 RUN-RATE</span>
+            </div>
+            <div class="h-64 w-full">
+              <canvas id="pnlChart"></canvas>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-control-darkCard p-5 rounded-xl border border-control-border dark:border-control-darkBorder flex flex-col justify-between">
+            <div>
+              <h3 class="text-xs font-bold font-mono text-navy-950 dark:text-white uppercase mb-1">QuickBooks Integration Stream</h3>
+              <p class="text-xs text-slate-400 mb-4">Direct bidirectional ledger synchronization</p>
+              
+              <div class="space-y-3 text-xs font-mono">
+                <div class="flex justify-between pb-2 border-b border-slate-100 dark:border-navy-900">
+                  <span class="text-slate-500">Unbilled Invoices:</span>
+                  <span class="font-bold text-amber-600">19 shifts ($18,420.00)</span>
+                </div>
+                <div class="flex justify-between pb-2 border-b border-slate-100 dark:border-navy-900">
+                  <span class="text-slate-500">Payroll Run-Rate:</span>
+                  <span class="font-bold text-navy-950 dark:text-white">$7,890.50</span>
+                </div>
+                <div class="flex justify-between pb-2 border-b border-slate-100 dark:border-navy-900">
+                  <span class="text-slate-500">Net Estimated Margin:</span>
+                  <span class="font-black text-emerald-600">57.1%</span>
+                </div>
+              </div>
+            </div>
+
+            <button class="w-full bg-navy-900 hover:bg-navy-800 text-white font-mono font-bold text-xs py-2.5 rounded-lg shadow transition">
+              Force Full Ledger Batch Sync
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 3. SLIDE-OVER INSPECTION DRAWER (CONTROL PANEL DRILL)      -->
+  <!-- ========================================================= -->
+  <div id="inspectorBackdrop" onclick="toggleInspector()" class="fixed inset-0 bg-navy-950/60 backdrop-blur-xs z-40 hidden transition-opacity"></div>
+  
+  <aside id="inspectorDrawer" class="fixed top-0 right-0 w-full sm:w-[560px] h-full bg-white dark:bg-control-darkCard border-l border-control-border dark:border-control-darkBorder z-50 transform translate-x-full transition-transform duration-200 ease-out flex flex-col shadow-2xl">
+    
+    <!-- Drawer Head -->
+    <div class="p-5 border-b border-control-border dark:border-navy-800 flex items-center justify-between bg-navy-950 text-white">
+      <div>
+        <div class="flex items-center space-x-2 font-mono text-[11px]">
+          <span class="text-amber-500 font-bold uppercase">Dispatch Node Drill-Down</span>
+          <span class="text-slate-500">|</span>
+          <span class="text-emerald-400 font-bold">GEOFENCE LOCKED (±1.4m)</span>
+        </div>
+        <h2 id="inspectTitle" class="text-base font-extrabold tracking-tight mt-0.5">#JOB-1040 • Deloitte Regional HQ</h2>
+      </div>
+      <button onclick="toggleInspector()" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-navy-900 transition">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Inspector Tabs -->
+    <div class="px-5 border-b border-control-border dark:border-navy-800 flex space-x-6 text-xs font-mono font-bold bg-slate-50 dark:bg-navy-950">
+      <button onclick="switchDrawerSubTab('checklist')" id="dtab-checklist" class="py-3 text-amber-600 border-b-2 border-amber-600">SOP & Tasks (22/26)</button>
+      <button onclick="switchDrawerSubTab('proof')" id="dtab-proof" class="py-3 text-slate-400 hover:text-navy-950 dark:hover:text-white border-b-2 border-transparent">Photo Proofs (14)</button>
+      <button onclick="switchDrawerSubTab('telemetry')" id="dtab-telemetry" class="py-3 text-slate-400 hover:text-navy-950 dark:hover:text-white border-b-2 border-transparent">GPS Telemetry</button>
+      <button onclick="switchDrawerSubTab('ledger')" id="dtab-ledger" class="py-3 text-slate-400 hover:text-navy-950 dark:hover:text-white border-b-2 border-transparent">Ledger Margins</button>
+    </div>
+
+    <!-- Inspector Body -->
+    <div class="flex-1 overflow-y-auto p-5 space-y-4 text-xs font-sans">
+      
+      <!-- SUBTAB 1: CHECKLIST -->
+      <div id="dcontent-checklist" class="space-y-3">
+        <div class="p-3 bg-slate-50 dark:bg-navy-950 rounded-lg border border-slate-200 dark:border-navy-800 flex justify-between items-center font-mono">
+          <div>
+            <span class="text-[10px] text-slate-400 uppercase font-bold">Standard Commercial Protocol</span>
+            <p class="font-bold text-navy-950 dark:text-white text-sm">Tier-1 Corporate Office SOP</p>
+          </div>
+          <span class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded text-xs font-mono">85% COMPLETE</span>
+        </div>
+
+        <div class="space-y-2">
+          <label class="p-3 bg-white dark:bg-navy-900 rounded-lg border border-slate-200 dark:border-navy-800 flex items-center justify-between">
+            <span class="flex items-center space-x-2.5">
+              <input type="checkbox" checked class="w-4 h-4 text-amber-600 rounded border-slate-300">
+              <span class="line-through text-slate-400 font-medium">Sanitize 4x Executive Restroom facilities</span>
+            </span>
+            <span class="text-[10px] font-mono text-slate-400">08:24 AM (Marcus)</span>
+          </label>
+          <label class="p-3 bg-white dark:bg-navy-900 rounded-lg border border-slate-200 dark:border-navy-800 flex items-center justify-between">
+            <span class="flex items-center space-x-2.5">
+              <input type="checkbox" checked class="w-4 h-4 text-amber-600 rounded border-slate-300">
+              <span class="line-through text-slate-400 font-medium">Breakroom & Kitchenette degrease & dishwasher run</span>
+            </span>
+            <span class="text-[10px] font-mono text-slate-400">09:12 AM (Sarah)</span>
+          </label>
+          <label class="p-3 bg-white dark:bg-navy-900 rounded-lg border border-amber-500/50 bg-amber-50/10 flex items-center justify-between">
+            <span class="flex items-center space-x-2.5">
+              <input type="checkbox" class="w-4 h-4 text-amber-600 rounded border-slate-300">
+              <span class="font-bold text-navy-950 dark:text-white">HEPA Filtration Vacuuming Workspace Zone 4</span>
+            </span>
+            <span class="text-[10px] font-mono font-bold text-amber-600">CURRENT STEP</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- SUBTAB 2: PHOTO PROOF -->
+      <div id="dcontent-proof" class="hidden space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="border border-slate-200 dark:border-navy-800 rounded-lg overflow-hidden">
+            <img src="https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=300&h=200&fit=crop" class="w-full h-32 object-cover">
+            <div class="p-2 bg-navy-950 text-white font-mono text-[10px] flex justify-between">
+              <span>BEFORE: 08:04 AM</span>
+              <span class="text-amber-400">ORIGINAL</span>
+            </div>
+          </div>
+          <div class="border border-amber-500 rounded-lg overflow-hidden">
+            <img src="https://images.unsplash.com/photo-1585421514738-01798e348b17?w=300&h=200&fit=crop" class="w-full h-32 object-cover">
+            <div class="p-2 bg-amber-600 text-white font-mono text-[10px] flex justify-between">
+              <span>AFTER: 11:20 AM</span>
+              <span class="font-bold">PASSED QA</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUBTAB 3: TELEMETRY -->
+      <div id="dcontent-telemetry" class="hidden space-y-3 font-mono">
+        <div class="p-3.5 bg-navy-950 text-slate-300 rounded-lg border border-navy-800 space-y-2 text-xs">
+          <div class="flex justify-between">
+            <span class="text-slate-400">Geofence Polygon:</span>
+            <span class="text-white font-bold">Deloitte HQ Outer Perimeter (75m radius)</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Hardware Ping:</span>
+            <span class="text-emerald-400 font-bold">4s ago (Samsung XCover Field Unit)</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Geofence Drift:</span>
+            <span class="text-white font-bold">1.4m from center (Normal)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUBTAB 4: LEDGER -->
+      <div id="dcontent-ledger" class="hidden space-y-3 font-mono">
+        <div class="p-3.5 bg-slate-50 dark:bg-navy-950 rounded-lg border border-slate-200 dark:border-navy-800 space-y-2 text-xs">
+          <div class="flex justify-between">
+            <span class="text-slate-400">Invoiced Value:</span>
+            <span class="font-bold text-navy-950 dark:text-white">$920.00 Fixed</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Direct Cleaner Payroll:</span>
+            <span class="font-bold text-slate-700 dark:text-slate-300">$421.50 (2 Cleaners @ 4.5h)</span>
+          </div>
+          <div class="flex justify-between border-t border-slate-200 dark:border-navy-800 pt-2">
+            <span class="text-slate-400">Net Job Margin:</span>
+            <span class="font-bold text-emerald-600">$498.50 (54.2%)</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Drawer Footer Actions -->
+    <div class="p-4 border-t border-control-border dark:border-navy-800 flex items-center justify-between bg-slate-50 dark:bg-navy-950">
+      <button class="text-xs font-mono font-bold text-rose-600 hover:underline">Flag Geofence Anomaly</button>
+      <div class="flex space-x-2">
+        <button onclick="toggleInspector()" class="px-3 py-1.5 border border-slate-200 dark:border-navy-700 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300">Close</button>
+        <button class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold font-mono shadow-xs">
+          SIGN-OFF & BILL
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========================================================= -->
+  <!-- 4. FLOATING BULK-ACTION BAR (APPEARS ON CHECKBOX SELECT)   -->
+  <!-- ========================================================= -->
+  <div id="bulkBar" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-navy-950 text-white border border-navy-800 shadow-2xl rounded-xl px-5 py-3 items-center space-x-4 z-40 hidden font-mono text-xs">
+    <div class="flex items-center space-x-2">
+      <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+      <span id="bulkCount" class="font-bold text-amber-400">2 JOBS SELECTED</span>
+    </div>
+    <div class="h-4 w-px bg-navy-800"></div>
+    <button class="hover:text-amber-400 font-bold transition flex items-center gap-1.5">
+      <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> Batch Reassign
+    </button>
+    <button class="hover:text-amber-400 font-bold transition flex items-center gap-1.5">
+      <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Force Geofence QA
+    </button>
+    <button class="hover:text-amber-400 font-bold transition flex items-center gap-1.5">
+      <i data-lucide="share" class="w-3.5 h-3.5"></i> Export QuickBooks
+    </button>
+    <button onclick="clearSelection()" class="text-slate-400 hover:text-white p-1 ml-2">
+      <i data-lucide="x" class="w-4 h-4"></i>
+    </button>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 5. JAVASCRIPT CONTROLLER                                  -->
+  <!-- ========================================================= -->
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // 1. View Switching between the 4 Primary Tabs
+    function switchMainTab(tabKey) {
+      const tabs = ['dispatch', 'rota', 'qa', 'finance'];
+      tabs.forEach(t => {
+        document.getElementById(`content-${t}`).classList.add('hidden');
+        const btn = document.getElementById(`tab-${t}`);
+        btn.classList.remove('active-nav-tab', 'border-amber-600', 'text-amber-600');
+        btn.classList.add('border-transparent', 'text-slate-400');
+      });
+
+      document.getElementById(`content-${tabKey}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tab-${tabKey}`);
+      activeBtn.classList.add('active-nav-tab', 'border-amber-600', 'text-amber-600');
+      activeBtn.classList.remove('border-transparent', 'text-slate-400');
+
+      if (tabKey === 'finance') {
+        renderFinanceChart();
+      }
+    }
+
+    // 2. Slide-Over Inspector Logic
+    function toggleInspector() {
+      const drawer = document.getElementById('inspectorDrawer');
+      const backdrop = document.getElementById('inspectorBackdrop');
+      const isOpen = !drawer.classList.contains('translate-x-full');
+      if (isOpen) {
+        drawer.classList.add('translate-x-full');
+        backdrop.classList.add('hidden');
+      } else {
+        drawer.classList.remove('translate-x-full');
+        backdrop.classList.remove('hidden');
+      }
+    }
+
+    function openJobDetails(jobId) {
+      document.getElementById('inspectTitle').innerText = `${jobId} • Deloitte Regional HQ`;
+      toggleInspector();
+    }
+
+    function switchDrawerSubTab(subTabKey) {
+      const subTabs = ['checklist', 'proof', 'telemetry', 'ledger'];
+      subTabs.forEach(st => {
+        document.getElementById(`dcontent-${st}`).classList.add('hidden');
+        const btn = document.getElementById(`dtab-${st}`);
+        btn.classList.remove('text-amber-600', 'border-amber-600');
+        btn.classList.add('text-slate-400', 'border-transparent');
+      });
+
+      document.getElementById(`dcontent-${subTabKey}`).classList.remove('hidden');
+      const active = document.getElementById(`dtab-${subTabKey}`);
+      active.classList.add('text-amber-600', 'border-amber-600');
+      active.classList.remove('text-slate-400', 'border-transparent');
+    }
+
+    // 3. Batch Action Checkbox Bar Logic
+    function updateBatchBar() {
+      const checkedBoxes = document.querySelectorAll('.job-checkbox:checked');
+      const bar = document.getElementById('bulkBar');
+      if (checkedBoxes.length > 0) {
+        bar.classList.remove('hidden');
+        bar.classList.add('flex');
+        document.getElementById('bulkCount').innerText = `${checkedBoxes.length} JOBS SELECTED`;
+      } else {
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
+      }
+    }
+
+    function toggleSelectAll(master) {
+      document.querySelectorAll('.job-checkbox').forEach(cb => cb.checked = master.checked);
+      updateBatchBar();
+    }
+
+    function clearSelection() {
+      document.querySelectorAll('.job-checkbox').forEach(cb => cb.checked = false);
+      updateBatchBar();
+    }
+
+    // 4. Dark Mode Switcher (Deep Navy & Amber Theme retention)
+    const themeBtn = document.getElementById('themeBtn');
+    const htmlEl = document.documentElement;
+
+    themeBtn.addEventListener('click', () => {
+      if (htmlEl.classList.contains('dark')) {
+        htmlEl.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+      } else {
+        htmlEl.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+      }
+      renderFinanceChart();
+    });
+
+    // 5. Chart.js Implementation (Deep Navy + Deep Amber)
+    let pnlChartInstance;
+    function renderFinanceChart() {
+      const ctx = document.getElementById('pnlChart');
+      if (!ctx) return;
+      const isDark = htmlEl.classList.contains('dark');
+      
+      if (pnlChartInstance) pnlChartInstance.destroy();
+
+      pnlChartInstance = new Chart(ctx.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri (Est)', 'Sat', 'Sun'],
+          datasets: [
+            {
+              label: 'Gross Invoiced ($)',
+              data: [9400, 10200, 11840, 11100, 12400, 6800, 7100],
+              backgroundColor: '#D97706', // Deep Amber
+              borderRadius: 4,
+              barPercentage: 0.6,
+            },
+            {
+              label: 'Field Cleaner Payroll ($)',
+              data: [4200, 4800, 4789, 4600, 5100, 3100, 3200],
+              backgroundColor: isDark ? '#1E293B' : '#0E1B38', // Deep Navy
+              borderRadius: 4,
+              barPercentage: 0.6,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              align: 'end',
+              labels: {
+                boxWidth: 10,
+                color: isDark ? '#94A3B8' : '#475569',
+                font: { family: '"JetBrains Mono"', size: 10, weight: 'bold' }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: isDark ? '#94A3B8' : '#64748B', font: { family: '"JetBrains Mono"', size: 10 } }
+            },
+            y: {
+              grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+              ticks: { 
+                color: isDark ? '#94A3B8' : '#64748B', 
+                font: { family: '"JetBrains Mono"', size: 10 },
+                callback: (v) => '$' + v 
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Run chart rendering initially
+    window.addEventListener('DOMContentLoaded', () => {
+      renderFinanceChart();
+    });
+  </script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { generateOTP, storeOTP, verifyOTP, getOTPStats } from '../../../../lib/o
 import { sendEmail } from '../../../../lib/email';
 import { UserRole } from '@prisma/client';
 import { ensureCustomerOwnsCompany, isCompanyBillingRole } from '@/lib/rbac';
+import { buildCompanySlug } from '@/lib/company-slug';
 
 /**
  * POST /api/auth/login
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
         isActive: true,
         isHeadSuperAdmin: true,
         googleId: true,
+        company: { select: { id: true, name: true } },
       }
     });
 
@@ -285,6 +287,16 @@ export async function POST(request: NextRequest) {
           companyId: billingUser.companyId,
           isHeadSuperAdmin: user.isHeadSuperAdmin
         },
+        company: billingUser.companyId
+          ? {
+              id: billingUser.companyId,
+              name: (user as any).company?.name || null,
+              slug: buildCompanySlug({
+                id: billingUser.companyId,
+                name: (user as any).company?.name || `company-${billingUser.companyId}`,
+              }),
+            }
+          : null,
         portal,
       }
     }, { status: 200 });
