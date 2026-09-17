@@ -149,21 +149,80 @@ export function OpsEmpty({ message }: { message: string }) {
   )
 }
 
-export function OpsBadge({ status }: { status: string }) {
-  const s = (status || "").toLowerCase()
+export function OpsBadge({ status }: { status?: string | null }) {
+  const label = String(status || "—")
+  const s = label.toLowerCase()
   let cls = "bg-slate-100 text-slate-600 border-slate-200"
-  if (["approved", "paid", "active", "completed", "synced"].includes(s)) {
+  if (["approved", "paid", "active", "completed", "synced", "resolved"].includes(s)) {
     cls = "bg-emerald-50 text-emerald-700 border-emerald-200"
-  } else if (["pending", "open", "in_progress", "assigned"].includes(s)) {
+  } else if (["pending", "open", "in_progress", "assigned", "planned"].includes(s)) {
     cls = "bg-amber-50 text-amber-800 border-amber-200"
-  } else if (["rejected", "failed", "cancelled"].includes(s)) {
+  } else if (["rejected", "failed", "cancelled", "high"].includes(s)) {
     cls = "bg-red-50 text-red-700 border-red-200"
   }
   return (
     <span
       className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}
     >
-      {status.replace(/_/g, " ")}
+      {label.replace(/_/g, " ")}
     </span>
   )
 }
+
+/** Dense control-panel table chrome matching the dispatch queue reference */
+export function OpsTableShell({
+  title,
+  badge,
+  tabs,
+  activeTab,
+  onTabChange,
+  footer,
+  children,
+}: {
+  title: string
+  badge?: React.ReactNode
+  tabs?: { id: string; label: string }[]
+  activeTab?: string
+  onTabChange?: (id: string) => void
+  footer?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-control-border bg-white shadow-sm dark:border-control-darkBorder dark:bg-control-darkCard">
+      <div className="flex flex-col gap-3 border-b border-control-border px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between dark:border-navy-800">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-sm font-bold text-navy-900 dark:text-white">{title}</h2>
+          {badge}
+        </div>
+        {tabs && tabs.length > 0 && (
+          <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-navy-950">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onTabChange?.(t.id)}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition ${
+                  activeTab === t.id
+                    ? "bg-white text-amber-700 shadow-sm dark:bg-navy-800 dark:text-amber-400"
+                    : "text-slate-500 hover:text-navy-900 dark:hover:text-white"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="overflow-x-auto">{children}</div>
+      {footer && (
+        <div className="flex items-center justify-between border-t border-control-border bg-slate-50 px-5 py-2.5 font-mono text-[10px] text-slate-400 dark:border-navy-800 dark:bg-navy-950">
+          {footer}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export const opsTh =
+  "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap"
+export const opsTd = "px-4 py-3.5 text-sm align-middle"

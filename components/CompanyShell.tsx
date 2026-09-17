@@ -36,7 +36,9 @@ import {
   Clock3,
   RefreshCcw,
   AlertCircle,
+  Sheet,
   CornerDownLeft,
+  Bell,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 
@@ -60,8 +62,9 @@ type NavItem = {
 }
 
 /**
- * Mobile Sidebar groups for OWNER / MANAGER / COMPANY_ADMIN.
- * EXCLUDED (admin-only): Sheets Sync / Task Sync, Company Config, TidyFlow AI.
+ * Owner/Manager company workspace nav.
+ * Platform-only (excluded): Company Config, TidyFlow AI platform config.
+ * Sheets / Task Sync ARE available to owners (mobile parity + desktop control).
  */
 const GROUPS = [
   { id: "navigate", label: "Navigate" },
@@ -70,18 +73,19 @@ const GROUPS = [
   { id: "account", label: "Account" },
 ] as const
 
-/**
- * Mobile Sidebar parity for OWNER / MANAGER / COMPANY_ADMIN.
- * Not included (admin-only): Sheets Sync / Task Sync, Company Config, TidyFlow AI.
- * Extra ops screens that exist on mobile but sit outside the sidebar are kept
- * under Manage/Finance for desktop usefulness (recurring, issues, hours, expenses, safety).
- */
 const OWNER_NAV: NavItem[] = [
-  // Navigate — mobile
+  // Navigate
   { name: "Home", page: "dashboard", icon: LayoutDashboard, group: "navigate" },
   { name: "Tasks", page: "jobs", icon: ClipboardList, group: "navigate" },
   { name: "Calendar", page: "calendar", icon: Calendar, group: "navigate" },
-  // Manage — mobile (+ desktop ops extras)
+  {
+    name: "Task Sync",
+    page: "sheets",
+    icon: Sheet,
+    group: "navigate",
+    roles: ["OWNER", "MANAGER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
+  // Manage
   { name: "Properties", page: "properties", icon: Building2, group: "manage" },
   { name: "Rota Builder", page: "rota", icon: CalendarDays, group: "manage" },
   {
@@ -103,7 +107,7 @@ const OWNER_NAV: NavItem[] = [
   { name: "Recurring Jobs", page: "recurring-jobs", icon: RefreshCcw, group: "manage" },
   { name: "Issues", page: "issues", icon: AlertCircle, group: "manage" },
   { name: "Working Hours", page: "working-hours", icon: Clock3, group: "manage" },
-  // Finance & reports — mobile
+  // Finance & reports
   { name: "Payroll", page: "payroll", icon: Wallet, group: "finance" },
   { name: "Client Invoices", page: "invoices", icon: FileText, group: "finance" },
   { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
@@ -118,16 +122,9 @@ const OWNER_NAV: NavItem[] = [
   },
   { name: "Compliance", page: "compliance", icon: Shield, group: "finance" },
   { name: "Safety & GPS", page: "safety", icon: MapPin, group: "finance" },
-  {
-    name: "Analytics",
-    page: "reporting",
-    icon: BarChart3,
-    group: "finance",
-    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
-  },
-  // Account — mobile
+  { name: "Analytics", page: "reporting", icon: BarChart3, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"] },
+  { name: "Notifications", page: "notifications", icon: Bell, group: "account" },
   { name: "Profile", page: "profile", icon: Settings, group: "account" },
-  { name: "Settings", page: "settings", icon: Settings, group: "account" },
 ]
 
 export default function CompanyShell({ children }: { children: React.ReactNode }) {

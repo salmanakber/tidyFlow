@@ -56,11 +56,14 @@ export const COMPANY_ROUTE_MAP: Record<string, string> = {
   billing: 'billing',
   integrations: 'integrations',
   compliance: 'compliance',
+  sheets: 'sheets-sync',
+  'task-sync': 'sheets-sync',
+  'sheets-sync': 'sheets-sync',
   settings: 'settings',
   profile: 'profile',
   'checklist-templates': 'checklist-templates',
-  // Intentionally NOT mapped for company workspace (platform admin only):
-  // ai, sheets-sync, company-config, notifications (platform)
+  notifications: 'notifications',
+  // Platform admin only: company-config, ai
 }
 
 export function slugifyCompanyName(name: string): string {

@@ -14,6 +14,9 @@ import {
   Loader2,
   Calendar,
   ClipboardList,
+  Camera,
+  CheckSquare,
+  Clock,
 } from "lucide-react"
 
 export interface JobTask {
@@ -120,7 +123,7 @@ function cleanerLabel(u?: JobCleaner | JobTask["assignedUser"] | null) {
   return n || ("email" in u ? u.email : "") || ""
 }
 
-type Tab = "details" | "schedule"
+type Tab = "details" | "schedule" | "checklist" | "proofs" | "hours"
 
 export default function JobInspectorDrawer({
   open,
@@ -141,6 +144,10 @@ export default function JobInspectorDrawer({
 }) {
   const [tab, setTab] = useState<Tab>("details")
   const [saving, setSaving] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [photos, setPhotos] = useState<any[]>([])
+  const [checklists, setChecklists] = useState<any[]>([])
+  const [timeLogs, setTimeLogs] = useState<any[]>([])
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -168,7 +175,28 @@ export default function JobInspectorDrawer({
         isRecurring: !!task.isRecurring,
         recurringPattern: task.recurringPattern || "weekly",
       })
+      ;(async () => {
+        try {
+          setDetailLoading(true)
+          const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+          const headers = { Authorization: `Bearer ${token}` }
+          const [detailRes, logsRes] = await Promise.all([
+            axios.get(`/api/tasks/${task.id}`, { headers }).catch(() => null),
+            axios.get(`/api/tasks/${task.id}/time-logs`, { headers }).catch(() => null),
+          ])
+          const d = detailRes?.data?.data?.task || detailRes?.data?.data || detailRes?.data
+          setPhotos(Array.isArray(d?.photos) ? d.photos : [])
+          setChecklists(Array.isArray(d?.checklists) ? d.checklists : Array.isArray(d?.checklistItems) ? d.checklistItems : [])
+          const logs = logsRes?.data?.data?.logs || logsRes?.data?.data || []
+          setTimeLogs(Array.isArray(logs) ? logs : [])
+        } finally {
+          setDetailLoading(false)
+        }
+      })()
     } else {
+      setPhotos([])
+      setChecklists([])
+      setTimeLogs([])
       setForm({
         title: "",
         description: "",
@@ -225,6 +253,19 @@ export default function JobInspectorDrawer({
     ? `#JOB-${task.id} · ${task.property?.address || task.title}`
     : "New job dispatch"
 
+  const doneCount = checklists.filter((c) => c.isCompleted || c.completed).length
+  const checklistPct = checklists.length
+    ? Math.round((doneCount / checklists.length) * 100)
+    : 0
+
+  const tabs: { id: Tab; label: string; icon: any; show?: boolean }[] = [
+    { id: "details", label: "Details", icon: ClipboardList },
+    { id: "schedule", label: "Schedule", icon: Calendar },
+    { id: "checklist", label: `SOP (${doneCount}/${checklists.length || 0})`, icon: CheckSquare, show: !!task },
+    { id: "proofs", label: `Proofs (${photos.length})`, icon: Camera, show: !!task },
+    { id: "hours", label: "Hours", icon: Clock, show: !!task },
+  ]
+
   return (
     <>
       <div
@@ -267,27 +308,24 @@ export default function JobInspectorDrawer({
           </button>
         </div>
 
-        <div className="flex gap-6 border-b border-control-border bg-slate-50 px-5 font-mono text-xs font-bold dark:border-navy-800 dark:bg-navy-950">
-          {(
-            [
-              { id: "details" as const, label: "Details", icon: ClipboardList },
-              { id: "schedule" as const, label: "Schedule", icon: Calendar },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 border-b-2 py-3 transition ${
-                tab === t.id
-                  ? "border-amber-600 text-amber-600"
-                  : "border-transparent text-slate-400 hover:text-navy-900 dark:hover:text-white"
-              }`}
-            >
-              <t.icon size={12} />
-              {t.label}
-            </button>
-          ))}
+        <div className="flex gap-4 overflow-x-auto border-b border-control-border bg-slate-50 px-5 font-mono text-xs font-bold dark:border-navy-800 dark:bg-navy-950">
+          {tabs
+            .filter((t) => t.show !== false)
+            .map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`flex shrink-0 items-center gap-1.5 border-b-2 py-3 transition ${
+                  tab === t.id
+                    ? "border-amber-600 text-amber-600"
+                    : "border-transparent text-slate-400 hover:text-navy-900 dark:hover:text-white"
+                }`}
+              >
+                <t.icon size={12} />
+                {t.label}
+              </button>
+            ))}
         </div>
 
         <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
@@ -411,6 +449,138 @@ export default function JobInspectorDrawer({
                 )}
               </>
             )}
+
+            {tab === "checklist" && (
+              <div className="space-y-3">
+                {detailLoading ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono dark:border-navy-800 dark:bg-navy-950">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase text-slate-400">SOP progress</p>
+                        <p className="text-sm font-bold text-navy-900 dark:text-white">
+                          {doneCount} / {checklists.length} complete
+                        </p>
+                      </div>
+                      <span className="rounded bg-amber-600 px-2.5 py-1 text-xs font-bold text-white">
+                        {checklistPct}%
+                      </span>
+                    </div>
+                    {checklists.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-slate-400">No checklist items yet</p>
+                    ) : (
+                      checklists.map((c) => {
+                        const done = !!(c.isCompleted || c.completed)
+                        return (
+                          <div
+                            key={c.id}
+                            className={`flex items-center justify-between rounded-lg border p-3 ${
+                              done
+                                ? "border-slate-200 bg-white dark:border-navy-800"
+                                : "border-amber-500/40 bg-amber-50/30"
+                            }`}
+                          >
+                            <span
+                              className={`text-sm font-medium ${
+                                done ? "text-slate-400 line-through" : "text-navy-900 dark:text-white"
+                              }`}
+                            >
+                              {c.title || c.name || `Item #${c.id}`}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              {done ? "DONE" : "OPEN"}
+                            </span>
+                          </div>
+                        )
+                      })
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {tab === "proofs" && (
+              <div className="space-y-3">
+                {detailLoading ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                  </div>
+                ) : photos.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-400">No photo proofs yet</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    {photos.map((p) => (
+                      <div
+                        key={p.id}
+                        className="overflow-hidden rounded-lg border border-control-border dark:border-navy-800"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={p.url || p.imageUrl || p.secureUrl}
+                          alt=""
+                          className="h-28 w-full object-cover"
+                        />
+                        <div className="flex justify-between bg-navy-950 px-2 py-1.5 font-mono text-[10px] text-white">
+                          <span>{(p.type || p.photoType || "PHOTO").toString().toUpperCase()}</span>
+                          <span className="text-amber-400">
+                            {p.createdAt
+                              ? new Date(p.createdAt).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : ""}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === "hours" && (
+              <div className="space-y-2">
+                {detailLoading ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                  </div>
+                ) : timeLogs.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-400">No time logs yet</p>
+                ) : (
+                  timeLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="rounded-lg border border-control-border p-3 dark:border-navy-800"
+                    >
+                      <div className="flex justify-between text-xs">
+                        <span className="font-bold text-navy-900 dark:text-white">
+                          {[log.user?.firstName, log.user?.lastName].filter(Boolean).join(" ") ||
+                            `Session #${log.id}`}
+                        </span>
+                        <span className="font-mono text-amber-700">
+                          {log.durationMinutes != null
+                            ? `${log.durationMinutes} min`
+                            : log.hours != null
+                              ? `${log.hours}h`
+                              : "—"}
+                        </span>
+                      </div>
+                      <p className="mt-1 font-mono text-[10px] text-slate-400">
+                        {log.startedAt || log.startTime
+                          ? new Date(log.startedAt || log.startTime).toLocaleString()
+                          : ""}
+                        {log.endedAt || log.endTime
+                          ? ` → ${new Date(log.endedAt || log.endTime).toLocaleString()}`
+                          : ""}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t border-control-border bg-slate-50 p-4 dark:border-navy-800 dark:bg-navy-950">
@@ -421,14 +591,16 @@ export default function JobInspectorDrawer({
             >
               Close
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-1.5 font-mono text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700 disabled:opacity-50"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-              {task ? "Save changes" : "Create job"}
-            </button>
+            {(tab === "details" || tab === "schedule") && (
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-1.5 font-mono text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700 disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                {task ? "Save changes" : "Create job"}
+              </button>
+            )}
           </div>
         </form>
       </aside>

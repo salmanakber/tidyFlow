@@ -1,264 +1,176 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
-import { Bell, Send, Users, Building2, CheckCircle, XCircle } from "lucide-react"
-import CompanySelector from "@/components/CompanySelector"
-
-interface Company {
-  id: number
-  name: string
-}
+import {
+  OpsPageHeader,
+  OpsRefreshButton,
+  OpsFlash,
+  OpsEmpty,
+  OpsBadge,
+  OpsTableShell,
+  opsTh,
+  opsTd,
+} from "@/components/ops/OpsChrome"
+import { formatDate } from "@/lib/admin-session"
+import { Bell, Check, Trash2 } from "lucide-react"
 
 export default function NotificationsPage() {
-  const [loading, setLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
+  const [items, setItems] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [userRole, setUserRole] = useState<string>("")
-  const [companies, setCompanies] = useState<Company[]>([])
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null)
-  
-  const [formData, setFormData] = useState({
-    title: "",
-    message: "",
-    targetRole: "all",
-    companyId: null as number | null,
-    userIds: [] as number[],
+  const [toast, setToast] = useState("")
+
+  const headers = () => ({
+    Authorization: `Bearer ${localStorage.getItem("authToken") || sessionStorage.getItem("authToken")}`,
   })
 
-  useEffect(() => {
-    loadUserRole()
-    if (userRole === "SUPER_ADMIN" || userRole === "OWNER" || userRole === "DEVELOPER") {
-      loadCompanies()
-    }
-  }, [userRole])
-
-  const loadUserRole = async () => {
+  const load = async () => {
     try {
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
-      const response = await axios.get("/api/auth/me", {
-        headers: { Authorization: `Bearer ${token}` },
+      setLoading(true)
+      setError("")
+      const res = await axios.get("/api/notifications", {
+        headers: headers(),
+        params: { limit: 100 },
       })
-      if (response.data.success) {
-        setUserRole(response.data.data.user.role)
-        if (response.data.data.user.companyId) {
-          setSelectedCompanyId(response.data.data.user.companyId)
-          setFormData(prev => ({ ...prev, companyId: response.data.data.user.companyId }))
-        }
-      }
-    } catch (error) {
-      console.error("Error loading user:", error)
-    }
-  }
-
-  const loadCompanies = async () => {
-    try {
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
-      const response = await axios.get("/api/admin/companies", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (response.data.success) {
-        setCompanies(response.data.data)
-      }
-    } catch (error) {
-      console.error("Error loading companies:", error)
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-    setSuccess(false)
-    setLoading(true)
-
-    try {
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
-      
-      const payload: any = {
-        title: formData.title,
-        message: formData.message,
-        targetRole: formData.targetRole !== "all" ? formData.targetRole : null,
-      }
-
-      if (userRole === "SUPER_ADMIN" || userRole === "OWNER" || userRole === "DEVELOPER") {
-        // Only include companyId if a specific company is selected (not null/undefined/empty)
-        if (formData.companyId != null) {
-          payload.companyId = Number(formData.companyId); // Ensure it's a number
-        } else {
-          // Explicitly don't include companyId to send to all companies
-          console.log('No companyId - sending to all companies')
-        }
-      }
-
-      if (formData.userIds.length > 0) {
-        payload.userIds = formData.userIds
-      }
-
-      const response = await axios.post(
-        "/api/admin/notifications/send",
-        payload,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      )
-
-      if (response.data.success) {
-        setSuccess(true)
-        setFormData({
-          title: "",
-          message: "",
-          targetRole: "all",
-          companyId: selectedCompanyId,
-          userIds: [],
-        })
-        setTimeout(() => setSuccess(false), 5000)
-      } else {
-        setError(response.data.error || "Failed to send notifications")
-      }
-    } catch (error: any) {
-      setError(error.response?.data?.error || error.message || "Failed to send notifications")
+      if (res.data.success) {
+        const raw = res.data.data
+        setItems(Array.isArray(raw) ? raw : raw?.notifications || [])
+      } else setError(res.data.message || "Failed")
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed to load notifications")
+      setItems([])
     } finally {
       setLoading(false)
     }
   }
 
-  const canSelectCompany = userRole === "SUPER_ADMIN" || userRole === "OWNER" || userRole === "DEVELOPER"
+  useEffect(() => {
+    load()
+  }, [])
+
+  const markRead = async (id: number) => {
+    try {
+      await axios.post(`/api/notifications/${id}/read`, {}, { headers: headers() })
+      setToast("Marked read")
+      await load()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed")
+    }
+  }
+
+  const remove = async (id: number) => {
+    try {
+      await axios.delete(`/api/notifications/${id}`, { headers: headers() })
+      setToast("Deleted")
+      await load()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed")
+    }
+  }
+
+  const unread = items.filter((n) => !n.readAt && n.status !== "read").length
 
   return (
     <AdminLayout>
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
-              <Bell className="text-indigo-600" size={24} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Send Notifications</h1>
-              <p className="text-gray-600 mt-1">Send notifications to users by role or company</p>
-            </div>
-          </div>
-        </div>
+      <div className="space-y-5">
+        <OpsPageHeader
+          eyebrow="Account"
+          title="Notifications"
+          subtitle="Company alerts, job updates, and system messages"
+          actions={<OpsRefreshButton onClick={load} loading={loading} />}
+        />
+        {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+        {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
-        {/* Success Message */}
-        {success && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
-            <CheckCircle className="text-green-600" size={20} />
-            <p className="text-sm text-green-800">Notifications sent successfully!</p>
-          </div>
-        )}
-
-        {/* Error Message */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-            <XCircle className="text-red-600" size={20} />
-            <p className="text-sm text-red-800">{error}</p>
-          </div>
-        )}
-
-        {/* Form */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Company Selector (only for super admins) */}
-            {canSelectCompany && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Company (Optional)
-                </label>
-                <select
-                  value={formData.companyId || ""}
-                  onChange={(e) => {
-                    const companyId = e.target.value ? parseInt(e.target.value) : null
-                    setFormData({ ...formData, companyId })
-                    setSelectedCompanyId(companyId)
-                  }}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
-                  <option value="">All Companies</option>
-                  {companies.map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">Leave empty to send to all companies</p>
-              </div>
-            )}
-
-            {/* Target Role */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Target Role
-              </label>
-              <select
-                value={formData.targetRole}
-                onChange={(e) => setFormData({ ...formData, targetRole: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                required
-              >
-                <option value="all">All Roles</option>
-                <option value="OWNER">Owner</option>
-                <option value="COMPANY_ADMIN">Company Admin</option>
-                <option value="MANAGER">Manager</option>
-                <option value="CLEANER">Cleaner</option>
-              </select>
-            </div>
-
-            {/* Title */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Title <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="Enter notification title"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-
-            {/* Message */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Message <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                required
-                value={formData.message}
-                onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                placeholder="Enter notification message"
-                rows={6}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-
-            {/* Submit Button */}
-            <div className="pt-6 border-t border-gray-200">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send size={18} />
-                    Send Notifications
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        </div>
+        <OpsTableShell
+          title="Inbox"
+          badge={
+            <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+              {unread} unread
+            </span>
+          }
+          footer={<span>OWNER ALERT FEED</span>}
+        >
+          {loading ? (
+            <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          ) : items.length === 0 ? (
+            <OpsEmpty message="No notifications yet" />
+          ) : (
+            <table className="w-full text-left">
+              <thead className="border-b border-control-border bg-slate-50 dark:bg-navy-950">
+                <tr>
+                  <th className={opsTh}>Alert</th>
+                  <th className={opsTh}>Type</th>
+                  <th className={opsTh}>When</th>
+                  <th className={opsTh}>Status</th>
+                  <th className={`${opsTh} text-right`}>Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                {items.map((n) => {
+                  const isUnread = !n.readAt && n.status !== "read"
+                  return (
+                    <tr
+                      key={n.id}
+                      className={isUnread ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}
+                    >
+                      <td className={opsTd}>
+                        <div className="flex items-start gap-2">
+                          <Bell
+                            size={14}
+                            className={isUnread ? "mt-0.5 text-amber-600" : "mt-0.5 text-slate-300"}
+                          />
+                          <div>
+                            <p className="font-bold text-navy-900 dark:text-white">
+                              {n.title || n.message?.slice(0, 60) || `Alert #${n.id}`}
+                            </p>
+                            <p className="mt-0.5 max-w-md text-xs text-slate-500 line-clamp-2">
+                              {n.body || n.message || n.content || ""}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className={`${opsTd} font-mono text-[10px] uppercase text-slate-500`}>
+                        {n.type || "general"}
+                      </td>
+                      <td className={`${opsTd} text-xs text-slate-500`}>
+                        {formatDate(n.createdAt)}
+                      </td>
+                      <td className={opsTd}>
+                        <OpsBadge status={isUnread ? "pending" : "read"} />
+                      </td>
+                      <td className={`${opsTd} text-right`}>
+                        <div className="inline-flex gap-1">
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => markRead(n.id)}
+                              className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50"
+                              title="Mark read"
+                            >
+                              <Check size={14} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => remove(n.id)}
+                            className="rounded-lg p-1.5 text-red-600 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </OpsTableShell>
       </div>
     </AdminLayout>
   )
 }
-

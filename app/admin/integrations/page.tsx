@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
 import {
@@ -10,13 +11,24 @@ import {
   OpsFlash,
   OpsPrimaryButton,
 } from "@/components/ops/OpsChrome"
-import { CheckCircle2, XCircle, ExternalLink } from "lucide-react"
+import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
+import {
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  Sheet,
+  ArrowRight,
+  Loader2,
+} from "lucide-react"
 
 export default function IntegrationsPage() {
+  const { href: wsHref } = useCompanyWorkspace()
   const [qb, setQb] = useState<any>(null)
+  const [sheets, setSheets] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [toast, setToast] = useState("")
+  const [qbWorking, setQbWorking] = useState(false)
 
   const headers = () => ({
     Authorization: `Bearer ${localStorage.getItem("authToken") || sessionStorage.getItem("authToken")}`,
@@ -26,14 +38,18 @@ export default function IntegrationsPage() {
     try {
       setLoading(true)
       setError("")
-      // Mobile parity: GET /api/integrations/quickbooks
-      const res = await axios.get("/api/integrations/quickbooks", { headers: headers() })
-      if (res?.data?.success) setQb(res.data.data)
-      else if (res?.data) setQb(res.data.data || res.data)
+      const [qbRes, sheetRes] = await Promise.all([
+        axios.get("/api/integrations/quickbooks", { headers: headers() }).catch(() => null),
+        axios.get("/api/company/google-sheet", { headers: headers() }).catch(() => null),
+      ])
+      if (qbRes?.data?.success) setQb(qbRes.data.data)
+      else if (qbRes?.data) setQb(qbRes.data.data || qbRes.data)
       else setQb(null)
+
+      if (sheetRes?.data?.success) setSheets(sheetRes.data.data)
+      else setSheets(null)
     } catch (e: any) {
       setError(e.response?.data?.message || "Could not load integrations")
-      setQb(null)
     } finally {
       setLoading(false)
     }
@@ -43,8 +59,9 @@ export default function IntegrationsPage() {
     load()
   }, [])
 
-  const connect = async () => {
+  const connectQb = async () => {
     try {
+      setQbWorking(true)
       const redirect =
         typeof window !== "undefined"
           ? `${window.location.origin}${window.location.pathname}`
@@ -62,13 +79,14 @@ export default function IntegrationsPage() {
       else setError("Connect URL not available")
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to start QuickBooks connect")
+    } finally {
+      setQbWorking(false)
     }
   }
 
-  const disconnect = async () => {
+  const disconnectQb = async () => {
     if (!confirm("Disconnect QuickBooks?")) return
     try {
-      // Mobile parity: DELETE /api/integrations/quickbooks
       await axios.delete("/api/integrations/quickbooks", { headers: headers() })
       setToast("QuickBooks disconnected")
       await load()
@@ -77,7 +95,8 @@ export default function IntegrationsPage() {
     }
   }
 
-  const connected = !!(qb?.connected || qb?.isConnected || qb?.realmId || qb?.companyName)
+  const qbConnected = !!(qb?.connected || qb?.isConnected || qb?.realmId || qb?.companyName)
+  const sheetsConnected = !!(sheets?.connected || sheets?.connection)
 
   return (
     <AdminLayout>
@@ -85,7 +104,7 @@ export default function IntegrationsPage() {
         <OpsPageHeader
           eyebrow="Finance"
           title="Integrations"
-          subtitle="Connect accounting tools for your company"
+          subtitle="Connect accounting and spreadsheet tools for your company"
           actions={<OpsRefreshButton onClick={load} loading={loading} />}
         />
         {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
@@ -108,7 +127,7 @@ export default function IntegrationsPage() {
                   <p className="mt-1 text-xs font-medium text-slate-400">{qb.companyName}</p>
                 )}
                 <div className="mt-2 flex items-center gap-1.5 text-xs font-bold">
-                  {connected ? (
+                  {qbConnected ? (
                     <>
                       <CheckCircle2 size={14} className="text-emerald-600" />
                       <span className="text-emerald-700">Connected</span>
@@ -123,16 +142,17 @@ export default function IntegrationsPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              {connected ? (
+              {qbConnected ? (
                 <button
-                  onClick={disconnect}
+                  onClick={disconnectQb}
                   className="h-9 rounded-lg border border-red-200 px-3 text-xs font-bold text-red-600 hover:bg-red-50"
                 >
                   Disconnect
                 </button>
               ) : (
-                <OpsPrimaryButton onClick={connect} disabled={loading}>
-                  <ExternalLink size={14} /> Connect QuickBooks
+                <OpsPrimaryButton onClick={connectQb} disabled={loading || qbWorking}>
+                  {qbWorking ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                  Connect QuickBooks
                 </OpsPrimaryButton>
               )}
             </div>
@@ -140,11 +160,44 @@ export default function IntegrationsPage() {
         </OpsCard>
 
         <OpsCard>
-          <h3 className="text-sm font-bold text-navy-900 dark:text-white">Google Sheets</h3>
-          <p className="mt-2 text-sm text-slate-500">
-            Spreadsheet sync and platform Google connections are managed by TidyFlow platform
-            administrators — not from the company workspace.
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                <Sheet size={22} />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-navy-900 dark:text-white">Google Sheets</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Connect your master Properties + Tasks workbook. Verify tabs, sync on demand, and
+                  manage the service account from the control center.
+                </p>
+                {sheets?.connection?.propertiesTab && (
+                  <p className="mt-1 font-mono text-[11px] text-slate-400">
+                    {sheets.connection.propertiesTab} · {sheets.connection.tasksTab}
+                  </p>
+                )}
+                <div className="mt-2 flex items-center gap-1.5 text-xs font-bold">
+                  {sheetsConnected ? (
+                    <>
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                      <span className="text-emerald-700">Connected</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle size={14} className="text-slate-400" />
+                      <span className="text-slate-500">Not connected</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <Link
+              href={wsHref("sheets")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700"
+            >
+              {sheetsConnected ? "Manage sheets" : "Connect sheet"} <ArrowRight size={14} />
+            </Link>
+          </div>
         </OpsCard>
       </div>
     </AdminLayout>
