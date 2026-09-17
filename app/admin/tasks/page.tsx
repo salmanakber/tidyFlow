@@ -12,6 +12,7 @@ import {
   OpsPrimaryButton,
   OpsFlash,
   OpsEmpty,
+  OpsSkeleton,
 } from "@/components/ops/OpsChrome"
 import JobInspectorDrawer, {
   JobStatusBadge,
@@ -20,6 +21,7 @@ import JobInspectorDrawer, {
   type JobProperty,
   type JobCleaner,
 } from "@/components/ops/JobInspectorDrawer"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   Plus,
   Search,
@@ -70,7 +72,7 @@ function TasksContent() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [selected, setSelected] = useState<JobTask | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useUrlQueryState("status", "all")
   const [propertyFilter, setPropertyFilter] = useState("all")
 
   const load = async () => {
@@ -112,10 +114,21 @@ function TasksContent() {
   useEffect(() => {
     const create = searchParams?.get("create")
     const id = searchParams?.get("id")
+    const smart = searchParams?.get("smart")
     if (create === "1") {
       setSelected(null)
       setDrawerOpen(true)
       router.replace(window.location.pathname, { scroll: false })
+    } else if (smart === "1" && tasks.length) {
+      const unassigned = tasks.find((t) => !t.assignedUser)
+      if (unassigned) {
+        setSelected(unassigned)
+        setDrawerOpen(true)
+        setStatusFilter("unassigned")
+      } else {
+        setStatusFilter("unassigned")
+      }
+      router.replace(window.location.pathname + "?status=unassigned", { scroll: false })
     } else if (id && tasks.length) {
       const found = tasks.find((t) => String(t.id) === id)
       if (found) {
@@ -124,7 +137,7 @@ function TasksContent() {
         router.replace(window.location.pathname, { scroll: false })
       }
     }
-  }, [searchParams, tasks, router])
+  }, [searchParams, tasks, router, setStatusFilter])
 
   const stats = useMemo(
     () => ({
@@ -143,7 +156,12 @@ function TasksContent() {
       task.title.toLowerCase().includes(q) ||
       (task.property?.address || "").toLowerCase().includes(q) ||
       String(task.id).includes(q)
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "unassigned"
+          ? !task.assignedUser
+          : task.status === statusFilter
     const matchesProperty =
       propertyFilter === "all" || String(task.property?.id) === propertyFilter
     return matchesSearch && matchesStatus && matchesProperty
@@ -226,6 +244,7 @@ function TasksContent() {
                 className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold dark:border-navy-800 dark:bg-navy-950"
               >
                 <option value="all">All statuses</option>
+                <option value="unassigned">Unassigned</option>
                 {Object.entries(JOB_STATUS_CONFIG).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v.label}
@@ -272,12 +291,14 @@ function TasksContent() {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-slate-400">
-              <Loader2 className="animate-spin text-amber-600" size={28} />
-            </div>
+            <OpsSkeleton rows={8} cols={5} />
           ) : viewMode === "list" ? (
             filtered.length === 0 ? (
-              <OpsEmpty message="No jobs match your filters" />
+              <OpsEmpty
+                message="No jobs match your filters"
+                ctaLabel="New job"
+                onCta={openCreate}
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">

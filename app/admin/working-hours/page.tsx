@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, adminPatch, formatDate } from "@/lib/admin-session"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import { Check, X, Loader2 } from "lucide-react"
 import {
   OpsPageHeader,
@@ -14,6 +15,7 @@ import {
   OpsKpi,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -33,7 +35,8 @@ export default function WorkingHoursPage() {
 }
 
 function Content() {
-  const [tab, setTab] = useState<Tab>("hours")
+  const [tab, setTabRaw] = useUrlQueryState("status", "hours")
+  const setTab = (id: string) => setTabRaw(id === "edits" ? "edits" : "hours")
   const [hours, setHours] = useState<any[]>([])
   const [edits, setEdits] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,7 +120,8 @@ function Content() {
   const safeHours = Array.isArray(hours) ? hours : []
   const safeEdits = Array.isArray(edits) ? edits : []
   const pendingHours = safeHours.filter((h) => h.status === "pending").length
-  const activeList = tab === "hours" ? safeHours : safeEdits
+  const activeTab = (tab === "edits" ? "edits" : "hours") as Tab
+  const activeList = activeTab === "hours" ? safeHours : safeEdits
   const pageSlice = activeList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
@@ -138,7 +142,8 @@ function Content() {
       </div>
 
       <OpsTableShell
-        title={tab === "hours" ? "Hour submissions" : "Edit requests"}
+        title={activeTab === "hours" ? "Hour submissions" : "Edit requests"}
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {activeList.length}
@@ -148,12 +153,12 @@ function Content() {
           { id: "hours", label: "Submissions" },
           { id: "edits", label: "Edit requests" },
         ]}
-        activeTab={tab}
-        onTabChange={(id) => setTab(id as Tab)}
+        activeTab={activeTab}
+        onTabChange={setTab}
       >
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
-        ) : tab === "hours" ? (
+          <OpsSkeleton rows={6} cols={6} />
+        ) : activeTab === "hours" ? (
           safeHours.length === 0 ? (
             <OpsEmpty message="No records in the last 30 days" />
           ) : (

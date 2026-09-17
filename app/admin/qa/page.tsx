@@ -14,6 +14,7 @@ import {
   OpsCard,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -120,9 +121,7 @@ function Content() {
             Cleaner combined scores
           </h2>
           {loading ? (
-            <div className="flex h-64 items-center justify-center text-sm text-slate-400">
-              Loading…
-            </div>
+            <OpsSkeleton rows={5} cols={4} />
           ) : chartData.length === 0 ? (
             <OpsEmpty message="No performance data yet" />
           ) : (
@@ -174,6 +173,7 @@ function Content() {
 
       <OpsTableShell
         title="Recent QA scores"
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {safeScores.length}
@@ -181,7 +181,7 @@ function Content() {
         }
       >
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          <OpsSkeleton rows={6} cols={6} />
         ) : safeScores.length === 0 ? (
           <OpsEmpty message="No QA scores recorded" />
         ) : (

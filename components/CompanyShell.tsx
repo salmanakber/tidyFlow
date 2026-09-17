@@ -39,8 +39,11 @@ import {
   Sheet,
   CornerDownLeft,
   Bell,
+  Sparkles,
+  Crosshair,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
+import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 
 interface User {
   id: number
@@ -107,12 +110,19 @@ const OWNER_NAV: NavItem[] = [
   { name: "Recurring Jobs", page: "recurring-jobs", icon: RefreshCcw, group: "manage" },
   { name: "Issues", page: "issues", icon: AlertCircle, group: "manage" },
   { name: "Working Hours", page: "working-hours", icon: Clock3, group: "manage" },
+  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "manage" },
   // Finance & reports
   { name: "Payroll", page: "payroll", icon: Wallet, group: "finance" },
   { name: "Client Invoices", page: "invoices", icon: FileText, group: "finance" },
   { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
   { name: "Integrations", page: "integrations", icon: Puzzle, group: "finance" },
-  { name: "Billing", page: "billing", icon: CreditCard, group: "finance" },
+  {
+    name: "Billing",
+    page: "billing",
+    icon: CreditCard,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   {
     name: "QA Performance",
     page: "qa",
@@ -121,11 +131,14 @@ const OWNER_NAV: NavItem[] = [
     roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
   },
   { name: "Compliance", page: "compliance", icon: Shield, group: "finance" },
-  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "finance" },
   { name: "Analytics", page: "reporting", icon: BarChart3, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"] },
   { name: "Notifications", page: "notifications", icon: Bell, group: "account" },
   { name: "Profile", page: "profile", icon: Settings, group: "account" },
 ]
+
+type CmdEntry =
+  | { kind: "action"; id: string; name: string; href: string; icon: NavItem["icon"] }
+  | { kind: "page"; id: string; name: string; href: string; icon: NavItem["icon"]; page: string }
 
 export default function CompanyShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -224,31 +237,85 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
     })
   }, [user])
 
-  const filtered = search
-    ? navigation.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()))
-    : navigation
+  const actionCommands = useMemo((): CmdEntry[] => {
+    return [
+      {
+        kind: "action",
+        id: "smart-assign",
+        name: "Smart assign / AI recommend",
+        href: `${wsHref("jobs")}?smart=1`,
+        icon: Sparkles,
+      },
+      {
+        kind: "action",
+        id: "live-map",
+        name: "Open live map / GPS",
+        href: wsHref("safety"),
+        icon: MapPin,
+      },
+      {
+        kind: "action",
+        id: "unassigned",
+        name: "Today unassigned",
+        href: `${wsHref("jobs")}?status=unassigned`,
+        icon: Crosshair,
+      },
+      {
+        kind: "action",
+        id: "create-job",
+        name: "Create job",
+        href: `${wsHref("jobs")}?create=1`,
+        icon: Plus,
+      },
+    ]
+  }, [wsHref])
+
+  const pageCommands = useMemo((): CmdEntry[] => {
+    return navigation.map((item) => ({
+      kind: "page" as const,
+      id: `page-${item.page}`,
+      name: item.name,
+      href: wsHref(item.page),
+      icon: item.icon,
+      page: item.page,
+    }))
+  }, [navigation, wsHref])
+
+  const cmdEntries = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const match = (name: string) => !q || name.toLowerCase().includes(q)
+    return {
+      actions: actionCommands.filter((a) => match(a.name)),
+      pages: pageCommands.filter((p) => match(p.name)),
+    }
+  }, [actionCommands, pageCommands, search])
+
+  const flatCmd = useMemo(
+    () => [...cmdEntries.actions, ...cmdEntries.pages],
+    [cmdEntries]
+  )
 
   useEffect(() => {
     setCmdIndex(0)
   }, [search])
 
-  const jumpTo = (page: string) => {
+  const jumpToHref = (href: string) => {
     closeCommandPalette()
-    router.push(wsHref(page))
+    router.push(href)
   }
 
   const onCmdKeyDown = (e: React.KeyboardEvent) => {
-    if (!filtered.length) return
+    if (!flatCmd.length) return
     if (e.key === "ArrowDown") {
       e.preventDefault()
-      setCmdIndex((i) => (i + 1) % filtered.length)
+      setCmdIndex((i) => (i + 1) % flatCmd.length)
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
-      setCmdIndex((i) => (i - 1 + filtered.length) % filtered.length)
+      setCmdIndex((i) => (i - 1 + flatCmd.length) % flatCmd.length)
     } else if (e.key === "Enter") {
       e.preventDefault()
-      const item = filtered[cmdIndex]
-      if (item) jumpTo(item.page)
+      const item = flatCmd[cmdIndex]
+      if (item) jumpToHref(item.href)
     }
   }
 
@@ -308,11 +375,11 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-navy-900 bg-navy-950 text-slate-300 transition-transform lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-amber-900/30 bg-navy-950 text-slate-300 transition-transform lg:static lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-16 items-center justify-between border-b border-navy-900 px-4">
+        <div className="flex h-16 items-center justify-between border-b border-amber-900/30 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 shadow-amber-glow">
               <Layers className="h-5 w-5 text-navy-950" strokeWidth={2.5} />
@@ -336,7 +403,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           </button>
         </div>
 
-        <div className="flex items-center justify-between border-b border-navy-900 bg-navy-900/80 px-4 py-2 font-mono text-[11px]">
+        <div className="flex items-center justify-between border-b border-amber-900/30 bg-navy-900/80 px-4 py-2 font-mono text-[11px]">
           <div className="flex items-center gap-1.5">
             <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
             <span className="text-slate-300">LIVE</span>
@@ -380,7 +447,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           ))}
         </nav>
 
-        <div className="flex items-center justify-between gap-2 border-t border-navy-900 p-3">
+        <div className="flex items-center justify-between gap-2 border-t border-amber-900/30 p-3">
           <div className="flex min-w-0 items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded border border-navy-700 bg-navy-800 text-xs font-bold text-amber-400">
               {user?.profileImage ? (
@@ -405,7 +472,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-20 flex h-16 flex-shrink-0 items-center justify-between border-b border-control-border bg-white px-4 dark:border-control-darkBorder dark:bg-control-darkCard sm:px-6">
+        <header className="z-20 flex h-16 flex-shrink-0 items-center justify-between border-b border-control-border bg-white px-4 dark:border-amber-900/30 dark:bg-control-darkCard sm:px-6">
           <div className="flex items-center gap-3">
             <button
               className="rounded-md p-2 text-slate-500 lg:hidden"
@@ -460,7 +527,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
               {userMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setUserMenu(false)} />
-                  <div className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-control-border bg-white p-2 shadow-lg dark:border-control-darkBorder dark:bg-control-darkCard">
+                  <div className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-control-border bg-white p-2 shadow-lg dark:border-amber-900/30 dark:bg-control-darkCard">
                     <Link
                       href={wsHref("profile")}
                       onClick={() => setUserMenu(false)}
@@ -482,7 +549,10 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto max-w-[1600px] space-y-6">{children}</div>
+          <div className="mx-auto max-w-[1600px] space-y-6">
+            <OpsStatusLegend compact />
+            {children}
+          </div>
         </main>
       </div>
 
@@ -494,15 +564,15 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
             onClick={closeCommandPalette}
             aria-hidden
           />
-          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-control-border bg-white shadow-2xl dark:border-control-darkBorder dark:bg-control-darkCard">
-            <div className="flex items-center gap-2 border-b border-control-border px-4 dark:border-navy-800">
+          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-control-border bg-white shadow-2xl dark:border-amber-900/30 dark:bg-control-darkCard">
+            <div className="flex items-center gap-2 border-b border-control-border px-4 dark:border-amber-900/30">
               <Search size={16} className="text-amber-600" />
               <input
                 ref={cmdInputRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={onCmdKeyDown}
-                placeholder="Jump to page…"
+                placeholder="Actions or jump to page…"
                 className="w-full bg-transparent py-3.5 text-sm font-medium text-navy-900 outline-none placeholder:text-slate-400 dark:text-white"
               />
               <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 sm:inline dark:border-navy-800 dark:bg-navy-950">
@@ -510,39 +580,84 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
               </kbd>
             </div>
             <div className="max-h-80 overflow-y-auto py-2">
-              {filtered.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-slate-400">No matching pages</p>
+              {flatCmd.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-400">No matches</p>
               ) : (
-                filtered.map((item, idx) => {
-                  const active = idx === cmdIndex
-                  return (
-                    <button
-                      key={item.page}
-                      type="button"
-                      onMouseEnter={() => setCmdIndex(idx)}
-                      onClick={() => jumpTo(item.page)}
-                      className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
-                        active
-                          ? "bg-amber-50 text-navy-900 dark:bg-amber-950/30 dark:text-white"
-                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-navy-900"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2.5 font-semibold">
-                        <item.icon
-                          size={15}
-                          className={active ? "text-amber-600" : "text-slate-400"}
-                        />
-                        {item.name}
-                      </span>
-                      {active && (
-                        <CornerDownLeft size={14} className="text-amber-600" />
-                      )}
-                    </button>
-                  )
-                })
+                <>
+                  {cmdEntries.actions.length > 0 && (
+                    <div className="mb-1">
+                      <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Actions
+                      </div>
+                      {cmdEntries.actions.map((item) => {
+                        const idx = flatCmd.indexOf(item)
+                        const active = idx === cmdIndex
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onMouseEnter={() => setCmdIndex(idx)}
+                            onClick={() => jumpToHref(item.href)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
+                              active
+                                ? "bg-amber-50 text-navy-900 dark:bg-amber-950/30 dark:text-white"
+                                : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-navy-900"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2.5 font-semibold">
+                              <item.icon
+                                size={15}
+                                className={active ? "text-amber-600" : "text-slate-400"}
+                              />
+                              {item.name}
+                            </span>
+                            {active && (
+                              <CornerDownLeft size={14} className="text-amber-600" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {cmdEntries.pages.length > 0 && (
+                    <div>
+                      <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Pages
+                      </div>
+                      {cmdEntries.pages.map((item) => {
+                        const idx = flatCmd.indexOf(item)
+                        const active = idx === cmdIndex
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onMouseEnter={() => setCmdIndex(idx)}
+                            onClick={() => jumpToHref(item.href)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
+                              active
+                                ? "bg-amber-50 text-navy-900 dark:bg-amber-950/30 dark:text-white"
+                                : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-navy-900"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2.5 font-semibold">
+                              <item.icon
+                                size={15}
+                                className={active ? "text-amber-600" : "text-slate-400"}
+                              />
+                              {item.name}
+                            </span>
+                            {active && (
+                              <CornerDownLeft size={14} className="text-amber-600" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
-            <div className="flex items-center gap-3 border-t border-control-border bg-slate-50 px-4 py-2 font-mono text-[10px] text-slate-400 dark:border-navy-800 dark:bg-navy-950">
+            <div className="flex items-center gap-3 border-t border-control-border bg-slate-50 px-4 py-2 font-mono text-[10px] text-slate-400 dark:border-amber-900/30 dark:bg-navy-950">
               <span>↑↓ navigate</span>
               <span>↵ open</span>
               <span className="ml-auto">esc close</span>

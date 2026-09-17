@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, formatDate, formatMoney } from "@/lib/admin-session"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   Wallet,
   AlertCircle,
@@ -22,6 +23,7 @@ import {
   OpsCard,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -82,7 +84,7 @@ function PayrollContent() {
   )
   const [payrollType, setPayrollType] = useState<"hourly" | "fixed">("hourly")
   const [actionId, setActionId] = useState<number | null>(null)
-  const [tab, setTab] = useState("all")
+  const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
 
   const load = async () => {
@@ -295,6 +297,7 @@ function PayrollContent() {
 
       <OpsTableShell
         title="Payroll records"
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {filtered.length}
@@ -310,11 +313,7 @@ function PayrollContent() {
         onTabChange={setTab}
       >
         {loading ? (
-          <div className="space-y-3 p-6 animate-pulse">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-10 rounded bg-slate-100 dark:bg-navy-900" />
-            ))}
-          </div>
+          <OpsSkeleton rows={6} cols={6} />
         ) : filtered.length === 0 ? (
           <OpsEmpty message="No payroll records for this month" />
         ) : (

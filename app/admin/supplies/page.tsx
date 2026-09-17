@@ -9,6 +9,7 @@ import {
   adminDelete,
   formatMoney,
 } from "@/lib/admin-session"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   OpsPageHeader,
   OpsCard,
@@ -19,6 +20,7 @@ import {
   OpsEmpty,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -58,7 +60,7 @@ function Content() {
   const [toast, setToast] = useState("")
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState("all")
+  const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
   const [form, setForm] = useState({
     name: "",
@@ -241,6 +243,7 @@ function Content() {
 
       <OpsTableShell
         title="Supply inventory"
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {filtered.length}
@@ -255,9 +258,13 @@ function Content() {
         onTabChange={setTab}
       >
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          <OpsSkeleton rows={6} cols={6} />
         ) : filtered.length === 0 ? (
-          <OpsEmpty message="No supply items yet" />
+          <OpsEmpty
+            message="No supply items yet"
+            ctaLabel="Add item"
+            onCta={() => setShowForm(true)}
+          />
         ) : (
           <>
             <table className="w-full text-left">

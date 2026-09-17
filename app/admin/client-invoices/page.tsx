@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, adminPatch, formatDate, formatMoney } from "@/lib/admin-session"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import { FileText, Loader2, Send, Plus } from "lucide-react"
 import {
   OpsPageHeader,
@@ -16,6 +17,7 @@ import {
   OpsCard,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -42,7 +44,7 @@ function Content() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([])
   const [creating, setCreating] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
-  const [tab, setTab] = useState("all")
+  const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
 
   const load = async () => {
@@ -233,6 +235,7 @@ function Content() {
 
       <OpsTableShell
         title="Invoices"
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {filtered.length}
@@ -247,9 +250,13 @@ function Content() {
         onTabChange={setTab}
       >
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          <OpsSkeleton rows={6} cols={6} />
         ) : filtered.length === 0 ? (
-          <OpsEmpty message="No client invoices yet" />
+          <OpsEmpty
+            message="No client invoices yet"
+            ctaLabel="Create invoice"
+            onCta={() => setShowCreate(true)}
+          />
         ) : (
           <>
             <table className="w-full text-left">

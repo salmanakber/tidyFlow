@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   OpsPageHeader,
   OpsRefreshButton,
@@ -12,6 +13,7 @@ import {
   OpsBadge,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -26,7 +28,7 @@ export default function NotificationsPage() {
   const [error, setError] = useState("")
   const [toast, setToast] = useState("")
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [tab, setTab] = useState<"all" | "unread" | "read">("all")
+  const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
   const [bulkBusy, setBulkBusy] = useState(false)
 
@@ -199,6 +201,7 @@ export default function NotificationsPage() {
 
         <OpsTableShell
           title="Inbox"
+          stickyHeader
           badge={
             <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
               {unread} unread
@@ -210,11 +213,11 @@ export default function NotificationsPage() {
             { id: "read", label: "Read" },
           ]}
           activeTab={tab}
-          onTabChange={(id) => setTab(id as any)}
+          onTabChange={setTab}
           footer={<span>OWNER ALERT FEED · PAGINATED</span>}
         >
           {loading ? (
-            <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+            <OpsSkeleton rows={6} cols={6} />
           ) : filtered.length === 0 ? (
             <OpsEmpty message="No notifications yet" />
           ) : (

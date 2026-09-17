@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, formatDate, formatMoney } from "@/lib/admin-session"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import { Plus, Loader2, Receipt } from "lucide-react"
 import {
   OpsPageHeader,
@@ -16,6 +17,7 @@ import {
   OpsCard,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -41,8 +43,10 @@ function Content() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ category: "supplies", amount: "", description: "" })
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState("all")
+  const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const load = async () => {
     try {
@@ -70,6 +74,7 @@ function Content() {
 
   useEffect(() => {
     setPage(1)
+    setSelected(new Set())
   }, [tab])
 
   const approve = async (id: number, status: "approved" | "rejected") => {
@@ -84,6 +89,26 @@ function Content() {
       setError(e.response?.data?.message || "Failed")
     } finally {
       setBusyId(null)
+    }
+  }
+
+  const bulkApprove = async () => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    try {
+      setBulkBusy(true)
+      const results = await Promise.allSettled(
+        ids.map((id) => adminPost(`/api/expenses/${id}/approve`, { status: "approved" }))
+      )
+      const failed = results.filter((r) => r.status === "rejected").length
+      setSelected(new Set())
+      if (failed) setError(`${failed} could not be approved`)
+      else setToast(`Approved ${ids.length} expense${ids.length === 1 ? "" : "s"}`)
+      await load()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Bulk approve failed")
+    } finally {
+      setBulkBusy(false)
     }
   }
 
@@ -117,6 +142,28 @@ function Content() {
     .filter((i) => i.status === "pending")
     .reduce((s, i) => s + Number(i.amount || 0), 0)
   const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const pendingOnPage = pageSlice.filter((i) => i.status === "pending")
+  const pendingIds = pendingOnPage.map((i) => i.id as number)
+  const allPendingSelected =
+    pendingIds.length > 0 && pendingIds.every((id) => selected.has(id))
+
+  const toggleOne = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const togglePagePending = () => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allPendingSelected) pendingIds.forEach((id) => next.delete(id))
+      else pendingIds.forEach((id) => next.add(id))
+      return next
+    })
+  }
 
   return (
     <div className="space-y-5">
@@ -196,8 +243,25 @@ function Content() {
         </OpsCard>
       )}
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+          <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+            {selected.size} selected
+          </p>
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={bulkApprove}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold uppercase text-white disabled:opacity-50"
+          >
+            {bulkBusy ? "Approving…" : "Approve selected"}
+          </button>
+        </div>
+      )}
+
       <OpsTableShell
         title="Expense claims"
+        stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
             {filtered.length}
@@ -213,14 +277,28 @@ function Content() {
         onTabChange={setTab}
       >
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          <OpsSkeleton rows={6} cols={7} />
         ) : filtered.length === 0 ? (
-          <OpsEmpty message="No expenses yet" />
+          <OpsEmpty
+            message="No expenses yet"
+            ctaLabel="Add expense"
+            onCta={() => setShowForm(true)}
+          />
         ) : (
           <>
             <table className="w-full text-left">
               <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
                 <tr>
+                  <th className={`${opsTh} w-10`}>
+                    <input
+                      type="checkbox"
+                      checked={allPendingSelected}
+                      onChange={togglePagePending}
+                      disabled={pendingIds.length === 0}
+                      aria-label="Select pending on page"
+                      className="rounded border-slate-300 disabled:opacity-40"
+                    />
+                  </th>
                   <th className={opsTh}>Staff</th>
                   <th className={opsTh}>Category</th>
                   <th className={opsTh}>Amount</th>
@@ -233,6 +311,17 @@ function Content() {
               <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
                 {pageSlice.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50/80">
+                    <td className={opsTd}>
+                      {item.status === "pending" ? (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item.id)}
+                          onChange={() => toggleOne(item.id)}
+                          aria-label={`Select expense ${item.id}`}
+                          className="rounded border-slate-300"
+                        />
+                      ) : null}
+                    </td>
                     <td className={`${opsTd} font-semibold`}>
                       {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") ||
                         "—"}

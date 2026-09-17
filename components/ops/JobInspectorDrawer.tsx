@@ -17,7 +17,16 @@ import {
   Camera,
   CheckSquare,
   Clock,
+  Radio,
 } from "lucide-react"
+import SmartAssignPanel from "@/components/ops/SmartAssignPanel"
+import LiveMapPanel from "@/components/ops/LiveMapPanel"
+import {
+  fetchLiveCleaners,
+  fetchTaskLocationLogs,
+  type LiveCleaner,
+  type LocationLog,
+} from "@/lib/ops-tracking"
 
 export interface JobTask {
   id: number
@@ -123,7 +132,7 @@ function cleanerLabel(u?: JobCleaner | JobTask["assignedUser"] | null) {
   return n || ("email" in u ? u.email : "") || ""
 }
 
-type Tab = "details" | "schedule" | "checklist" | "proofs" | "hours"
+type Tab = "details" | "schedule" | "checklist" | "proofs" | "hours" | "gps"
 
 export default function JobInspectorDrawer({
   open,
@@ -148,6 +157,9 @@ export default function JobInspectorDrawer({
   const [photos, setPhotos] = useState<any[]>([])
   const [checklists, setChecklists] = useState<any[]>([])
   const [timeLogs, setTimeLogs] = useState<any[]>([])
+  const [locationLogs, setLocationLogs] = useState<LocationLog[]>([])
+  const [liveForJob, setLiveForJob] = useState<LiveCleaner[]>([])
+  const [gpsLoading, setGpsLoading] = useState(false)
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -189,6 +201,8 @@ export default function JobInspectorDrawer({
           setChecklists(Array.isArray(d?.checklists) ? d.checklists : Array.isArray(d?.checklistItems) ? d.checklistItems : [])
           const logs = logsRes?.data?.data?.logs || logsRes?.data?.data || []
           setTimeLogs(Array.isArray(logs) ? logs : [])
+          setLocationLogs([])
+          setLiveForJob([])
         } finally {
           setDetailLoading(false)
         }
@@ -197,6 +211,8 @@ export default function JobInspectorDrawer({
       setPhotos([])
       setChecklists([])
       setTimeLogs([])
+      setLocationLogs([])
+      setLiveForJob([])
       setForm({
         title: "",
         description: "",
@@ -209,6 +225,48 @@ export default function JobInspectorDrawer({
       })
     }
   }, [task, open])
+
+  useEffect(() => {
+    if (!open || !task?.id || tab !== "gps") return
+    let cancelled = false
+    ;(async () => {
+      try {
+        setGpsLoading(true)
+        const [logs, live] = await Promise.all([
+          fetchTaskLocationLogs(task.id),
+          fetchLiveCleaners(),
+        ])
+        if (cancelled) return
+        setLocationLogs(logs)
+        const assignedId = task.assignedUser?.id
+        setLiveForJob(
+          live.filter(
+            (c) =>
+              c.taskId === task.id ||
+              (assignedId != null && c.userId === assignedId)
+          )
+        )
+      } finally {
+        if (!cancelled) setGpsLoading(false)
+      }
+    })()
+    const poll = setInterval(async () => {
+      const live = await fetchLiveCleaners()
+      if (cancelled) return
+      const assignedId = task.assignedUser?.id
+      setLiveForJob(
+        live.filter(
+          (c) =>
+            c.taskId === task.id ||
+            (assignedId != null && c.userId === assignedId)
+        )
+      )
+    }, 30000)
+    return () => {
+      cancelled = true
+      clearInterval(poll)
+    }
+  }, [open, task, tab])
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -264,6 +322,39 @@ export default function JobInspectorDrawer({
     { id: "checklist", label: `SOP (${doneCount}/${checklists.length || 0})`, icon: CheckSquare, show: !!task },
     { id: "proofs", label: `Proofs (${photos.length})`, icon: Camera, show: !!task },
     { id: "hours", label: "Hours", icon: Clock, show: !!task },
+    { id: "gps", label: "Live GPS", icon: Radio, show: !!task },
+  ]
+
+  const gpsPoints = [
+    ...liveForJob
+      .filter((c) => c.latitude != null && c.longitude != null)
+      .map((c) => ({
+        id: `live-${c.userId}`,
+        lat: Number(c.latitude),
+        lng: Number(c.longitude),
+        label: c.name || `Cleaner #${c.userId}`,
+        sub: [
+          c.isLive ? "Live now" : "Last seen",
+          c.withinGeofence === false ? "Off-site" : c.withinGeofence ? "On-site" : null,
+          c.propertyAddress,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        kind: "cleaner" as const,
+        warn: c.withinGeofence === false,
+      })),
+    ...locationLogs
+      .filter((l) => l.latitude != null && l.longitude != null)
+      .slice(0, 8)
+      .map((l) => ({
+        id: `log-${l.id}`,
+        lat: Number(l.latitude),
+        lng: Number(l.longitude),
+        label: l.checkType || "GPS ping",
+        sub: l.createdAt || l.recordedAt || undefined,
+        kind: "log" as const,
+        warn: l.withinGeofence === false,
+      })),
   ]
 
   return (
@@ -383,6 +474,23 @@ export default function JobInspectorDrawer({
                     />
                   </div>
                 </Field>
+                <SmartAssignPanel
+                  taskId={task?.id}
+                  propertyId={form.propertyId ? parseInt(form.propertyId, 10) : undefined}
+                  scheduledDate={
+                    form.scheduledDate
+                      ? new Date(form.scheduledDate).toISOString()
+                      : undefined
+                  }
+                  selectedUserId={form.assignedUserId}
+                  onSelect={(userId) => {
+                    setForm((f) => ({
+                      ...f,
+                      assignedUserId: String(userId),
+                      status: f.status === "PLANNED" || f.status === "DRAFT" ? "ASSIGNED" : f.status,
+                    }))
+                  }}
+                />
                 <Field label="Status">
                   <div className="relative">
                     <select
@@ -579,6 +687,80 @@ export default function JobInspectorDrawer({
                     </div>
                   ))
                 )}
+              </div>
+            )}
+
+            {tab === "gps" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-navy-800 bg-navy-950 px-3 py-2.5 text-white">
+                  <div>
+                    <p className="font-mono text-[10px] font-bold uppercase text-amber-400">
+                      Live cleaner location
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {liveForJob.filter((c) => c.isLive).length} live · refreshes every 30s
+                    </p>
+                  </div>
+                  {gpsLoading && <Loader2 size={16} className="animate-spin text-amber-400" />}
+                </div>
+
+                {gpsLoading && gpsPoints.length === 0 ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                  </div>
+                ) : (
+                  <LiveMapPanel
+                    points={gpsPoints}
+                    emptyMessage="No live GPS for this job yet — cleaner must have tracking on"
+                  />
+                )}
+
+                <div>
+                  <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Location history
+                  </p>
+                  {locationLogs.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-slate-400">No location logs yet</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {locationLogs.slice(0, 20).map((l) => (
+                        <li
+                          key={l.id}
+                          className="flex items-center justify-between rounded-lg border border-control-border px-3 py-2 dark:border-navy-800"
+                        >
+                          <div>
+                            <p className="text-xs font-bold text-navy-900 dark:text-white">
+                              {(l.checkType || "ping").toString().toUpperCase()}
+                              {l.withinGeofence === false ? (
+                                <span className="ml-1.5 text-red-600">Off-site</span>
+                              ) : l.withinGeofence ? (
+                                <span className="ml-1.5 text-emerald-600">On-site</span>
+                              ) : null}
+                            </p>
+                            <p className="font-mono text-[10px] text-slate-400">
+                              {l.createdAt || l.recordedAt
+                                ? new Date(l.createdAt || l.recordedAt || "").toLocaleString()
+                                : "—"}
+                              {l.distanceFromProperty != null
+                                ? ` · ${Math.round(Number(l.distanceFromProperty))}m from property`
+                                : ""}
+                            </p>
+                          </div>
+                          {l.latitude != null && l.longitude != null && (
+                            <a
+                              href={`https://www.google.com/maps?q=${l.latitude},${l.longitude}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] font-bold uppercase text-amber-700"
+                            >
+                              Map
+                            </a>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             )}
           </div>

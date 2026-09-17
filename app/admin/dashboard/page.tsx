@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
 import Link from "next/link"
@@ -10,6 +10,7 @@ import {
   OpsRefreshButton,
   OpsFlash,
   OpsEmpty,
+  OpsSkeleton,
   OpsTableShell,
   OpsCard,
   opsTh,
@@ -19,7 +20,6 @@ import {
   CheckCircle2,
   Timer,
   MapPin,
-  RefreshCw,
   AlertCircle,
   Calendar,
   Activity,
@@ -28,8 +28,17 @@ import {
   TrendingDown,
   PieChart as PieChartIcon,
   BarChart3,
+  Sparkles,
+  Radio,
+  ShieldAlert,
+  UserX,
+  Loader2,
 } from "lucide-react"
 import { JobStatusBadge } from "@/components/ops/JobInspectorDrawer"
+import { fetchLiveCleaners } from "@/lib/ops-tracking"
+import { getCleanerRecommendations } from "@/lib/ops-ai"
+import { adminGet, adminPatch } from "@/lib/admin-session"
+import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 import {
   ResponsiveContainer,
   PieChart,
@@ -159,8 +168,15 @@ function ChartEmpty({ label }: { label: string }) {
   )
 }
 
+function isUnassigned(task: TaskRow) {
+  if (task.assignedUser?.id) return false
+  if (task.taskAssignments?.some((a) => a.user?.id)) return false
+  return true
+}
+
 export default function AdminDashboard() {
   const { href: wsHref } = useCompanyWorkspace()
+  const createJobHref = wsHref ? wsHref("tasks") : "/admin/tasks"
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [todayTasks, setTodayTasks] = useState<TaskRow[]>([])
   const [recentTasks, setRecentTasks] = useState<TaskRow[]>([])
@@ -170,8 +186,49 @@ export default function AdminDashboard() {
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [toast, setToast] = useState("")
   const [lastUpdated, setLastUpdated] = useState(new Date())
   const [queueTab, setQueueTab] = useState("all")
+  const [offSiteCount, setOffSiteCount] = useState(0)
+  const [sosCount, setSosCount] = useState(0)
+  const [liveBusy, setLiveBusy] = useState(false)
+  const [assigningId, setAssigningId] = useState<number | null>(null)
+  const liveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadLiveCounts = useCallback(async () => {
+    try {
+      setLiveBusy(true)
+      const [live, sosRes] = await Promise.all([
+        fetchLiveCleaners(),
+        adminGet("/api/safety/sos", { params: { status: "active" } }).catch(() => null),
+      ])
+      setOffSiteCount(live.filter((c) => c.withinGeofence === false).length)
+      if (sosRes?.data) {
+        const raw = sosRes.data.data
+        const list = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.alerts)
+            ? raw.alerts
+            : Array.isArray(raw?.items)
+              ? raw.items
+              : []
+        setSosCount(list.length)
+      }
+    } catch {
+      /* soft fail — command strip stays usable */
+    } finally {
+      setLiveBusy(false)
+    }
+  }, [])
+
+  const softRefreshLive = useCallback(() => {
+    if (liveDebounceRef.current) clearTimeout(liveDebounceRef.current)
+    liveDebounceRef.current = setTimeout(() => {
+      loadLiveCounts().catch(() => undefined)
+    }, 2000)
+  }, [loadLiveCounts])
+
+  useOpsRealtime(softRefreshLive, true)
 
   const loadDashboard = async () => {
     try {
@@ -187,6 +244,7 @@ export default function AdminDashboard() {
       const [overviewRes, revenueRes] = await Promise.all([
         axios.get("/api/dashboard/overview", { headers }),
         axios.get("/api/revenue/overview", { headers }).catch(() => null),
+        loadLiveCounts(),
       ])
 
       if (overviewRes.data.success) {
@@ -213,7 +271,43 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadDashboard()
+    return () => {
+      if (liveDebounceRef.current) clearTimeout(liveDebounceRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const unassignedToday = useMemo(
+    () => todayTasks.filter(isUnassigned),
+    [todayTasks]
+  )
+
+  const aiAssign = async (task: TaskRow) => {
+    setToast(`AI assigning #JOB-${task.id}…`)
+    setAssigningId(task.id)
+    try {
+      const rec = await getCleanerRecommendations({
+        taskId: task.id,
+        scheduledDate: task.scheduledDate || undefined,
+      })
+      const pick = rec?.recommended?.userId
+      if (!pick) {
+        setToast("")
+        setError("No AI recommendation available for this job")
+        return
+      }
+      await adminPatch(`/api/tasks/${task.id}`, { assignedUserId: pick })
+      setToast(
+        `Assigned #JOB-${task.id} to ${rec?.recommended?.name || `cleaner #${pick}`}`
+      )
+      await loadDashboard()
+    } catch (err: any) {
+      setToast("")
+      setError(err.response?.data?.message || "AI assign failed")
+    } finally {
+      setAssigningId(null)
+    }
+  }
 
   const queue = useMemo(() => {
     const base = todayTasks.length ? todayTasks : recentTasks
@@ -222,7 +316,7 @@ export default function AdminDashboard() {
         ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "QA_REVIEW"].includes(t.status)
       )
     if (queueTab === "exceptions")
-      return base.filter((t) => ["REJECTED", "DRAFT"].includes(t.status) || !t.assignedUser)
+      return base.filter((t) => ["REJECTED", "DRAFT"].includes(t.status) || isUnassigned(t))
     if (queueTab === "completed")
       return base.filter((t) =>
         ["COMPLETED", "APPROVED", "ARCHIVED"].includes(t.status)
@@ -323,15 +417,16 @@ export default function AdminDashboard() {
   if (loading && !stats) {
     return (
       <AdminLayout>
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <RefreshCw className="animate-spin text-amber-600" size={28} />
+        <div className="space-y-4 p-1">
+          <OpsSkeleton rows={3} cols={4} />
+          <OpsSkeleton rows={6} cols={5} />
         </div>
       </AdminLayout>
     )
   }
 
   const completion = Number(stats?.todayCompletionRate || 0)
-  const atRisk = (stats?.openIssues || 0) + queue.filter((t) => !t.assignedUser).length
+  const atRisk = (stats?.openIssues || 0) + unassignedToday.length
 
   return (
     <AdminLayout>
@@ -347,6 +442,113 @@ export default function AdminDashboard() {
         />
 
         {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
+        {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+
+        {/* Dispatch command center */}
+        <section className="overflow-hidden rounded-xl border border-navy-800/80 bg-navy-950 text-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-800 px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Radio size={14} className={`text-amber-400 ${liveBusy ? "animate-pulse" : ""}`} />
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                Dispatch command center
+              </p>
+            </div>
+            <Link
+              href={wsHref("rota")}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-mono text-[10px] font-bold uppercase text-white hover:bg-amber-700"
+            >
+              <Sparkles size={12} /> AI Smart fill → Rota
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-px bg-navy-800 sm:grid-cols-4">
+            <CommandStat
+              label="Unassigned today"
+              value={unassignedToday.length}
+              icon={UserX}
+              warn={unassignedToday.length > 0}
+            />
+            <CommandStat
+              label="Off-site GPS"
+              value={offSiteCount}
+              icon={MapPin}
+              warn={offSiteCount > 0}
+            />
+            <CommandStat
+              label="Open SOS"
+              value={sosCount}
+              icon={ShieldAlert}
+              warn={sosCount > 0}
+            />
+            <div className="flex flex-col justify-center bg-navy-950 px-4 py-3">
+              <p className="font-mono text-[9px] font-bold uppercase text-slate-500">
+                Bulk fill
+              </p>
+              <Link
+                href={wsHref("rota")}
+                className="mt-1 text-sm font-bold text-amber-400 hover:text-amber-300"
+              >
+                Open rota matrix →
+              </Link>
+            </div>
+          </div>
+
+          <div className="border-t border-navy-800 px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Today&apos;s unassigned · {unassignedToday.length}
+              </p>
+            </div>
+            {unassignedToday.length === 0 ? (
+              <OpsEmpty
+                message="No unassigned jobs today — queue is clear"
+                ctaLabel="Create job"
+                ctaHref={createJobHref}
+              />
+            ) : (
+              <ul className="divide-y divide-navy-800/80">
+                {unassignedToday.slice(0, 8).map((task) => (
+                  <li
+                    key={task.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        <span className="mr-2 font-mono text-xs text-amber-400">
+                          #JOB-{task.id}
+                        </span>
+                        {task.title}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">
+                        <MapPin size={10} />
+                        {task.property?.address || "—"}
+                        <span className="text-slate-600">·</span>
+                        {scheduleLabel(task.scheduledDate)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={assigningId === task.id}
+                      onClick={() => aiAssign(task)}
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-[10px] font-bold uppercase text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {assigningId === task.id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={12} />
+                      )}
+                      AI assign
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {unassignedToday.length > 8 && (
+              <p className="mt-2 font-mono text-[10px] text-slate-500">
+                +{unassignedToday.length - 8} more — use Smart fill on rota
+              </p>
+            )}
+          </div>
+        </section>
 
         {stats && (stats.openIssues > 0 || atRisk > 0) && (
           <section className="flex flex-col justify-between gap-4 rounded-xl border border-navy-800 bg-navy-900 p-4 text-white shadow-sm lg:flex-row lg:items-center">
@@ -671,7 +873,11 @@ export default function AdminDashboard() {
           }
         >
           {queue.length === 0 ? (
-            <OpsEmpty message="No jobs in this queue" />
+            <OpsEmpty
+              message="No jobs in this queue"
+              ctaLabel="Create job"
+              ctaHref={createJobHref}
+            />
           ) : (
             <table className="w-full text-left">
               <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
@@ -773,6 +979,34 @@ export default function AdminDashboard() {
         </div>
       </div>
     </AdminLayout>
+  )
+}
+
+function CommandStat({
+  label,
+  value,
+  icon: Icon,
+  warn,
+}: {
+  label: string
+  value: number
+  icon: React.ComponentType<{ className?: string; size?: number }>
+  warn?: boolean
+}) {
+  return (
+    <div className="bg-navy-950 px-4 py-3">
+      <div className="flex items-center justify-between font-mono text-[9px] font-bold uppercase text-slate-500">
+        <span>{label}</span>
+        <Icon size={12} className={warn ? "text-amber-400" : "text-slate-600"} />
+      </div>
+      <p
+        className={`mt-1 font-mono text-2xl font-black tabular-nums ${
+          warn ? "text-amber-400" : "text-white"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
   )
 }
 

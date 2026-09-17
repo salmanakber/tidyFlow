@@ -50,6 +50,7 @@ import {
   buildCompanySlug,
   isCompanyWorkspaceRole,
 } from "@/lib/company-slug"
+import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 
 interface User {
   id: number
@@ -414,7 +415,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto max-w-[1600px] space-y-6">{children}</div>
+          <div className="mx-auto max-w-[1600px] space-y-6">
+            <OpsStatusLegend compact />
+            {children}
+          </div>
         </main>
       </div>
     </div>

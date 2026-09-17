@@ -10,6 +10,7 @@ import {
   OpsKpi,
   OpsRefreshButton,
   OpsPagination,
+  OpsSkeleton,
 } from "@/components/ops/OpsChrome"
 import {
   ChevronLeft,
@@ -19,7 +20,10 @@ import {
   GripVertical,
   Users,
   X,
+  Sparkles,
+  Loader2,
 } from "lucide-react"
+import { getCleanerRecommendations } from "@/lib/ops-ai"
 
 const PAGE_SIZE = 10
 
@@ -93,6 +97,7 @@ export default function RotaBuilderPage() {
   const [toast, setToast] = useState("")
   const [error, setError] = useState("")
   const [page, setPage] = useState(1)
+  const [smartBusy, setSmartBusy] = useState(false)
 
   const weekDates = useMemo(() => {
     const start = new Date(selectedWeek + "T12:00:00")
@@ -169,6 +174,56 @@ export default function RotaBuilderPage() {
       await loadRota()
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to assign")
+    }
+  }
+
+  /** Uses existing /api/ai/recommend-cleaners — does not change mobile contracts */
+  const smartFillUnassigned = async () => {
+    const unassigned = (Array.isArray(rotaData?.tasks) ? rotaData!.tasks : []).filter(
+      (t) => !t.assignedUser
+    )
+    if (unassigned.length === 0) {
+      setToast("No unassigned jobs this week")
+      return
+    }
+    if (
+      !confirm(
+        `AI will suggest and assign cleaners for ${unassigned.length} unassigned job${
+          unassigned.length === 1 ? "" : "s"
+        }. Continue?`
+      )
+    ) {
+      return
+    }
+    try {
+      setSmartBusy(true)
+      setError("")
+      let filled = 0
+      for (const task of unassigned) {
+        const rec = await getCleanerRecommendations({
+          taskId: task.id,
+          propertyId: task.property?.id,
+          scheduledDate: task.scheduledDate,
+        })
+        const pick = rec?.recommended?.userId
+        if (!pick) continue
+        try {
+          await axios.post(
+            "/api/admin/rota/assign",
+            { taskId: task.id, cleanerId: pick },
+            { headers: authHeaders(), params: companyParams() }
+          )
+          filled += 1
+        } catch {
+          /* skip failed assign */
+        }
+      }
+      setToast(`Smart scheduling filled ${filled} of ${unassigned.length} jobs`)
+      await loadRota()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Smart scheduling failed")
+    } finally {
+      setSmartBusy(false)
     }
   }
 
@@ -270,6 +325,19 @@ export default function RotaBuilderPage() {
               </button>
               <OpsRefreshButton onClick={loadRota} loading={loading} />
               <button
+                type="button"
+                onClick={smartFillUnassigned}
+                disabled={smartBusy || stats.unassigned === 0}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {smartBusy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                Smart fill
+              </button>
+              <button
                 onClick={handleCloneWeek}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-navy-900 px-3 text-xs font-bold text-white hover:bg-navy-800"
               >
@@ -326,9 +394,7 @@ export default function RotaBuilderPage() {
 
         <div className="overflow-hidden rounded-xl border border-control-border bg-white shadow-sm dark:border-control-darkBorder dark:bg-control-darkCard">
           {loading ? (
-            <div className="flex h-64 items-center justify-center">
-              <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-amber-600" />
-            </div>
+            <OpsSkeleton rows={8} cols={8} />
           ) : !rotaData ? (
             <OpsEmpty message="No rota data for this week" />
           ) : (
@@ -396,6 +462,16 @@ export default function RotaBuilderPage() {
                           const cellKey = `${cleaner.id}-${dateKey(date)}`
                           const dayTasks = tasksFor(cleaner.id, date)
                           const isToday = dateKey(date) === todayKey
+                          const isDropTarget = dropTarget === cellKey
+                          const showDropConflict =
+                            isDropTarget &&
+                            !!draggedTask &&
+                            safeConflicts.some(
+                              (c) =>
+                                c.cleanerId === cleaner.id &&
+                                (c.taskId === draggedTask.id ||
+                                  dayTasks.some((t) => t.id === c.taskId))
+                            )
                           return (
                             <td
                               key={dayIdx}
@@ -415,12 +491,17 @@ export default function RotaBuilderPage() {
                               className={`min-h-[88px] border-l border-slate-100 p-1.5 align-top dark:border-navy-900 ${
                                 isToday ? "bg-amber-50/40 dark:bg-amber-950/10" : ""
                               } ${
-                                dropTarget === cellKey
+                                isDropTarget
                                   ? "bg-amber-100/80 ring-2 ring-inset ring-amber-500 dark:bg-amber-900/30"
                                   : ""
                               }`}
                             >
                               <div className="min-h-[72px] space-y-1.5">
+                                {showDropConflict && (
+                                  <div className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                                    Conflict risk
+                                  </div>
+                                )}
                                 {dayTasks.map((task) => (
                                   <JobChip
                                     key={task.id}

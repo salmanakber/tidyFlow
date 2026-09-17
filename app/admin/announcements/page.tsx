@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
+import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   OpsPageHeader,
   OpsCard,
@@ -13,6 +14,7 @@ import {
   OpsBadge,
   OpsTableShell,
   OpsPagination,
+  OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -60,7 +62,7 @@ export default function AnnouncementsPage() {
   const [target, setTarget] = useState<TargetKey>("ALL")
   const [expiresOn, setExpiresOn] = useState(defaultExpires())
   const [saving, setSaving] = useState(false)
-  const [filter, setFilter] = useState<"ALL" | "ACTIVE" | "EXPIRED" | TargetKey>("ALL")
+  const [filter, setFilter] = useUrlQueryState("status", "ALL")
   const [page, setPage] = useState(1)
 
   const headers = () => {
@@ -276,6 +278,7 @@ export default function AnnouncementsPage() {
 
         <OpsTableShell
           title="Announcement feed"
+          stickyHeader
           badge={
             <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
               {filtered.length}
@@ -289,12 +292,19 @@ export default function AnnouncementsPage() {
             { id: "CLEANER", label: "Cleaners" },
           ]}
           activeTab={filter}
-          onTabChange={(id) => setFilter(id as any)}
+          onTabChange={setFilter}
         >
           {loading ? (
-            <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+            <OpsSkeleton rows={6} cols={5} />
           ) : filtered.length === 0 ? (
-            <OpsEmpty message="No announcements yet" />
+            <OpsEmpty
+              message="No announcements yet"
+              ctaLabel="New announcement"
+              onCta={() => {
+                resetForm()
+                setShowForm(true)
+              }}
+            />
           ) : (
             <>
               <table className="w-full text-left">
