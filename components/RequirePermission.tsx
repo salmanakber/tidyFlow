@@ -57,9 +57,12 @@ export default function RequirePermission({
       const isHeadSuperAdmin = user?.isHeadSuperAdmin || false
       const isDeveloper = user?.role === "DEVELOPER"
       const isOwner = user?.role === "OWNER"
+      const isManager = user?.role === "MANAGER"
+      const isCompanyAdmin = user?.role === "COMPANY_ADMIN"
 
-      // Head super admin, DEVELOPER, and OWNER have all permissions
-      if (isHeadSuperAdmin || isDeveloper || isOwner) {
+      // Head super admin, DEVELOPER, and company workspace roles bypass page ACL
+      // (company APIs still enforce company scope / role).
+      if (isHeadSuperAdmin || isDeveloper || isOwner || isManager || isCompanyAdmin) {
         setHasAccess(true)
         setLoading(false)
         return

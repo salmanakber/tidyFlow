@@ -3,8 +3,17 @@
 import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
-import { adminGet, adminPost, formatDate, statusBadgeClass } from "@/lib/admin-session"
-import { RefreshCw, CalendarOff, Check, X, Loader2 } from "lucide-react"
+import { adminGet, adminPost, formatDate } from "@/lib/admin-session"
+import {
+  OpsPageHeader,
+  OpsCard,
+  OpsKpi,
+  OpsRefreshButton,
+  OpsFlash,
+  OpsEmpty,
+  OpsBadge,
+} from "@/components/ops/OpsChrome"
+import { Check, X, Loader2 } from "lucide-react"
 
 export default function LeavePage() {
   return (
@@ -61,34 +70,23 @@ function Content() {
   const pending = items.filter((i) => i.status === "pending").length
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-navy-900 dark:text-white flex items-center gap-2">
-            <CalendarOff className="text-amber-600" size={24} /> Leave requests
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">Approve time off for cleaners and staff</p>
-        </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-control-border rounded-lg text-sm font-semibold"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
-      </div>
+    <div className="space-y-5">
+      <OpsPageHeader
+        eyebrow="Manage"
+        title="Leave requests"
+        subtitle="Approve time off for cleaners and staff"
+        actions={<OpsRefreshButton onClick={load} loading={loading} />}
+      />
 
-      {toast && <Flash ok text={toast} onClose={() => setToast("")} />}
-      {error && <Flash ok={false} text={error} onClose={() => setError("")} />}
+      {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+      {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border px-4 py-3">
-          <span className="text-[11px] font-bold uppercase text-slate-400">Pending</span>
-          <span className="ml-3 text-xl font-extrabold text-navy-900 dark:text-white">{pending}</span>
-        </div>
+        <OpsKpi label="Pending" value={pending} />
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-navy-800 dark:bg-navy-950"
         >
           <option value="all">All statuses</option>
           <option value="pending">Pending</option>
@@ -97,50 +95,44 @@ function Content() {
         </select>
       </div>
 
-      <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border overflow-hidden">
+      <OpsCard padding={false}>
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-sm">Loading…</div>
+          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No leave requests</div>
+          <OpsEmpty message="No leave requests" />
         ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 dark:bg-navy-950 text-[10px] uppercase text-slate-500">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 dark:bg-navy-950">
               <tr>
-                <th className="px-4 py-3">Staff</th>
-                <th className="px-4 py-3">Dates</th>
-                <th className="px-4 py-3">Reason</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th className="px-5 py-3">Staff</th>
+                <th className="px-5 py-3">Dates</th>
+                <th className="px-5 py-3">Reason</th>
+                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
               {filtered.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-4 py-3 font-semibold">
+                  <td className="px-5 py-3 font-semibold text-navy-900 dark:text-white">
                     {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") || "—"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-5 py-3">
                     {formatDate(item.startDate)} → {formatDate(item.endDate)}
                   </td>
-                  <td className="px-4 py-3 text-slate-500 max-w-[240px] truncate">
+                  <td className="max-w-[240px] truncate px-5 py-3 text-slate-500">
                     {item.reason || "—"}
                   </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${statusBadgeClass(
-                        item.status
-                      )}`}
-                    >
-                      {item.status}
-                    </span>
+                  <td className="px-5 py-3">
+                    <OpsBadge status={item.status} />
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-5 py-3 text-right">
                     {item.status === "pending" && (
                       <div className="inline-flex gap-1">
                         <button
                           disabled={busyId === item.id}
                           onClick={() => decide(item.id, true)}
-                          className="p-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                          className="rounded-lg border border-emerald-200 p-1.5 text-emerald-700 hover:bg-emerald-50"
                         >
                           {busyId === item.id ? (
                             <Loader2 size={14} className="animate-spin" />
@@ -151,7 +143,7 @@ function Content() {
                         <button
                           disabled={busyId === item.id}
                           onClick={() => decide(item.id, false)}
-                          className="p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                          className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50"
                         >
                           <X size={14} />
                         </button>
@@ -163,22 +155,7 @@ function Content() {
             </tbody>
           </table>
         )}
-      </div>
-    </div>
-  )
-}
-
-function Flash({ ok, text, onClose }: { ok: boolean; text: string; onClose: () => void }) {
-  return (
-    <div
-      className={`rounded-xl px-4 py-3 text-sm flex justify-between ${
-        ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
-      }`}
-    >
-      {text}
-      <button onClick={onClose} className="font-bold text-xs">
-        Dismiss
-      </button>
+      </OpsCard>
     </div>
   )
 }

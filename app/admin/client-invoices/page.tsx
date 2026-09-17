@@ -5,6 +5,11 @@ import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, adminPatch, formatDate, formatMoney, statusBadgeClass } from "@/lib/admin-session"
 import { RefreshCw, FileText, Loader2, Send, Plus } from "lucide-react"
+import {
+  OpsPageHeader,
+  OpsRefreshButton,
+  OpsPrimaryButton,
+} from "@/components/ops/OpsChrome"
 
 export default function ClientInvoicesPage() {
   return (
@@ -118,26 +123,19 @@ function Content() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-navy-900 dark:text-white">Client invoices</h1>
-          <p className="text-sm text-slate-500 mt-1">Bill clients for completed jobs</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm px-4 py-2 rounded-lg"
-          >
-            <Plus size={16} /> Create invoice
-          </button>
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-control-border rounded-lg text-sm font-semibold"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
-          </button>
-        </div>
-      </div>
+      <OpsPageHeader
+        eyebrow="Finance"
+        title="Client invoices"
+        subtitle="Bill clients for completed jobs"
+        actions={
+          <div className="flex gap-2">
+            <OpsRefreshButton onClick={load} loading={loading} />
+            <OpsPrimaryButton onClick={() => setShowCreate(true)}>
+              <Plus size={14} /> Create invoice
+            </OpsPrimaryButton>
+          </div>
+        }
+      />
 
       {toast && <Flash ok text={toast} onClose={() => setToast("")} />}
       {error && <Flash ok={false} text={error} onClose={() => setError("")} />}

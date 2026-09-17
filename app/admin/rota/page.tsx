@@ -1,25 +1,32 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
-import AIRecommendationsPanel from "@/components/AIRecommendationsPanel"
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  AlertTriangle,
+  GripVertical,
+  CalendarDays,
+  Users,
+  RefreshCw,
+  X,
+} from "lucide-react"
 
 interface Task {
   id: number
   title: string
   scheduledDate: string
-  property: {
-    id: number
-    address: string
-  }
+  status: string
+  property: { id: number; address: string }
   assignedUser?: {
     id: number
     firstName?: string
     lastName?: string
     email: string
   }
-  status: string
 }
 
 interface Cleaner {
@@ -39,337 +46,372 @@ interface Cleaner {
 interface RotaData {
   tasks: Task[]
   cleaners: Cleaner[]
-  conflicts: Array<{
-    taskId: number
-    cleanerId: number
-    reason: string
-  }>
+  conflicts: Array<{ taskId: number; cleanerId: number; reason: string }>
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  PLANNED: "bg-blue-50 border-blue-200 text-blue-900",
+  ASSIGNED: "bg-violet-50 border-violet-200 text-violet-900",
+  IN_PROGRESS: "bg-amber-50 border-amber-300 text-amber-950",
+  SUBMITTED: "bg-cyan-50 border-cyan-200 text-cyan-900",
+  APPROVED: "bg-emerald-50 border-emerald-200 text-emerald-900",
+  COMPLETED: "bg-emerald-50 border-emerald-200 text-emerald-900",
+  QA_REVIEW: "bg-pink-50 border-pink-200 text-pink-900",
+}
+
+function cleanerName(c: Cleaner) {
+  const n = [c.firstName, c.lastName].filter(Boolean).join(" ")
+  return n || c.email
+}
+
+function mondayOf(d: Date) {
+  const x = new Date(d)
+  const day = x.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  x.setDate(x.getDate() + diff)
+  x.setHours(0, 0, 0, 0)
+  return x
 }
 
 export default function RotaBuilderPage() {
   const [rotaData, setRotaData] = useState<RotaData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedWeek, setSelectedWeek] = useState(() => {
-    const today = new Date()
-    const monday = new Date(today)
-    monday.setDate(today.getDate() - today.getDay() + 1)
-    return monday.toISOString().split("T")[0]
-  })
+  const [selectedWeek, setSelectedWeek] = useState(() =>
+    mondayOf(new Date()).toISOString().split("T")[0]
+  )
   const [draggedTask, setDraggedTask] = useState<Task | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [showConflicts, setShowConflicts] = useState(false)
-  const [aiTaskId, setAiTaskId] = useState<number | null>(null)
+  const [toast, setToast] = useState("")
+  const [error, setError] = useState("")
 
-  useEffect(() => {
-    loadRota()
+  const weekDates = useMemo(() => {
+    const start = new Date(selectedWeek + "T12:00:00")
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(start.getDate() + i)
+      return d
+    })
   }, [selectedWeek])
 
-  const getWeekDates = () => {
-    const start = new Date(selectedWeek)
-    const dates = []
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start)
-      date.setDate(start.getDate() + i)
-      dates.push(date)
-    }
-    return dates
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+  const authHeaders = () => {
+    const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+    return { Authorization: `Bearer ${token}` }
   }
 
-  const getWeekStartEnd = () => {
-    const start = new Date(selectedWeek)
-    const end = new Date(start)
-    end.setDate(start.getDate() + 6)
-    return {
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0],
-    }
+  const companyParams = () => {
+    const selectedCompanyId = localStorage.getItem("selectedCompanyId")
+    return selectedCompanyId ? { companyId: selectedCompanyId } : {}
+  }
+
+  const weekRange = () => {
+    const start = selectedWeek
+    const endDate = new Date(selectedWeek + "T12:00:00")
+    endDate.setDate(endDate.getDate() + 6)
+    return { weekStart: start, weekEnd: endDate.toISOString().split("T")[0] }
   }
 
   const loadRota = async () => {
     try {
       setLoading(true)
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
-      const selectedCompanyId = localStorage.getItem("selectedCompanyId")
-      const { start, end } = getWeekStartEnd()
-
-      const params: any = { weekStart: start, weekEnd: end }
-      if (selectedCompanyId) {
-        params.companyId = selectedCompanyId
-      }
-
+      setError("")
+      const params = { ...weekRange(), ...companyParams() }
       const [rotaRes, conflictsRes] = await Promise.all([
-        axios.get("/api/admin/rota", {
-          headers: { Authorization: `Bearer ${token}` },
-          params,
-        }),
-        axios.get("/api/admin/rota/conflicts", {
-          headers: { Authorization: `Bearer ${token}` },
-          params,
-        }),
+        axios.get("/api/admin/rota", { headers: authHeaders(), params }),
+        axios.get("/api/admin/rota/conflicts", { headers: authHeaders(), params }),
       ])
-
-      if (rotaRes.data.success && conflictsRes.data.success) {
+      if (rotaRes.data.success) {
         setRotaData({
           tasks: rotaRes.data.data.tasks || [],
           cleaners: rotaRes.data.data.cleaners || [],
-          conflicts: conflictsRes.data.data.conflicts || [],
+          conflicts: conflictsRes.data?.data?.conflicts || [],
         })
+      } else {
+        setError(rotaRes.data.message || "Failed to load rota")
       }
-    } catch (error) {
-      console.error("Error loading rota:", error)
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed to load rota")
     } finally {
       setLoading(false)
     }
   }
 
+  useEffect(() => {
+    loadRota()
+  }, [selectedWeek])
+
   const handleAssign = async (taskId: number, cleanerId: number | null) => {
     try {
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
       await axios.post(
         "/api/admin/rota/assign",
         { taskId, cleanerId },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        { headers: authHeaders(), params: companyParams() }
       )
-      loadRota()
-    } catch (error) {
-      console.error("Error assigning task:", error)
-      alert("Failed to assign task")
+      setToast(cleanerId ? "Assignment updated" : "Task unassigned")
+      await loadRota()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed to assign")
     }
-  }
-
-  const handleDragStart = (task: Task) => {
-    setDraggedTask(task)
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-  }
-
-  const handleDrop = async (e: React.DragEvent, cleanerId: number) => {
-    e.preventDefault()
-    if (draggedTask) {
-      await handleAssign(draggedTask.id, cleanerId)
-      setDraggedTask(null)
-    }
-  }
-
-  const handleUnassign = async (taskId: number) => {
-    await handleAssign(taskId, null)
   }
 
   const handleCloneWeek = async () => {
-    if (!confirm("Clone this week's assignments to next week?")) return
-
+    if (!confirm("Clone this week’s assignments to the next week?")) return
     try {
-      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
-      const selectedCompanyId = localStorage.getItem("selectedCompanyId")
-      const { start, end } = getWeekStartEnd()
-      
-      const payload: any = { weekStart: start, weekEnd: end }
-      if (selectedCompanyId) {
-        payload.companyId = parseInt(selectedCompanyId)
-      }
-      
-      await axios.post(
-        "/api/admin/rota/week-clone",
-        payload,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      )
-      alert("Week cloned successfully!")
-      const nextWeek = new Date(selectedWeek)
-      nextWeek.setDate(nextWeek.getDate() + 7)
-      setSelectedWeek(nextWeek.toISOString().split("T")[0])
-      loadRota() // Reload rota to show cloned tasks
-    } catch (error: any) {
-      console.error("Error cloning week:", error)
-      const errorMessage = error.response?.data?.message || "Failed to clone week"
-      alert(errorMessage)
+      const { weekStart, weekEnd } = weekRange()
+      const payload: any = { weekStart, weekEnd, ...companyParams() }
+      if (payload.companyId) payload.companyId = parseInt(payload.companyId, 10)
+      await axios.post("/api/admin/rota/week-clone", payload, { headers: authHeaders() })
+      setToast("Week cloned")
+      const next = new Date(selectedWeek + "T12:00:00")
+      next.setDate(next.getDate() + 7)
+      setSelectedWeek(next.toISOString().split("T")[0])
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed to clone week")
     }
   }
 
-  const getTasksForDay = (date: Date) => {
+  const dateKey = (d: Date) => d.toISOString().split("T")[0]
+
+  const tasksFor = (cleanerId: number | null, date: Date) => {
     if (!rotaData) return []
-    const dateStr = date.toISOString().split("T")[0]
-    return rotaData.tasks.filter(
-      (task) => task.scheduledDate && task.scheduledDate.split("T")[0] === dateStr
-    )
+    const key = dateKey(date)
+    return rotaData.tasks.filter((t) => {
+      if (!t.scheduledDate || t.scheduledDate.split("T")[0] !== key) return false
+      if (cleanerId === null) return !t.assignedUser
+      return t.assignedUser?.id === cleanerId
+    })
   }
 
-  const getTasksForCleaner = (cleanerId: number) => {
-    if (!rotaData) return []
-    return rotaData.tasks.filter((task) => task.assignedUser?.id === cleanerId)
+  const shiftWeek = (delta: number) => {
+    const d = new Date(selectedWeek + "T12:00:00")
+    d.setDate(d.getDate() + delta * 7)
+    setSelectedWeek(mondayOf(d).toISOString().split("T")[0])
   }
 
-  const weekDates = getWeekDates()
-  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  const stats = useMemo(() => {
+    if (!rotaData) return { jobs: 0, assigned: 0, unassigned: 0, cleaners: 0 }
+    const assigned = rotaData.tasks.filter((t) => t.assignedUser).length
+    return {
+      jobs: rotaData.tasks.length,
+      assigned,
+      unassigned: rotaData.tasks.length - assigned,
+      cleaners: rotaData.cleaners.length,
+    }
+  }, [rotaData])
+
+  const todayKey = new Date().toISOString().split("T")[0]
 
   return (
     <AdminLayout>
-      <div className="max-w-7xl mx-auto">
+      <div className="space-y-5">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Rota Builder</h1>
-              <p className="text-gray-600 mt-1">Visual calendar for weekly cleaner assignments</p>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <CalendarDays size={12} className="text-amber-600" />
+              Fleet rota matrix
             </div>
-            <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-extrabold tracking-tight text-navy-900 dark:text-white">
+              Schedule &amp; assignments
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Drag jobs onto cleaners · week of{" "}
+              {weekDates[0]?.toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}{" "}
+              –{" "}
+              {weekDates[6]?.toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => shiftWeek(-1)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-control-border bg-white text-slate-600 hover:bg-slate-50 dark:bg-control-darkCard dark:border-control-darkBorder"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <input
+              type="date"
+              value={selectedWeek}
+              onChange={(e) =>
+                setSelectedWeek(mondayOf(new Date(e.target.value + "T12:00:00")).toISOString().split("T")[0])
+              }
+              className="h-9 rounded-lg border border-control-border bg-white px-3 text-sm font-medium dark:bg-control-darkCard dark:border-control-darkBorder"
+            />
+            <button
+              onClick={() => shiftWeek(1)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-control-border bg-white text-slate-600 hover:bg-slate-50 dark:bg-control-darkCard dark:border-control-darkBorder"
+            >
+              <ChevronRight size={18} />
+            </button>
+            <button
+              onClick={() => setSelectedWeek(mondayOf(new Date()).toISOString().split("T")[0])}
+              className="h-9 rounded-lg border border-control-border bg-white px-3 text-xs font-bold text-slate-700 hover:border-amber-600 hover:text-amber-700 dark:bg-control-darkCard"
+            >
+              This week
+            </button>
+            <button
+              onClick={loadRota}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-control-border bg-white px-3 text-xs font-bold text-slate-700 dark:bg-control-darkCard"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+            </button>
+            <button
+              onClick={handleCloneWeek}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-navy-900 px-3 text-xs font-bold text-white hover:bg-navy-800"
+            >
+              <Copy size={14} /> Clone week
+            </button>
+            {rotaData && rotaData.conflicts.length > 0 && (
               <button
-                onClick={handleCloneWeek}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                onClick={() => setShowConflicts(!showConflicts)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-bold text-white"
               >
-                Clone Week
+                <AlertTriangle size={14} /> {rotaData.conflicts.length} conflicts
               </button>
-              {rotaData && rotaData.conflicts.length > 0 && (
-                <button
-                  onClick={() => setShowConflicts(!showConflicts)}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
-                >
-                  Conflicts ({rotaData.conflicts.length})
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Week Selector */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => {
-                  const prevWeek = new Date(selectedWeek)
-                  prevWeek.setDate(prevWeek.getDate() - 7)
-                  setSelectedWeek(prevWeek.toISOString().split("T")[0])
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                ← Previous
-              </button>
-              <input
-                type="date"
-                value={selectedWeek}
-                onChange={(e) => setSelectedWeek(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg"
-              />
-              <button
-                onClick={() => {
-                  const nextWeek = new Date(selectedWeek)
-                  nextWeek.setDate(nextWeek.getDate() + 7)
-                  setSelectedWeek(nextWeek.toISOString().split("T")[0])
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Next →
-              </button>
-              <button
-                onClick={() => {
-                  const today = new Date()
-                  const monday = new Date(today)
-                  monday.setDate(today.getDate() - today.getDay() + 1)
-                  setSelectedWeek(monday.toISOString().split("T")[0])
-                }}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                This Week
-              </button>
-            </div>
-          </div>
+        {toast && (
+          <Flash ok text={toast} onClose={() => setToast("")} />
+        )}
+        {error && <Flash ok={false} text={error} onClose={() => setError("")} />}
+
+        {/* KPI strip */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Kpi label="Jobs this week" value={stats.jobs} />
+          <Kpi label="Assigned" value={stats.assigned} accent="emerald" />
+          <Kpi label="Unassigned" value={stats.unassigned} accent={stats.unassigned ? "amber" : "slate"} />
+          <Kpi label="Cleaners" value={stats.cleaners} icon />
         </div>
 
-        {/* Conflicts Alert */}
         {showConflicts && rotaData && rotaData.conflicts.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-            <h3 className="font-semibold text-red-900 mb-2">Conflicts Detected</h3>
-            <ul className="space-y-1">
-              {rotaData.conflicts.map((conflict, idx) => (
-                <li key={idx} className="text-sm text-red-800">
-                  • {conflict.reason}
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:bg-red-950/30 dark:border-red-900">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-red-900 dark:text-red-200">Scheduling conflicts</h3>
+              <button onClick={() => setShowConflicts(false)} className="text-red-400 hover:text-red-600">
+                <X size={16} />
+              </button>
+            </div>
+            <ul className="space-y-1 text-sm text-red-800 dark:text-red-300">
+              {rotaData.conflicts.map((c, i) => (
+                <li key={i} className="font-medium">
+                  · {c.reason}
                 </li>
               ))}
             </ul>
           </div>
         )}
 
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
-          </div>
-        ) : rotaData ? (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            {/* Calendar Grid */}
+        {/* Matrix */}
+        <div className="overflow-hidden rounded-xl border border-control-border bg-white shadow-sm dark:bg-control-darkCard dark:border-control-darkBorder">
+          {loading ? (
+            <div className="flex h-64 items-center justify-center">
+              <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-amber-600" />
+            </div>
+          ) : !rotaData ? (
+            <div className="py-20 text-center text-sm text-slate-500">No rota data for this week</div>
+          ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+              <table className="w-full min-w-[1100px] border-collapse text-left">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 w-48">
-                      Cleaner
+                  <tr className="border-b border-control-border bg-navy-950 text-slate-300 dark:border-navy-800">
+                    <th className="sticky left-0 z-10 w-48 bg-navy-950 px-4 py-3 text-[10px] font-bold uppercase tracking-wider">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Users size={12} className="text-amber-500" /> Cleaner
+                      </span>
                     </th>
-                    {weekDates.map((date, idx) => (
-                      <th
-                        key={idx}
-                        className="px-4 py-3 text-center text-sm font-semibold text-gray-900 border-l border-gray-200 min-w-[200px]"
-                      >
-                        <div>{dayNames[idx]}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                        </div>
-                      </th>
-                    ))}
+                    {weekDates.map((date, idx) => {
+                      const isToday = dateKey(date) === todayKey
+                      return (
+                        <th
+                          key={idx}
+                          className={`min-w-[140px] border-l border-navy-800 px-3 py-3 text-center ${
+                            isToday ? "bg-amber-600/20" : ""
+                          }`}
+                        >
+                          <div
+                            className={`text-[10px] font-bold uppercase tracking-wider ${
+                              isToday ? "text-amber-400" : "text-slate-400"
+                            }`}
+                          >
+                            {dayNames[idx]}
+                          </div>
+                          <div
+                            className={`mt-0.5 font-mono text-sm font-bold ${
+                              isToday ? "text-amber-300" : "text-white"
+                            }`}
+                          >
+                            {date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                          </div>
+                        </th>
+                      )
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {rotaData.cleaners.map((cleaner) => (
-                    <tr key={cleaner.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-gray-900">
-                          {cleaner.firstName && cleaner.lastName
-                            ? `${cleaner.firstName} ${cleaner.lastName}`
-                            : cleaner.email}
+                  {rotaData.cleaners.map((cleaner, rowIdx) => (
+                    <tr
+                      key={cleaner.id}
+                      className={`border-b border-slate-100 dark:border-navy-900 ${
+                        rowIdx % 2 === 0 ? "bg-white dark:bg-control-darkCard" : "bg-slate-50/80 dark:bg-navy-950/40"
+                      }`}
+                    >
+                      <td className="sticky left-0 z-10 border-r border-slate-100 bg-inherit px-4 py-3 dark:border-navy-900">
+                        <div className="text-sm font-bold text-navy-900 dark:text-white">
+                          {cleanerName(cleaner)}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {getTasksForCleaner(cleaner.id).length} tasks
+                        <div className="mt-0.5 font-mono text-[10px] text-slate-400">
+                          {tasksFor(cleaner.id, weekDates[0]).length >= 0
+                            ? `${rotaData.tasks.filter((t) => t.assignedUser?.id === cleaner.id).length} jobs`
+                            : ""}
+                          {cleaner.workload != null ? ` · load ${cleaner.workload}` : ""}
                         </div>
                       </td>
                       {weekDates.map((date, dayIdx) => {
-                        const dayTasks = getTasksForDay(date).filter(
-                          (task) => task.assignedUser?.id === cleaner.id
-                        )
+                        const cellKey = `${cleaner.id}-${dateKey(date)}`
+                        const dayTasks = tasksFor(cleaner.id, date)
+                        const isToday = dateKey(date) === todayKey
                         return (
                           <td
                             key={dayIdx}
-                            className="px-2 py-2 border-l border-gray-200 align-top"
-                            onDragOver={handleDragOver}
-                            onDrop={(e) => handleDrop(e, cleaner.id)}
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              setDropTarget(cellKey)
+                            }}
+                            onDragLeave={() => setDropTarget(null)}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              setDropTarget(null)
+                              if (draggedTask) {
+                                handleAssign(draggedTask.id, cleaner.id)
+                                setDraggedTask(null)
+                              }
+                            }}
+                            className={`min-h-[88px] border-l border-slate-100 p-1.5 align-top dark:border-navy-900 ${
+                              isToday ? "bg-amber-50/40 dark:bg-amber-950/10" : ""
+                            } ${
+                              dropTarget === cellKey
+                                ? "bg-amber-100/80 ring-2 ring-inset ring-amber-500 dark:bg-amber-900/30"
+                                : ""
+                            }`}
                           >
-                            <div className="space-y-1 min-h-[60px]">
+                            <div className="min-h-[72px] space-y-1.5">
                               {dayTasks.map((task) => (
-                                <div
+                                <JobChip
                                   key={task.id}
-                                  draggable
-                                  onDragStart={() => handleDragStart(task)}
-                                  className="bg-cyan-100 border border-cyan-300 rounded p-2 text-xs cursor-move hover:bg-cyan-200"
-                                >
-                                  <div className="font-medium text-gray-900 truncate">
-                                    {task.property.address}
-                                  </div>
-                                <div className="text-gray-600 truncate">{task.title}</div>
-                                <button
-                                  onClick={() => setAiTaskId(task.id)}
-                                  className="mt-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
-                                >
-                                  ✨ AI Recommend
-                                </button>
-                                <button
-                                  onClick={() => handleUnassign(task.id)}
-                                  className="mt-1 text-red-600 hover:text-red-800 text-xs block"
-                                >
-                                  Remove
-                                </button>
-                                </div>
+                                  task={task}
+                                  onDragStart={() => setDraggedTask(task)}
+                                  onUnassign={() => handleAssign(task.id, null)}
+                                />
                               ))}
                             </div>
                           </td>
@@ -377,71 +419,145 @@ export default function RotaBuilderPage() {
                       })}
                     </tr>
                   ))}
-                  {/* Unassigned Tasks Row */}
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <td className="px-4 py-3 font-medium text-gray-900">Unassigned</td>
-                    {weekDates.map((date, dayIdx) => {
-                      const dayTasks = getTasksForDay(date).filter((task) => !task.assignedUser)
-                      return (
-                        <td key={dayIdx} className="px-2 py-2 border-l border-gray-200 align-top">
-                          <div className="space-y-1 min-h-[60px]">
-                            {dayTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                draggable
-                                onDragStart={() => handleDragStart(task)}
-                                className="bg-yellow-100 border border-yellow-300 rounded p-2 text-xs cursor-move hover:bg-yellow-200"
-                              >
-                                <div className="font-medium text-gray-900 truncate">
-                                  {task.property.address}
-                                </div>
-                                <div className="text-gray-600 truncate">{task.title}</div>
-                                <button
-                                  onClick={() => setAiTaskId(task.id)}
-                                  className="mt-1 text-teal-700 hover:text-teal-900 text-xs font-medium"
-                                >
-                                  ✨ AI Recommend
-                                </button>
-                                <div className="text-xs text-gray-500 mt-1">Drag to assign</div>
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                      )
-                    })}
+
+                  {/* Unassigned row */}
+                  <tr className="border-t-2 border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20">
+                    <td className="sticky left-0 z-10 border-r border-amber-100 bg-amber-50 px-4 py-3 dark:bg-amber-950/40 dark:border-amber-900">
+                      <div className="text-sm font-extrabold text-amber-900 dark:text-amber-300">
+                        Unassigned
+                      </div>
+                      <div className="mt-0.5 text-[10px] font-medium text-amber-700/80">
+                        Drag onto a cleaner
+                      </div>
+                    </td>
+                    {weekDates.map((date, dayIdx) => (
+                      <td
+                        key={dayIdx}
+                        className="min-h-[88px] border-l border-amber-100 p-1.5 align-top dark:border-amber-900/50"
+                      >
+                        <div className="min-h-[72px] space-y-1.5">
+                          {tasksFor(null, date).map((task) => (
+                            <JobChip
+                              key={task.id}
+                              task={task}
+                              unassigned
+                              onDragStart={() => setDraggedTask(task)}
+                            />
+                          ))}
+                        </div>
+                      </td>
+                    ))}
                   </tr>
                 </tbody>
               </table>
             </div>
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-            No rota data available
-          </div>
-        )}
-      </div>
-
-      {aiTaskId && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-gray-900">Assign Cleaner</h3>
-              <button onClick={() => setAiTaskId(null)} className="text-gray-400 hover:text-gray-600">
-                ✕
-              </button>
-            </div>
-            <AIRecommendationsPanel
-              taskId={aiTaskId}
-              onAssign={async (cleanerId) => {
-                await handleAssign(aiTaskId, cleanerId)
-                setAiTaskId(null)
-              }}
-            />
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </AdminLayout>
   )
 }
 
+function JobChip({
+  task,
+  unassigned,
+  onDragStart,
+  onUnassign,
+}: {
+  task: Task
+  unassigned?: boolean
+  onDragStart: () => void
+  onUnassign?: () => void
+}) {
+  const style =
+    (unassigned
+      ? "bg-amber-100 border-amber-300 text-amber-950"
+      : STATUS_STYLE[task.status]) || "bg-slate-50 border-slate-200 text-slate-800"
 
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      className={`group cursor-grab rounded-lg border px-2 py-1.5 shadow-sm active:cursor-grabbing ${style}`}
+    >
+      <div className="flex items-start gap-1">
+        <GripVertical size={12} className="mt-0.5 shrink-0 opacity-40 group-hover:opacity-70" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[11px] font-bold leading-tight">
+            {task.property?.address || "No address"}
+          </div>
+          <div className="mt-0.5 truncate text-[10px] opacity-70">{task.title}</div>
+          <div className="mt-1 flex items-center justify-between gap-1">
+            <span className="font-mono text-[9px] font-bold uppercase opacity-60">
+              {task.status?.replace(/_/g, " ")}
+            </span>
+            {onUnassign && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onUnassign()
+                }}
+                className="text-[9px] font-bold uppercase text-red-600 opacity-0 hover:underline group-hover:opacity-100"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Kpi({
+  label,
+  value,
+  accent = "slate",
+  icon,
+}: {
+  label: string
+  value: number
+  accent?: "slate" | "emerald" | "amber"
+  icon?: boolean
+}) {
+  const colors = {
+    slate: "text-navy-900 dark:text-white",
+    emerald: "text-emerald-700 dark:text-emerald-400",
+    amber: "text-amber-700 dark:text-amber-400",
+  }
+  return (
+    <div className="rounded-xl border border-control-border bg-white p-4 shadow-sm dark:bg-control-darkCard dark:border-control-darkBorder">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className={`mt-1 text-2xl font-extrabold tabular-nums ${colors[accent]}`}>
+        {value}
+        {icon ? "" : ""}
+      </p>
+    </div>
+  )
+}
+
+function Flash({
+  ok,
+  text,
+  onClose,
+}: {
+  ok: boolean
+  text: string
+  onClose: () => void
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between rounded-xl px-4 py-3 text-sm ${
+        ok
+          ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
+          : "border border-red-200 bg-red-50 text-red-800"
+      }`}
+    >
+      {text}
+      <button onClick={onClose} className="text-xs font-bold opacity-70">
+        Dismiss
+      </button>
+    </div>
+  )
+}

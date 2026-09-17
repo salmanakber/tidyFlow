@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import axios from "axios"
@@ -9,8 +9,7 @@ import {
   Building2,
   ClipboardList,
   CalendarDays,
-  RefreshCcw,
-  AlertCircle,
+  Calendar,
   Users,
   BarChart3,
   Settings,
@@ -19,13 +18,10 @@ import {
   X,
   Search,
   ChevronDown,
-  Bell,
-  Sparkles,
+  Megaphone,
   MapPin,
-  Camera,
   Plus,
   Wallet,
-  Clock3,
   Receipt,
   FileText,
   CalendarOff,
@@ -33,7 +29,14 @@ import {
   ShieldCheck,
   Sun,
   Moon,
-  Database,
+  Layers,
+  Puzzle,
+  CreditCard,
+  Shield,
+  Clock3,
+  RefreshCcw,
+  AlertCircle,
+  CornerDownLeft,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 
@@ -52,40 +55,78 @@ type NavItem = {
   page: string
   icon: React.ComponentType<{ size?: number; className?: string }>
   group: string
-  /** Hide from MANAGER (mobile parity) */
-  ownerOnly?: boolean
+  /** If set, only these roles see the item (mobile Sidebar parity) */
+  roles?: string[]
 }
 
+/**
+ * Mobile Sidebar groups for OWNER / MANAGER / COMPANY_ADMIN.
+ * EXCLUDED (admin-only): Sheets Sync / Task Sync, Company Config, TidyFlow AI.
+ */
 const GROUPS = [
-  { id: "ops", label: "Operations" },
-  { id: "team", label: "Team & assets" },
-  { id: "finance", label: "Finance" },
-  { id: "insights", label: "Insights" },
+  { id: "navigate", label: "Navigate" },
+  { id: "manage", label: "Manage" },
+  { id: "finance", label: "Finance & reports" },
   { id: "account", label: "Account" },
 ] as const
 
-/** Owner/manager company workspace only — never platform admin tools. */
+/**
+ * Mobile Sidebar parity for OWNER / MANAGER / COMPANY_ADMIN.
+ * Not included (admin-only): Sheets Sync / Task Sync, Company Config, TidyFlow AI.
+ * Extra ops screens that exist on mobile but sit outside the sidebar are kept
+ * under Manage/Finance for desktop usefulness (recurring, issues, hours, expenses, safety).
+ */
 const OWNER_NAV: NavItem[] = [
-  { name: "Dashboard", page: "dashboard", icon: LayoutDashboard, group: "ops" },
-  { name: "Jobs", page: "jobs", icon: ClipboardList, group: "ops" },
-  { name: "Rota & Schedule", page: "rota", icon: CalendarDays, group: "ops" },
-  { name: "Recurring Jobs", page: "recurring-jobs", icon: RefreshCcw, group: "ops" },
-  { name: "Issues", page: "issues", icon: AlertCircle, group: "ops" },
-  { name: "Team", page: "team", icon: Users, group: "team", ownerOnly: true },
-  { name: "Properties", page: "properties", icon: Building2, group: "team" },
-  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "team" },
-  { name: "Supplies", page: "supplies", icon: Package, group: "team" },
-  { name: "Leave", page: "leave", icon: CalendarOff, group: "team" },
+  // Navigate — mobile
+  { name: "Home", page: "dashboard", icon: LayoutDashboard, group: "navigate" },
+  { name: "Tasks", page: "jobs", icon: ClipboardList, group: "navigate" },
+  { name: "Calendar", page: "calendar", icon: Calendar, group: "navigate" },
+  // Manage — mobile (+ desktop ops extras)
+  { name: "Properties", page: "properties", icon: Building2, group: "manage" },
+  { name: "Rota Builder", page: "rota", icon: CalendarDays, group: "manage" },
+  {
+    name: "Team",
+    page: "team",
+    icon: Users,
+    group: "manage",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
+  { name: "Leave Requests", page: "leave", icon: CalendarOff, group: "manage" },
+  { name: "Supplies", page: "supplies", icon: Package, group: "manage" },
+  {
+    name: "Announcements",
+    page: "announcements",
+    icon: Megaphone,
+    group: "manage",
+    roles: ["OWNER", "DEVELOPER"],
+  },
+  { name: "Recurring Jobs", page: "recurring-jobs", icon: RefreshCcw, group: "manage" },
+  { name: "Issues", page: "issues", icon: AlertCircle, group: "manage" },
+  { name: "Working Hours", page: "working-hours", icon: Clock3, group: "manage" },
+  // Finance & reports — mobile
   { name: "Payroll", page: "payroll", icon: Wallet, group: "finance" },
-  { name: "Working Hours", page: "working-hours", icon: Clock3, group: "finance" },
-  { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
   { name: "Client Invoices", page: "invoices", icon: FileText, group: "finance" },
-  { name: "Reporting", page: "reporting", icon: BarChart3, group: "insights", ownerOnly: true },
-  { name: "Quality (QA)", page: "qa", icon: ShieldCheck, group: "insights", ownerOnly: true },
-  { name: "TidyFlow AI", page: "ai", icon: Sparkles, group: "insights" },
-  { name: "Notifications", page: "notifications", icon: Bell, group: "insights", ownerOnly: true },
-  { name: "Sheets Sync", page: "sheets-sync", icon: Database, group: "account", ownerOnly: true },
-  { name: "Company Config", page: "company-config", icon: Camera, group: "account" },
+  { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
+  { name: "Integrations", page: "integrations", icon: Puzzle, group: "finance" },
+  { name: "Billing", page: "billing", icon: CreditCard, group: "finance" },
+  {
+    name: "QA Performance",
+    page: "qa",
+    icon: ShieldCheck,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
+  { name: "Compliance", page: "compliance", icon: Shield, group: "finance" },
+  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "finance" },
+  {
+    name: "Analytics",
+    page: "reporting",
+    icon: BarChart3,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
+  // Account — mobile
+  { name: "Profile", page: "profile", icon: Settings, group: "account" },
   { name: "Settings", page: "settings", icon: Settings, group: "account" },
 ]
 
@@ -100,6 +141,40 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const [userMenu, setUserMenu] = useState(false)
   const [search, setSearch] = useState("")
   const [darkMode, setDarkMode] = useState(false)
+  const [cmdOpen, setCmdOpen] = useState(false)
+  const [cmdIndex, setCmdIndex] = useState(0)
+  const cmdInputRef = useRef<HTMLInputElement>(null)
+  const headerSearchRef = useRef<HTMLInputElement>(null)
+
+  const openCommandPalette = useCallback(() => {
+    setCmdOpen(true)
+    setSearch("")
+    setCmdIndex(0)
+    setTimeout(() => cmdInputRef.current?.focus(), 30)
+  }, [])
+
+  const closeCommandPalette = useCallback(() => {
+    setCmdOpen(false)
+    setSearch("")
+    setCmdIndex(0)
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        if (cmdOpen) closeCommandPalette()
+        else openCommandPalette()
+        return
+      }
+      if (e.key === "Escape" && cmdOpen) {
+        e.preventDefault()
+        closeCommandPalette()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [cmdOpen, openCommandPalette, closeCommandPalette])
 
   useEffect(() => {
     const preferDark = localStorage.getItem("tidyflow-theme") === "dark"
@@ -125,7 +200,6 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           return
         }
         const role = String(res.data.data.user?.role || "").toUpperCase()
-        // Hard block platform admins from company shell
         if (role === "SUPER_ADMIN" || role === "ADMIN_UNIQUE") {
           router.replace("/admin/control-center")
           return
@@ -146,8 +220,9 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
 
   const navigation = useMemo(() => {
     if (!user) return []
+    const role = user.role
     return OWNER_NAV.filter((item) => {
-      if (item.ownerOnly && user.role === "MANAGER") return false
+      if (item.roles && !item.roles.includes(role)) return false
       return true
     })
   }, [user])
@@ -156,9 +231,33 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
     ? navigation.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()))
     : navigation
 
+  useEffect(() => {
+    setCmdIndex(0)
+  }, [search])
+
+  const jumpTo = (page: string) => {
+    closeCommandPalette()
+    router.push(wsHref(page))
+  }
+
+  const onCmdKeyDown = (e: React.KeyboardEvent) => {
+    if (!filtered.length) return
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setCmdIndex((i) => (i + 1) % filtered.length)
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setCmdIndex((i) => (i - 1 + filtered.length) % filtered.length)
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      const item = filtered[cmdIndex]
+      if (item) jumpTo(item.page)
+    }
+  }
+
   const grouped = GROUPS.map((g) => ({
     ...g,
-    items: filtered.filter((i) => i.group === g.id),
+    items: navigation.filter((i) => i.group === g.id),
   })).filter((g) => g.items.length > 0)
 
   const logout = async () => {
@@ -177,8 +276,6 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
     }
     localStorage.removeItem("authToken")
     sessionStorage.removeItem("authToken")
-    localStorage.removeItem("userData")
-    sessionStorage.removeItem("userData")
     router.push("/login")
   }
 
@@ -198,60 +295,64 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-control-canvas dark:bg-control-darkCanvas">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-amber-600" />
+      <div className="flex min-h-screen items-center justify-center bg-control-canvas dark:bg-control-darkCanvas">
+        <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-amber-600" />
       </div>
     )
   }
 
   return (
-    <div className="h-screen bg-control-canvas dark:bg-control-darkCanvas text-slate-800 dark:text-slate-100 flex overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-control-canvas font-sans text-slate-800 antialiased dark:bg-control-darkCanvas dark:text-slate-100">
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-navy-950/60 z-40 lg:hidden"
+          className="fixed inset-0 z-40 bg-navy-950/60 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-navy-950 text-slate-300 border-r border-navy-900 flex flex-col transform transition-transform lg:translate-x-0 lg:static ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-navy-900 bg-navy-950 text-slate-300 transition-transform lg:static lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="h-16 px-4 border-b border-navy-900 flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg overflow-hidden bg-amber-600 flex-shrink-0">
-            <img src="/assets/new-icon.png" alt="" className="w-full h-full object-cover" />
-          </div>
-          <div className="min-w-0 leading-tight">
-            <div className="font-extrabold text-sm text-white truncate">
-              Tidy<span className="text-amber-500">Flow</span>
+        <div className="flex h-16 items-center justify-between border-b border-navy-900 px-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 shadow-amber-glow">
+              <Layers className="h-5 w-5 text-navy-950" strokeWidth={2.5} />
             </div>
-            <p className="text-[11px] text-slate-400 truncate">
-              {companyName || "Company workspace"}
-            </p>
+            <div className="min-w-0 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-black tracking-tight text-white">
+                  Tidy<span className="text-amber-500">Flow</span>
+                </span>
+                <span className="rounded border border-amber-500/40 bg-amber-500/20 px-1 py-0.5 font-mono text-[9px] font-bold text-amber-300">
+                  OS
+                </span>
+              </div>
+              <p className="truncate text-[11px] font-medium text-slate-400">
+                {companyName || "Company workspace"}
+              </p>
+            </div>
           </div>
-          <button
-            className="lg:hidden ml-auto p-1 text-slate-400"
-            onClick={() => setSidebarOpen(false)}
-          >
+          <button className="p-1 text-slate-400 lg:hidden" onClick={() => setSidebarOpen(false)}>
             <X size={18} />
           </button>
         </div>
 
-        <div className="px-4 py-2 bg-navy-900/80 border-b border-navy-900 text-[11px] font-mono flex justify-between">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            COMPANY
-          </span>
-          <span className="text-amber-400 font-bold truncate ml-2">
+        <div className="flex items-center justify-between border-b border-navy-900 bg-navy-900/80 px-4 py-2 font-mono text-[11px]">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+            <span className="text-slate-300">LIVE</span>
+          </div>
+          <span className="truncate font-bold text-amber-400">
             {user?.role?.replace(/_/g, " ")}
           </span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5 text-xs font-medium">
+        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 text-xs font-medium">
           {grouped.map((group) => (
             <div key={group.id}>
-              <div className="px-2.5 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                 {group.label}
               </div>
               <div className="space-y-0.5">
@@ -263,13 +364,16 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                       key={item.page}
                       href={to}
                       onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition ${
+                      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition ${
                         active
-                          ? "bg-amber-600 text-white font-bold"
+                          ? "bg-amber-600 font-bold text-white"
                           : "text-slate-300 hover:bg-navy-900 hover:text-white"
                       }`}
                     >
-                      <item.icon size={16} className={active ? "text-white" : "text-slate-400"} />
+                      <item.icon
+                        size={16}
+                        className={active ? "text-white" : "text-slate-400"}
+                      />
                       <span>{item.name}</span>
                     </Link>
                   )
@@ -279,81 +383,77 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           ))}
         </nav>
 
-        <div className="p-3 border-t border-navy-900 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded bg-navy-800 border border-navy-700 flex items-center justify-center text-amber-400 text-xs font-bold overflow-hidden">
+        <div className="flex items-center justify-between gap-2 border-t border-navy-900 p-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded border border-navy-700 bg-navy-800 text-xs font-bold text-amber-400">
               {user?.profileImage ? (
-                <img src={user.profileImage} alt="" className="w-full h-full object-cover" />
+                <img src={user.profileImage} alt="" className="h-full w-full object-cover" />
               ) : (
                 initials
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-bold text-white truncate">{displayName}</p>
-              <p className="text-[10px] text-slate-400 truncate">{companySlug}</p>
+              <p className="truncate text-xs font-bold text-white">{displayName}</p>
+              <p className="truncate font-mono text-[10px] text-slate-400">{companySlug}</p>
             </div>
           </div>
           <button
             onClick={toggleTheme}
-            className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-navy-900"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-amber-400"
+            title="Toggle theme"
           >
             {darkMode ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-16 bg-white dark:bg-control-darkCard border-b border-control-border dark:border-control-darkBorder px-4 sm:px-6 flex items-center justify-between flex-shrink-0">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="z-20 flex h-16 flex-shrink-0 items-center justify-between border-b border-control-border bg-white px-4 dark:border-control-darkBorder dark:bg-control-darkCard sm:px-6">
           <div className="flex items-center gap-3">
             <button
-              className="lg:hidden p-2 text-slate-500"
+              className="rounded-md p-2 text-slate-500 lg:hidden"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu size={22} />
             </button>
-            <div className="relative hidden md:block w-72">
+            <div className="relative hidden w-80 md:block">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 size={14}
               />
               <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Jump to jobs, payroll, team…"
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-navy-950 border border-slate-200 dark:border-navy-900 rounded-lg"
+                ref={headerSearchRef}
+                readOnly
+                onFocus={openCommandPalette}
+                onClick={openCommandPalette}
+                placeholder="Command jump: tasks, payroll, team…"
+                className="w-full cursor-pointer rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-12 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-amber-600 focus:outline-none dark:border-navy-900 dark:bg-navy-950 dark:text-slate-100"
               />
-              {search && filtered.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-full bg-white dark:bg-control-darkCard border border-control-border rounded-lg shadow-lg z-50 max-h-56 overflow-y-auto">
-                  {filtered.map((item) => (
-                    <Link
-                      key={item.page}
-                      href={wsHref(item.page)}
-                      onClick={() => setSearch("")}
-                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-navy-900"
-                    >
-                      <item.icon size={14} /> {item.name}
-                    </Link>
-                  ))}
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={openCommandPalette}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-white px-1 font-mono text-[10px] text-slate-400 hover:border-amber-600 hover:text-amber-700 dark:border-navy-800 dark:bg-navy-900"
+              >
+                ⌘K
+              </button>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Link
-              href={wsHref("jobs")}
-              className="hidden sm:inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-1.5 rounded-lg font-bold text-xs"
+              href={`${wsHref("jobs")}?create=1`}
+              className="hidden items-center gap-2 rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-amber-glow transition hover:bg-amber-700 active:scale-95 sm:inline-flex"
             >
-              <Plus size={14} /> New Job
+              <Plus size={14} strokeWidth={2.5} /> New Job
             </Link>
             <div className="relative">
               <button
                 onClick={() => setUserMenu(!userMenu)}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 dark:hover:bg-navy-900"
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-navy-900"
               >
-                <div className="w-8 h-8 rounded-lg bg-navy-100 dark:bg-navy-800 flex items-center justify-center text-sm font-semibold overflow-hidden">
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg border border-navy-200 bg-navy-100 text-sm font-semibold text-navy-800 dark:border-navy-700 dark:bg-navy-800 dark:text-amber-400">
                   {user?.profileImage ? (
-                    <img src={user.profileImage} alt="" className="w-full h-full object-cover" />
+                    <img src={user.profileImage} alt="" className="h-full w-full object-cover" />
                   ) : (
                     initials
                   )}
@@ -363,17 +463,17 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
               {userMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setUserMenu(false)} />
-                  <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-control-darkCard border border-control-border rounded-lg shadow-lg z-20 p-2">
+                  <div className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-control-border bg-white p-2 shadow-lg dark:border-control-darkBorder dark:bg-control-darkCard">
                     <Link
                       href={wsHref("profile")}
                       onClick={() => setUserMenu(false)}
-                      className="flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-slate-50 dark:hover:bg-navy-900"
+                      className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-navy-900"
                     >
                       <Settings size={14} /> Profile
                     </Link>
                     <button
                       onClick={logout}
-                      className="flex items-center gap-2 px-3 py-2 text-sm rounded-md text-red-600 hover:bg-red-50 w-full"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-600 hover:bg-red-50"
                     >
                       <LogOut size={14} /> Sign out
                     </button>
@@ -385,9 +485,74 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="max-w-[1600px] mx-auto">{children}</div>
+          <div className="mx-auto max-w-[1600px] space-y-6">{children}</div>
         </main>
       </div>
+
+      {/* ⌘K / Ctrl+K command palette */}
+      {cmdOpen && (
+        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-navy-950/50 px-4 pt-[12vh] backdrop-blur-[2px]">
+          <div
+            className="fixed inset-0"
+            onClick={closeCommandPalette}
+            aria-hidden
+          />
+          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-control-border bg-white shadow-2xl dark:border-control-darkBorder dark:bg-control-darkCard">
+            <div className="flex items-center gap-2 border-b border-control-border px-4 dark:border-navy-800">
+              <Search size={16} className="text-amber-600" />
+              <input
+                ref={cmdInputRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={onCmdKeyDown}
+                placeholder="Jump to page…"
+                className="w-full bg-transparent py-3.5 text-sm font-medium text-navy-900 outline-none placeholder:text-slate-400 dark:text-white"
+              />
+              <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 sm:inline dark:border-navy-800 dark:bg-navy-950">
+                ESC
+              </kbd>
+            </div>
+            <div className="max-h-80 overflow-y-auto py-2">
+              {filtered.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-400">No matching pages</p>
+              ) : (
+                filtered.map((item, idx) => {
+                  const active = idx === cmdIndex
+                  return (
+                    <button
+                      key={item.page}
+                      type="button"
+                      onMouseEnter={() => setCmdIndex(idx)}
+                      onClick={() => jumpTo(item.page)}
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
+                        active
+                          ? "bg-amber-50 text-navy-900 dark:bg-amber-950/30 dark:text-white"
+                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-navy-900"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5 font-semibold">
+                        <item.icon
+                          size={15}
+                          className={active ? "text-amber-600" : "text-slate-400"}
+                        />
+                        {item.name}
+                      </span>
+                      {active && (
+                        <CornerDownLeft size={14} className="text-amber-600" />
+                      )}
+                    </button>
+                  )
+                })
+              )}
+            </div>
+            <div className="flex items-center gap-3 border-t border-control-border bg-slate-50 px-4 py-2 font-mono text-[10px] text-slate-400 dark:border-navy-800 dark:bg-navy-950">
+              <span>↑↓ navigate</span>
+              <span>↵ open</span>
+              <span className="ml-auto">esc close</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

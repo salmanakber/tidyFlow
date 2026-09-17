@@ -6,6 +6,10 @@ import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, formatDate } from "@/lib/admin-session"
 import { RefreshCw, ShieldCheck, Star } from "lucide-react"
 import {
+  OpsPageHeader,
+  OpsRefreshButton,
+} from "@/components/ops/OpsChrome"
+import {
   BarChart,
   Bar,
   XAxis,
@@ -62,22 +66,12 @@ function Content() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-navy-900 dark:text-white flex items-center gap-2">
-            <ShieldCheck className="text-amber-600" size={24} /> Quality assurance
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Cleaner QA scores, on-time rates, and recent reviews
-          </p>
-        </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-control-border rounded-lg text-sm font-semibold"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
-      </div>
+      <OpsPageHeader
+        eyebrow="Finance"
+        title="QA Performance"
+        subtitle="Cleaner QA scores, on-time rates, and recent reviews"
+        actions={<OpsRefreshButton onClick={load} loading={loading} />}
+      />
 
       {error && (
         <div className="rounded-xl bg-red-50 border border-red-200 text-red-800 px-4 py-3 text-sm">

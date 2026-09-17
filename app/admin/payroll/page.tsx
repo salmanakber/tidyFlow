@@ -19,6 +19,10 @@ import {
   Play,
   FileDown,
 } from "lucide-react"
+import {
+  OpsPageHeader,
+  OpsRefreshButton,
+} from "@/components/ops/OpsChrome"
 
 interface PayrollRecord {
   id: number
@@ -164,11 +168,11 @@ function PayrollContent() {
 
   return (
     <div className="space-y-6">
-      <Header
+      <OpsPageHeader
+        eyebrow="Finance"
         title="Payroll"
         subtitle="Generate, approve, and pay staff for the selected period"
-        onRefresh={load}
-        loading={loading}
+        actions={<OpsRefreshButton onClick={load} loading={loading} />}
       />
 
       {toast && <Banner kind="ok" text={toast} onClose={() => setToast("")} />}

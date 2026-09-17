@@ -5,6 +5,11 @@ import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, adminPatch, adminDelete, formatMoney } from "@/lib/admin-session"
 import { RefreshCw, Plus, Package, Trash2, Loader2, AlertTriangle } from "lucide-react"
+import {
+  OpsPageHeader,
+  OpsRefreshButton,
+  OpsPrimaryButton,
+} from "@/components/ops/OpsChrome"
 
 export default function SuppliesPage() {
   return (
@@ -109,28 +114,19 @@ function Content() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold text-navy-900 dark:text-white flex items-center gap-2">
-            <Package className="text-amber-600" size={24} /> Supplies
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">Inventory levels, costs, and low-stock alerts</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm px-4 py-2 rounded-lg"
-          >
-            <Plus size={16} /> Add item
-          </button>
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-control-border rounded-lg text-sm font-semibold"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
-          </button>
-        </div>
-      </div>
+      <OpsPageHeader
+        eyebrow="Manage"
+        title="Supplies"
+        subtitle="Inventory levels, costs, and low-stock alerts"
+        actions={
+          <div className="flex gap-2">
+            <OpsRefreshButton onClick={load} loading={loading} />
+            <OpsPrimaryButton onClick={() => setShowForm(true)}>
+              <Plus size={14} /> Add item
+            </OpsPrimaryButton>
+          </div>
+        }
+      />
 
       {toast && <Flash ok text={toast} onClose={() => setToast("")} />}
       {error && <Flash ok={false} text={error} onClose={() => setError("")} />}
