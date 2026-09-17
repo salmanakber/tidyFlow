@@ -40,7 +40,6 @@ import {
   SlidersHorizontal,
   Target,
   Handshake,
-  Layers,
   Sun,
   Moon,
 } from "lucide-react"
@@ -259,9 +258,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       >
         <div className="flex h-16 items-center justify-between border-b border-navy-900 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 shadow-amber-glow">
-              <Layers className="h-5 w-5 text-navy-950" strokeWidth={2.5} />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/logot-transparent.png"
+              alt="TidyFlow"
+              className="h-9 w-9 flex-shrink-0 rounded-lg bg-white/5 object-contain p-0.5"
+              onError={(e) => {
+                const el = e.currentTarget
+                if (!el.src.includes("new-icon.png")) {
+                  el.src = "/assets/new-icon.png"
+                }
+              }}
+            />
             <div className="min-w-0 leading-tight">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-black tracking-tight text-white">
@@ -355,7 +363,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               <Menu size={22} />
             </button>
-            <div className="relative hidden w-72 md:block">
+            <div className="relative hidden w-48 sm:block md:w-72">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 size={14}
@@ -363,7 +371,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Filter admin pages…"
+                placeholder="Filter pages…"
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-3 text-xs font-medium focus:border-amber-600 focus:outline-none dark:border-navy-900 dark:bg-navy-950"
               />
             </div>
@@ -414,7 +422,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className="mx-auto max-w-[1600px] space-y-6">
             <OpsStatusLegend compact />
             {children}

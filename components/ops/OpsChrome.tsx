@@ -223,10 +223,13 @@ export function OpsBadge({ status }: { status?: string | null }) {
     cls =
       "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
   } else if (
-    ["rejected", "failed", "cancelled", "high", "expired", "low", "off-site", "offsite"].includes(s)
+    ["rejected", "failed", "cancelled", "high", "expired", "low", "off-site", "offsite", "late"].includes(s)
   ) {
     cls =
       "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900"
+  } else if (["unassigned"].includes(s)) {
+    cls =
+      "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
   }
   return (
     <span

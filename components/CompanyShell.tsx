@@ -29,7 +29,6 @@ import {
   ShieldCheck,
   Sun,
   Moon,
-  Layers,
   Puzzle,
   CreditCard,
   Shield,
@@ -41,6 +40,7 @@ import {
   Bell,
   Sparkles,
   Crosshair,
+  Mail,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
@@ -88,8 +88,9 @@ const OWNER_NAV: NavItem[] = [
     group: "navigate",
     roles: ["OWNER", "MANAGER", "COMPANY_ADMIN", "DEVELOPER"],
   },
-  // Manage
+  // Manage — Safety near top (managers)
   { name: "Properties", page: "properties", icon: Building2, group: "manage" },
+  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "manage" },
   { name: "Rota Builder", page: "rota", icon: CalendarDays, group: "manage" },
   {
     name: "Team",
@@ -110,12 +111,23 @@ const OWNER_NAV: NavItem[] = [
   { name: "Recurring Jobs", page: "recurring-jobs", icon: RefreshCcw, group: "manage" },
   { name: "Issues", page: "issues", icon: AlertCircle, group: "manage" },
   { name: "Working Hours", page: "working-hours", icon: Clock3, group: "manage" },
-  { name: "Safety & GPS", page: "safety", icon: MapPin, group: "manage" },
-  // Finance & reports
-  { name: "Payroll", page: "payroll", icon: Wallet, group: "finance" },
+  // Finance & reports — Payroll / Integrations / Billing / Analytics: not for MANAGER
+  {
+    name: "Payroll",
+    page: "payroll",
+    icon: Wallet,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   { name: "Client Invoices", page: "invoices", icon: FileText, group: "finance" },
   { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
-  { name: "Integrations", page: "integrations", icon: Puzzle, group: "finance" },
+  {
+    name: "Integrations",
+    page: "integrations",
+    icon: Puzzle,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   {
     name: "Billing",
     page: "billing",
@@ -130,9 +142,22 @@ const OWNER_NAV: NavItem[] = [
     group: "finance",
     roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
   },
-  { name: "Compliance", page: "compliance", icon: Shield, group: "finance" },
-  { name: "Analytics", page: "reporting", icon: BarChart3, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"] },
+  { name: "Compliance", page: "compliance", icon: Shield, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"] },
+  {
+    name: "Analytics",
+    page: "reporting",
+    icon: BarChart3,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   { name: "Notifications", page: "notifications", icon: Bell, group: "account" },
+  {
+    name: "Digests",
+    page: "digests",
+    icon: Mail,
+    group: "account",
+    roles: ["OWNER", "MANAGER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   { name: "Profile", page: "profile", icon: Settings, group: "account" },
 ]
 
@@ -267,6 +292,13 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         href: `${wsHref("jobs")}?create=1`,
         icon: Plus,
       },
+      {
+        kind: "action",
+        id: "send-digest",
+        name: "Send digest",
+        href: wsHref("digests"),
+        icon: Mail,
+      },
     ]
   }, [wsHref])
 
@@ -381,9 +413,18 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
       >
         <div className="flex h-16 items-center justify-between border-b border-amber-900/30 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 shadow-amber-glow">
-              <Layers className="h-5 w-5 text-navy-950" strokeWidth={2.5} />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/assets/logot-transparent.png"
+              alt="TidyFlow"
+              className="h-9 w-9 flex-shrink-0 rounded-lg bg-white/5 object-contain p-0.5"
+              onError={(e) => {
+                const el = e.currentTarget
+                if (!el.src.includes("new-icon.png")) {
+                  el.src = "/assets/new-icon.png"
+                }
+              }}
+            />
             <div className="min-w-0 leading-tight">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-black tracking-tight text-white">
@@ -480,7 +521,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
             >
               <Menu size={22} />
             </button>
-            <div className="relative hidden w-80 md:block">
+            <div className="relative hidden w-56 sm:block md:w-80">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 size={14}
@@ -490,7 +531,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 readOnly
                 onFocus={openCommandPalette}
                 onClick={openCommandPalette}
-                placeholder="Command jump: tasks, payroll, team…"
+                placeholder="Command jump…"
                 className="w-full cursor-pointer rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-12 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-amber-600 focus:outline-none dark:border-navy-900 dark:bg-navy-950 dark:text-slate-100"
               />
               <button
@@ -501,6 +542,14 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 ⌘K
               </button>
             </div>
+            <button
+              type="button"
+              onClick={openCommandPalette}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 font-mono text-[10px] font-bold text-slate-500 sm:hidden dark:border-navy-800"
+              aria-label="Open command palette"
+            >
+              ⌘K
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -548,7 +597,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className="mx-auto max-w-[1600px] space-y-6">
             <OpsStatusLegend compact />
             {children}
@@ -558,13 +607,13 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
 
       {/* ⌘K / Ctrl+K command palette */}
       {cmdOpen && (
-        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-navy-950/50 px-4 pt-[12vh] backdrop-blur-[2px]">
+        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-navy-950/50 pt-[12vh] backdrop-blur-[2px]">
           <div
             className="fixed inset-0"
             onClick={closeCommandPalette}
             aria-hidden
           />
-          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-control-border bg-white shadow-2xl dark:border-amber-900/30 dark:bg-control-darkCard">
+          <div className="relative z-10 mx-2 w-full max-w-lg overflow-hidden rounded-xl border border-control-border bg-white shadow-2xl dark:border-amber-900/30 dark:bg-control-darkCard">
             <div className="flex items-center gap-2 border-b border-control-border px-4 dark:border-amber-900/30">
               <Search size={16} className="text-amber-600" />
               <input

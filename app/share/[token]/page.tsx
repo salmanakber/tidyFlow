@@ -1,298 +1,299 @@
+"use client"
 
-import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import { getSharePortalData } from '@/lib/share-portal';
-import ProofGpsMap from '@/components/share/ProofGpsMap';
+/**
+ * Public read-only client portal for share links.
+ * Fetches GET /api/share/[token] — no auth required.
+ */
+import { useEffect, useMemo, useState } from "react"
+import { useParams } from "next/navigation"
+import { MapPin, ShieldCheck, Camera, AlertTriangle, Loader2 } from "lucide-react"
 
-function formatDurationMinutes(mins: number): string {
-  if (mins < 60) return `${mins}m`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+type PortalPhoto = {
+  id: number
+  url: string
+  photoType?: string | null
+  caption?: string | null
 }
 
-type PageProps = { params: { token: string } };
-
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const result = await getSharePortalData(params.token, { incrementView: false });
-  if (!result.ok) {
-    return { title: 'Cleaning Report' };
+type PortalData = {
+  companyName?: string | null
+  title?: string | null
+  status?: string | null
+  completedAt?: string | null
+  averageScore?: number | null
+  property?: { address?: string | null; clientName?: string | null } | null
+  assignedUser?: { firstName?: string | null; lastName?: string | null } | null
+  photos?: PortalPhoto[]
+  proof?: {
+    cleaners?: Array<{ name: string; workMinutes?: number; startWithinGeofence?: boolean | null }>
+    totalWorkMinutes?: number
+    gps?: {
+      checkpointCount?: number
+      onSiteCount?: number
+      startOnSite?: boolean
+      flaggedCheckpoints?: Array<{
+        latitude: number
+        longitude: number
+        recordedAt: string
+      }>
+    }
   }
-  return {
-    title: `${result.data.title} · Cleaning Report`,
-    description: `Photo and GPS verified cleaning report for ${result.data.property.address}`,
-  };
 }
 
-export default async function SharePortalPage({ params }: PageProps) {
-  const result = await getSharePortalData(params.token);
-  if (!result.ok) {
-    if (result.ok === false && result.status === 404) notFound();
+export default function SharePortalPage() {
+  const params = useParams()
+  const token = typeof params?.token === "string" ? params.token : ""
+  const [data, setData] = useState<PortalData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<"invalid" | "expired" | "network" | null>(null)
+
+  useEffect(() => {
+    if (!token) {
+      setError("invalid")
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const res = await fetch(`/api/share/${encodeURIComponent(token)}`)
+        const json = await res.json().catch(() => null)
+        if (cancelled) return
+        if (res.status === 410) {
+          setError("expired")
+          setData(null)
+          return
+        }
+        if (!res.ok || !json?.success) {
+          setError(res.status === 404 || res.status === 400 ? "invalid" : "network")
+          setData(null)
+          return
+        }
+        setData(json.data as PortalData)
+      } catch {
+        if (!cancelled) {
+          setError("network")
+          setData(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [token])
+
+  const beforePhotos = useMemo(
+    () => (data?.photos || []).filter((p) => (p.photoType || "").toLowerCase() === "before"),
+    [data]
+  )
+  const afterPhotos = useMemo(
+    () => (data?.photos || []).filter((p) => (p.photoType || "").toLowerCase() === "after"),
+    [data]
+  )
+
+  const cleanerName = useMemo(() => {
+    if (data?.assignedUser) {
+      const n = [data.assignedUser.firstName, data.assignedUser.lastName].filter(Boolean).join(" ").trim()
+      if (n) return n
+    }
+    return data?.proof?.cleaners?.[0]?.name || null
+  }, [data])
+
+  if (loading) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center px-6 text-center bg-slate-50">
-        <div className="rounded-2xl bg-white p-8 shadow-sm border border-slate-100">
-          <svg className="mx-auto h-12 w-12 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <p className="mt-4 text-lg font-semibold text-slate-900">Link Expired</p>
-          <p className="mt-2 text-sm text-slate-500">This client report link is no longer valid or has been deactivated.</p>
+      <Shell>
+        <div className="flex flex-col items-center justify-center gap-3 py-24 text-slate-400">
+          <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
+          <p className="text-sm font-medium">Loading cleaning report…</p>
         </div>
-      </main>
-    );
+      </Shell>
+    )
   }
 
-  const task = result.data;
-  const proof = task.proof;
-  const beforePhotos = task.photos.filter((p) => p.photoType === 'before');
-  const afterPhotos = task.photos.filter((p) => p.photoType === 'after');
-  const cleanerName = task.assignedUser
-    ? `${task.assignedUser.firstName || ''} ${task.assignedUser.lastName || ''}`.trim()
-    : proof.cleaners[0]?.name;
+  if (error || !data) {
+    const title =
+      error === "expired" ? "This link has expired" : error === "network" ? "Could not load report" : "Link invalid or expired"
+    const detail =
+      error === "expired"
+        ? "Ask the cleaning company for a fresh share link."
+        : error === "network"
+          ? "Check your connection and try again."
+          : "This share link is no longer available."
+    return (
+      <Shell>
+        <div className="mx-auto max-w-md rounded-2xl border border-amber-500/20 bg-navy-900/80 px-8 py-12 text-center shadow-xl">
+          <AlertTriangle className="mx-auto h-12 w-12 text-amber-500" />
+          <h1 className="mt-4 text-xl font-extrabold text-white">{title}</h1>
+          <p className="mt-2 text-sm text-slate-400">{detail}</p>
+        </div>
+      </Shell>
+    )
+  }
+
+  const gps = data.proof?.gps
+  const statusLabel = (data.status || "—").replace(/_/g, " ")
 
   return (
-    <main className="min-h-screen bg-slate-50 pb-16 text-slate-800 antialiased">
-      {/* Top Brand Bar */}
-      <div className="bg-slate-900 px-4 py-3 text-center text-xs font-medium tracking-wider text-slate-300 uppercase">
-        {task.companyName || 'Cleaning Service Report'}
-      </div>
-
-      {/* Header Section */}
-      <header className="border-b border-slate-200 bg-white px-4 py-8 md:px-8">
-        <div className="mx-auto max-w-3xl">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Verified Report
-            </span>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 uppercase tracking-wider">
-              {task.status.replace(/_/g, ' ')}
-            </span>
-          </div>
-
-          <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-slate-950 md:text-3.5xl">
-            Cleaning Report
+    <Shell>
+      <header className="overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-br from-navy-900 via-navy-950 to-[#061018] shadow-xl">
+        <div className="border-b border-amber-500/15 px-5 py-4 sm:px-8 sm:py-5">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400">
+            Cleaning report
+          </p>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
+            {data.companyName || "TidyFlow"}
           </h1>
-          <p className="mt-1.5 text-base font-semibold text-slate-700">{task.title}</p>
-          
-          <div className="mt-4 flex items-start gap-2 text-sm text-slate-500">
-            <svg className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span>{task.property.address}</span>
-          </div>
+          {data.property?.address && (
+            <p className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+              <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+              <span>{data.property.address}</span>
+            </p>
+          )}
+          {data.title && <p className="mt-1 text-xs font-medium text-slate-500">{data.title}</p>}
+        </div>
+        <div className="grid grid-cols-2 gap-px bg-amber-500/10 sm:grid-cols-4">
+          <Stat label="Status" value={statusLabel} />
+          <Stat label="Cleaner" value={cleanerName || "—"} />
+          <Stat
+            label="Quality score"
+            value={data.averageScore != null ? `${data.averageScore}/100` : "—"}
+          />
+          <Stat
+            label="Completed"
+            value={
+              data.completedAt
+                ? new Date(data.completedAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : "—"
+            }
+          />
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl space-y-6 px-4 pt-6 md:px-8">
-        
-        {/* Report Summary Cards */}
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {cleanerName ? (
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <span className="block text-xs font-medium text-slate-400 uppercase tracking-wider">Service Professional</span>
-              <span className="mt-1 block text-sm font-semibold text-slate-900 truncate">{cleanerName}</span>
-            </div>
-          ) : null}
-
-          <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <span className="block text-xs font-medium text-slate-400 uppercase tracking-wider">Service Date</span>
-            <span className="mt-1 block text-sm font-semibold text-slate-900">
-              {task.completedAt
-                ? new Date(task.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-                : task.scheduledDate
-                  ? new Date(task.scheduledDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-                  : '—'}
-            </span>
+      {gps && (
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-amber-600" />
+            <h2 className="text-base font-bold text-navy-900">GPS verification</h2>
           </div>
-
-          {proof.totalWorkMinutes > 0 ? (
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <span className="block text-xs font-medium text-slate-400 uppercase tracking-wider">Time on Site</span>
-              <span className="mt-1 block text-sm font-semibold text-emerald-700">
-                {formatDurationMinutes(proof.totalWorkMinutes)}
-              </span>
-            </div>
-          ) : null}
-
-          {task.averageScore != null ? (
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <span className="block text-xs font-medium text-slate-400 uppercase tracking-wider">Quality Score</span>
-              <span className="mt-1 block text-sm font-bold text-slate-900">
-                {task.averageScore}<span className="text-xs font-normal text-slate-400">/100</span>
-              </span>
-            </div>
-          ) : null}
-        </section>
-
-        {/* GPS Verification Info & Map */}
-        {proof.gps.checkpointCount > 0 ? (
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 bg-slate-50/50 p-5">
-              <div className="flex items-center gap-2">
-                <div className="rounded-md bg-sky-50 p-1.5 text-sky-600 ring-1 ring-sky-500/10">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                </div>
-                <h2 className="text-base font-bold text-slate-900">GPS Audit Verification</h2>
-              </div>
-              <p className="mt-2 text-xs font-medium text-slate-500">
-                {proof.gps.checkpointCount} logged location pings
-                {proof.gps.onSiteCount > 0 ? ` · ${proof.gps.onSiteCount} confirmed on site` : ''}
-                {proof.gps.offSiteCount > 0 ? ` · ${proof.gps.offSiteCount} off site` : ''}
-              </p>
-
-              {proof.cleaners.map((c, idx) => (
-                <div key={`${c.name}-${idx}`} className="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-xs shadow-xs">
-                  <div className="flex items-center justify-between font-semibold text-slate-800">
-                    <span>{c.name}</span>
-                    <span className="text-slate-500">{formatDurationMinutes(c.workMinutes)}</span>
-                  </div>
-                  {c.startWithinGeofence !== undefined && (
-                    <div className="mt-1 flex items-center gap-1 text-slate-400">
-                      <span className={`h-1.5 w-1.5 rounded-full ${c.startWithinGeofence ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-                      <span>{c.startWithinGeofence ? 'Started within authorized property zone' : 'Started outside property zone'}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="p-4 bg-slate-50">
-              <div className="overflow-hidden rounded-xl border border-slate-200 shadow-inner">
-                <ProofGpsMap
-                  bounds={proof.gps.mapBounds}
-                  checkpoints={proof.gps.mapCheckpoints}
-                  propertyAddress={task.property.address}
-                />
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {/* Before Photos Gallery */}
-        {beforePhotos.length > 0 ? (
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">
-                Before Photos <span className="ml-1 text-xs font-normal text-slate-400">({beforePhotos.length})</span>
-              </h2>
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">Initial State</span>
-            </div>
-            
-            <div className="flex gap-4 overflow-x-auto pb-3 snap-x scrollbar-thin scrollbar-thumb-slate-200">
-              {beforePhotos.map((photo) => (
-                <a
-                  key={photo.id}
-                  href={photo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative shrink-0 snap-start overflow-hidden rounded-xl border border-slate-200 shadow-sm transition hover:opacity-95"
+          <p className="mt-2 text-sm text-slate-500">
+            {gps.checkpointCount ?? 0} location checkpoint
+            {(gps.checkpointCount ?? 0) === 1 ? "" : "s"}
+            {(gps.onSiteCount ?? 0) > 0 ? ` · ${gps.onSiteCount} on site` : ""}
+            {gps.startOnSite === true ? " · Started on site" : ""}
+          </p>
+          {data.proof?.cleaners && data.proof.cleaners.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {data.proof.cleaners.map((c, i) => (
+                <li
+                  key={`${c.name}-${i}`}
+                  className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
                 >
-                  <span className="absolute top-2 left-2 z-10 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] font-bold text-white uppercase backdrop-blur-xs">
-                    Before
-                  </span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={photo.url}
-                    alt={photo.caption || 'Before service'}
-                    className="h-44 w-64 object-cover"
-                  />
-                  {photo.caption && (
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                      <p className="text-[11px] text-white truncate">{photo.caption}</p>
-                    </div>
-                  )}
-                </a>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {/* After Photos Gallery */}
-        {afterPhotos.length > 0 ? (
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">
-                After Photos <span className="ml-1 text-xs font-normal text-slate-400">({afterPhotos.length})</span>
-              </h2>
-              <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/10">
-                Completed
-              </span>
-            </div>
-
-            <div className="flex gap-4 overflow-x-auto pb-3 snap-x scrollbar-thin scrollbar-thumb-slate-200">
-              {afterPhotos.map((photo) => (
-                <a
-                  key={photo.id}
-                  href={photo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative shrink-0 snap-start overflow-hidden rounded-xl border border-slate-200 shadow-sm transition hover:opacity-95"
-                >
-                  <span className="absolute top-2 left-2 z-10 rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase shadow-xs">
-                    After
-                  </span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={photo.url}
-                    alt={photo.caption || 'After service'}
-                    className="h-44 w-64 object-cover"
-                  />
-                  
-                  {photo.aiScore != null && (
-                    <span className="absolute top-2 right-2 z-10 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-xs">
-                      AI: {photo.aiScore}/100
-                    </span>
-                  )}
-
-                  {photo.caption && (
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                      <p className="text-[11px] text-white truncate">{photo.caption}</p>
-                    </div>
-                  )}
-                </a>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {/* Dynamic Checklist Tasks */}
-        {task.checklists.length > 0 ? (
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="border-b border-slate-100 pb-3">
-              <h2 className="text-base font-bold text-slate-900">Task Inspection Checklist</h2>
-              <p className="text-xs text-slate-400">Real-time checklist logged at completion</p>
-            </div>
-            
-            <ul className="mt-4 divide-y divide-slate-100">
-              {task.checklists.map((item, idx) => (
-                <li key={idx} className="flex items-start gap-3 py-3 text-sm first:pt-0 last:pb-0">
-                  {item.isCompleted ? (
-                    <svg className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                  ) : (
-                    <svg className="mt-0.5 h-5 w-5 shrink-0 text-slate-300" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="10" cy="10" r="7" />
-                    </svg>
-                  )}
-                  <span className={`font-medium ${item.isCompleted ? 'text-slate-600 line-through decoration-slate-300' : 'text-slate-800'}`}>
-                    {item.title}
+                  <span className="font-semibold text-navy-900">{c.name}</span>
+                  <span className="text-xs text-slate-500">
+                    {c.workMinutes != null && c.workMinutes > 0
+                      ? `${c.workMinutes} min`
+                      : "Time n/a"}
+                    {c.startWithinGeofence === true
+                      ? " · On site start"
+                      : c.startWithinGeofence === false
+                        ? " · Off site start"
+                        : ""}
                   </span>
                 </li>
               ))}
             </ul>
-          </section>
-        ) : null}
-      </div>
+          )}
+          {(gps.flaggedCheckpoints?.length ?? 0) > 0 && (
+            <div className="mt-4 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-rose-700">
+                Flagged off-site points
+              </p>
+              <ul className="mt-2 space-y-1">
+                {gps.flaggedCheckpoints!.slice(0, 5).map((g, i) => (
+                  <li key={`${g.recordedAt}-${i}`} className="text-xs text-rose-800">
+                    {Number(g.latitude).toFixed(5)}, {Number(g.longitude).toFixed(5)}
+                    {" · "}
+                    {new Date(g.recordedAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
-      {/* Footer */}
-      <footer className="mx-auto mt-12 max-w-3xl px-4 text-center text-xs text-slate-400 md:px-8">
-        <p className="font-semibold tracking-wide uppercase text-slate-400/80">Verified Cleaning Report</p>
-        <p className="mt-1">Generated and verified by {task.companyName}</p>
-      </footer>
-    </main>
-  );
+      <PhotoGrid title="Before photos" photos={beforePhotos} />
+      <PhotoGrid title="After photos" photos={afterPhotos} />
+
+      <p className="mt-10 text-center text-[11px] text-slate-400">
+        Powered by <span className="font-semibold text-navy-800">TidyFlow</span>
+      </p>
+    </Shell>
+  )
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#F4F6F9] via-[#EEF1F6] to-[#E8ECF2]">
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">{children}</div>
+    </div>
+  )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-navy-950/90 px-4 py-3 sm:px-5 sm:py-4">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-sm font-bold capitalize text-white">{value}</p>
+    </div>
+  )
+}
+
+function PhotoGrid({ title, photos }: { title: string; photos: PortalPhoto[] }) {
+  return (
+    <section className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <Camera className="h-4 w-4 text-amber-600" />
+        <h2 className="text-base font-bold text-navy-900">
+          {title}{" "}
+          <span className="font-mono text-sm font-medium text-slate-400">({photos.length})</span>
+        </h2>
+      </div>
+      {photos.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 bg-white/60 px-4 py-8 text-center text-sm text-slate-400">
+          No photos yet
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {photos.map((p) => (
+            <a
+              key={p.id}
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={p.url}
+                alt={p.caption || title}
+                className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+              />
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }

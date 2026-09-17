@@ -1,12 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Sparkles, Loader2, Star, MapPin, Check } from "lucide-react"
+import { Sparkles, Loader2, Star, MapPin, Check, CreditCard } from "lucide-react"
 import {
   getCleanerRecommendations,
   type AssignmentRecommendations,
   type CleanerRecommendation,
 } from "@/lib/ops-ai"
+import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 
 export default function SmartAssignPanel({
   taskId,
@@ -14,16 +15,25 @@ export default function SmartAssignPanel({
   scheduledDate,
   selectedUserId,
   onSelect,
+  billingHref = "billing",
 }: {
   taskId?: number
   propertyId?: number
   scheduledDate?: string
   selectedUserId?: string
   onSelect: (userId: number, name: string) => void
+  /** Relative page key or absolute path; defaults to company/admin billing */
+  billingHref?: string
 }) {
+  const { href: wsHref } = useCompanyWorkspace()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [upsell, setUpsell] = useState(false)
   const [data, setData] = useState<AssignmentRecommendations | null>(null)
+
+  const billingLink = billingHref.startsWith("/")
+    ? billingHref
+    : wsHref(billingHref)
 
   const run = async () => {
     if (!propertyId && !taskId) {
@@ -33,12 +43,18 @@ export default function SmartAssignPanel({
     try {
       setLoading(true)
       setError("")
+      setUpsell(false)
       const res = await getCleanerRecommendations({
         taskId,
         propertyId,
         scheduledDate,
       })
-      if (!res || (!res.recommended && !(res.alternatives?.length > 0))) {
+      if (!res) {
+        setUpsell(true)
+        setData(null)
+        return
+      }
+      if (!res.recommended && !(res.alternatives?.length > 0)) {
         setError(
           "No recommendations available — check AI assignment is enabled on your plan, or try again."
         )
@@ -46,8 +62,13 @@ export default function SmartAssignPanel({
         return
       }
       setData(res)
-    } catch {
-      setError("AI recommend failed — try again")
+    } catch (e: any) {
+      if (e?.response?.status === 403) {
+        setUpsell(true)
+        setData(null)
+      } else {
+        setError("AI recommend failed — try again")
+      }
     } finally {
       setLoading(false)
     }
@@ -81,7 +102,25 @@ export default function SmartAssignPanel({
         </button>
       </div>
 
-      {error && <p className="mt-3 text-xs font-semibold text-red-600">{error}</p>}
+      {upsell && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-100/80 p-3 dark:border-amber-700 dark:bg-amber-950/40">
+          <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+            Smart assign needs a plan upgrade
+          </p>
+          <p className="mt-1 text-[11px] text-amber-800/90 dark:text-amber-300/80">
+            AI cleaner recommendations aren’t available on your current plan. Upgrade billing to unlock
+            smart scheduling.
+          </p>
+          <a
+            href={billingLink}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-700"
+          >
+            <CreditCard size={12} /> View billing
+          </a>
+        </div>
+      )}
+
+      {error && !upsell && <p className="mt-3 text-xs font-semibold text-red-600">{error}</p>}
 
       {rows.length > 0 && (
         <ul className="mt-3 space-y-2">

@@ -41,6 +41,7 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   '/admin/client-invoices': null,
   '/admin/leave': null,
   '/admin/supplies': null,
+  '/admin/digests': null,
   
   // System
   '/admin/sheets-sync': PERMISSIONS.SYSTEM_ADMIN,

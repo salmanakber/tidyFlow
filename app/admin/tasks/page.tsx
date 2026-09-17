@@ -13,6 +13,7 @@ import {
   OpsFlash,
   OpsEmpty,
   OpsSkeleton,
+  OpsPagination,
 } from "@/components/ops/OpsChrome"
 import JobInspectorDrawer, {
   JobStatusBadge,
@@ -38,6 +39,9 @@ import {
 } from "lucide-react"
 
 const BOARD_COLUMNS = ["PLANNED", "ASSIGNED", "IN_PROGRESS", "SUBMITTED", "APPROVED"]
+const PAGE_SIZE = 20
+
+const TASK_STATUS_VALUES = new Set(Object.keys(JOB_STATUS_CONFIG))
 
 function formatSmartDate(dateString?: string) {
   if (!dateString) return "Unscheduled"
@@ -74,6 +78,8 @@ function TasksContent() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useUrlQueryState("status", "all")
   const [propertyFilter, setPropertyFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
 
   const load = async () => {
     try {
@@ -82,14 +88,30 @@ function TasksContent() {
       const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
       const companyId = localStorage.getItem("selectedCompanyId")
       const headers = { Authorization: `Bearer ${token}` }
-      const params = companyId ? { companyId } : {}
+      const params: Record<string, string | number> = {
+        page,
+        limit: PAGE_SIZE,
+      }
+      if (companyId) params.companyId = companyId
+      // Server-side status when it is a TaskStatus enum value
+      if (statusFilter !== "all" && statusFilter !== "unassigned" && TASK_STATUS_VALUES.has(statusFilter)) {
+        params.status = statusFilter
+      }
       const [tasksRes, propsRes, usersRes] = await Promise.all([
-        axios.get("/api/tasks", { headers, params: { ...params, limit: 500 } }),
-        axios.get("/api/properties", { headers, params }),
-        axios.get("/api/users", { headers, params }),
+        axios.get("/api/tasks", { headers, params }),
+        axios.get("/api/properties", { headers, params: companyId ? { companyId } : {} }),
+        axios.get("/api/users", { headers, params: companyId ? { companyId } : {} }),
       ])
       const list = tasksRes.data?.data?.tasks || tasksRes.data?.data || []
       setTasks(Array.isArray(list) ? list : [])
+      const pagination = tasksRes.data?.pagination
+      setTotal(
+        typeof pagination?.total === "number"
+          ? pagination.total
+          : Array.isArray(list)
+            ? list.length
+            : 0
+      )
       const props = propsRes.data?.data?.properties || propsRes.data?.data || []
       setProperties(Array.isArray(props) ? props : [])
       const usersRaw = usersRes.data?.data?.users || usersRes.data?.data || []
@@ -109,7 +131,12 @@ function TasksContent() {
 
   useEffect(() => {
     load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, statusFilter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [statusFilter])
 
   useEffect(() => {
     const create = searchParams?.get("create")
@@ -454,6 +481,14 @@ function TasksContent() {
                 })}
               </div>
             </div>
+          )}
+          {!loading && total > 0 && (
+            <OpsPagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={total}
+              onPageChange={setPage}
+            />
           )}
         </OpsCard>
       </div>

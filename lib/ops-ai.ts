@@ -35,7 +35,8 @@ export async function getCleanerRecommendations(opts: {
     })
     if (res.data?.success) return res.data.data as AssignmentRecommendations
     return null
-  } catch {
+  } catch (e: any) {
+    if (e?.response?.status === 403) throw e
     return null
   }
 }

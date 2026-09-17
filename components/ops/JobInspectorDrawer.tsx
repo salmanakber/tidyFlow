@@ -18,9 +18,12 @@ import {
   CheckSquare,
   Clock,
   Radio,
+  Share2,
+  ScrollText,
 } from "lucide-react"
 import SmartAssignPanel from "@/components/ops/SmartAssignPanel"
 import LiveMapPanel from "@/components/ops/LiveMapPanel"
+import AuditTrailDrawer from "@/components/ops/AuditTrailDrawer"
 import {
   fetchLiveCleaners,
   fetchTaskLocationLogs,
@@ -160,6 +163,9 @@ export default function JobInspectorDrawer({
   const [locationLogs, setLocationLogs] = useState<LocationLog[]>([])
   const [liveForJob, setLiveForJob] = useState<LiveCleaner[]>([])
   const [gpsLoading, setGpsLoading] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareFlash, setShareFlash] = useState("")
+  const [auditOpen, setAuditOpen] = useState(false)
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -307,6 +313,37 @@ export default function JobInspectorDrawer({
     }
   }
 
+  const shareWithClient = async () => {
+    if (!task?.id) return
+    try {
+      setShareBusy(true)
+      setShareFlash("")
+      const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+      const res = await axios.post(
+        "/api/share",
+        { taskId: task.id },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      const link = res.data?.data?.shareLink as string | undefined
+      if (!link) {
+        onError(res.data?.message || "Could not create share link")
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(link)
+        setShareFlash("Share link copied")
+      } catch {
+        setShareFlash(link)
+        onError("Link created — copy manually: " + link)
+      }
+    } catch (err: any) {
+      onError(err.response?.data?.message || "Could not share with client")
+    } finally {
+      setShareBusy(false)
+      setTimeout(() => setShareFlash(""), 3500)
+    }
+  }
+
   const headline = task
     ? `#JOB-${task.id} · ${task.property?.address || task.title}`
     : "New job dispatch"
@@ -366,11 +403,11 @@ export default function JobInspectorDrawer({
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 right-0 z-[70] flex w-full max-w-[560px] flex-col border-l border-control-border bg-white shadow-2xl transition-transform duration-200 ease-out dark:border-control-darkBorder dark:bg-control-darkCard ${
+        className={`fixed inset-y-0 right-0 z-[70] flex w-full flex-col border-l border-control-border bg-white shadow-2xl transition-transform duration-200 ease-out sm:w-1/2 sm:max-w-[50vw] dark:border-control-darkBorder dark:bg-control-darkCard ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex items-start justify-between border-b border-navy-900 bg-navy-950 p-5 text-white">
+        <div className="flex items-start justify-between border-b border-navy-900 bg-navy-950 p-4 text-white sm:p-5">
           <div className="min-w-0 pr-3">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
               <span className="font-bold uppercase text-amber-500">Job inspector</span>
@@ -399,7 +436,7 @@ export default function JobInspectorDrawer({
           </button>
         </div>
 
-        <div className="flex gap-4 overflow-x-auto border-b border-control-border bg-slate-50 px-5 font-mono text-xs font-bold dark:border-navy-800 dark:bg-navy-950">
+        <div className="flex gap-4 overflow-x-auto border-b border-control-border bg-slate-50 px-3 font-mono text-xs font-bold sm:px-5 dark:border-navy-800 dark:bg-navy-950">
           {tabs
             .filter((t) => t.show !== false)
             .map((t) => (
@@ -420,7 +457,12 @@ export default function JobInspectorDrawer({
         </div>
 
         <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto p-5 text-sm">
+          <div className="flex-1 space-y-4 overflow-y-auto p-3 text-sm sm:p-5">
+            {shareFlash && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                {shareFlash}
+              </div>
+            )}
             {tab === "details" && (
               <>
                 <Field label="Job title" required>
@@ -765,7 +807,7 @@ export default function JobInspectorDrawer({
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-control-border bg-slate-50 p-4 dark:border-navy-800 dark:bg-navy-950">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-control-border bg-slate-50 p-3 sm:gap-3 sm:p-4 dark:border-navy-800 dark:bg-navy-950">
             <button
               type="button"
               onClick={onClose}
@@ -773,19 +815,52 @@ export default function JobInspectorDrawer({
             >
               Close
             </button>
-            {(tab === "details" || tab === "schedule") && (
-              <button
-                type="submit"
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-1.5 font-mono text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-                {task ? "Save changes" : "Create job"}
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {task?.id ? (
+                <button
+                  type="button"
+                  onClick={() => setAuditOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-navy-700 dark:bg-navy-900 dark:text-slate-200"
+                >
+                  <ScrollText size={14} />
+                  Audit
+                </button>
+              ) : null}
+              {task?.id ? (
+                <button
+                  type="button"
+                  disabled={shareBusy}
+                  onClick={shareWithClient}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:bg-navy-900 dark:text-amber-300"
+                >
+                  {shareBusy ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Share2 size={14} />
+                  )}
+                  Share with client
+                </button>
+              ) : null}
+              {(tab === "details" || tab === "schedule") && (
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-1.5 font-mono text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {task ? "Save changes" : "Create job"}
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </aside>
+      <AuditTrailDrawer
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        entityType="task"
+        entityId={task?.id ? String(task.id) : undefined}
+      />
     </>
   )
 }

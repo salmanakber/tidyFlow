@@ -63,6 +63,7 @@ export const COMPANY_ROUTE_MAP: Record<string, string> = {
   profile: 'profile',
   'checklist-templates': 'checklist-templates',
   notifications: 'notifications',
+  digests: 'digests',
   // Platform admin only: company-config, ai
 }
 

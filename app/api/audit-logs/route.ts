@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const action = searchParams.get('action');
   const entityType = searchParams.get('entityType');
-  const limit = Math.min(Number(searchParams.get('limit') || 50), 500);
+  const rawLimit = Number(searchParams.get('limit') || 20);
+  const limit = Math.min(Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20, 500);
   const format = searchParams.get('format');
 
   const where: {
