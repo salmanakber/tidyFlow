@@ -3,13 +3,24 @@
 import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
-import { adminGet, adminPost, formatDate, formatMoney, statusBadgeClass } from "@/lib/admin-session"
-import { RefreshCw, Plus, Loader2, Receipt } from "lucide-react"
+import { adminGet, adminPost, formatDate, formatMoney } from "@/lib/admin-session"
+import { Plus, Loader2, Receipt } from "lucide-react"
 import {
   OpsPageHeader,
   OpsRefreshButton,
   OpsPrimaryButton,
+  OpsFlash,
+  OpsEmpty,
+  OpsBadge,
+  OpsKpi,
+  OpsCard,
+  OpsTableShell,
+  OpsPagination,
+  opsTh,
+  opsTd,
 } from "@/components/ops/OpsChrome"
+
+const PAGE_SIZE = 10
 
 export default function ExpensesPage() {
   return (
@@ -30,16 +41,24 @@ function Content() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ category: "supplies", amount: "", description: "" })
   const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState("all")
+  const [page, setPage] = useState(1)
 
   const load = async () => {
     try {
       setLoading(true)
       setError("")
       const res = await adminGet("/api/expenses")
-      if (res.data.success) setItems(res.data.data || [])
-      else setError(res.data.message || "Failed")
+      if (res.data.success) {
+        const raw = res.data.data
+        setItems(Array.isArray(raw) ? raw : [])
+      } else {
+        setItems([])
+        setError(res.data.message || "Failed")
+      }
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to load expenses")
+      setItems([])
     } finally {
       setLoading(false)
     }
@@ -48,6 +67,10 @@ function Content() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [tab])
 
   const approve = async (id: number, status: "approved" | "rejected") => {
     try {
@@ -86,13 +109,17 @@ function Content() {
     }
   }
 
-  const pending = items.filter((i) => i.status === "pending").length
-  const totalPending = items
+  const safeItems = Array.isArray(items) ? items : []
+  const filtered =
+    tab === "all" ? safeItems : safeItems.filter((i) => String(i.status) === tab)
+  const pending = safeItems.filter((i) => i.status === "pending").length
+  const totalPending = safeItems
     .filter((i) => i.status === "pending")
     .reduce((s, i) => s + Number(i.amount || 0), 0)
+  const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <OpsPageHeader
         eyebrow="Finance"
         title="Expenses"
@@ -107,158 +134,151 @@ function Content() {
         }
       />
 
-      {toast && <Flash ok text={toast} onClose={() => setToast("")} />}
-      {error && <Flash ok={false} text={error} onClose={() => setError("")} />}
+      {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+      {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
       <div className="grid grid-cols-2 gap-3">
-        <Card label="Pending approvals" value={pending} />
-        <Card label="Pending amount" value={formatMoney(totalPending)} />
+        <OpsKpi label="Pending approvals" value={pending} />
+        <OpsKpi label="Pending amount" value={formatMoney(totalPending)} />
       </div>
 
       {showForm && (
-        <form
-          onSubmit={create}
-          className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-5 grid grid-cols-1 md:grid-cols-4 gap-3"
-        >
-          <label className="text-xs font-semibold space-y-1">
-            Category
-            <select
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-            >
-              <option value="supplies">Supplies</option>
-              <option value="travel">Travel</option>
-              <option value="equipment">Equipment</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label className="text-xs font-semibold space-y-1">
-            Amount
-            <input
-              required
-              type="number"
-              step="0.01"
-              min="0"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-            />
-          </label>
-          <label className="text-xs font-semibold space-y-1 md:col-span-2">
-            Description
-            <input
-              required
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          </label>
-          <div className="md:col-span-4 flex gap-2 justify-end">
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm font-semibold">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center gap-2 bg-navy-900 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="animate-spin" size={14} /> : <Receipt size={14} />}
-              Submit
-            </button>
-          </div>
-        </form>
+        <OpsCard>
+          <form onSubmit={create} className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <label className="space-y-1 text-xs font-semibold">
+              Category
+              <select
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                <option value="supplies">Supplies</option>
+                <option value="travel">Travel</option>
+                <option value="equipment">Equipment</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-xs font-semibold">
+              Amount
+              <input
+                required
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              />
+            </label>
+            <label className="space-y-1 text-xs font-semibold md:col-span-2">
+              Description
+              <input
+                required
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+            </label>
+            <div className="flex justify-end gap-2 md:col-span-4">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="px-4 py-2 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <OpsPrimaryButton type="submit" disabled={saving}>
+                {saving ? <Loader2 className="animate-spin" size={14} /> : <Receipt size={14} />}
+                Submit
+              </OpsPrimaryButton>
+            </div>
+          </form>
+        </OpsCard>
       )}
 
-      <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border overflow-hidden">
+      <OpsTableShell
+        title="Expense claims"
+        badge={
+          <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+            {filtered.length}
+          </span>
+        }
+        tabs={[
+          { id: "all", label: "All" },
+          { id: "pending", label: "Pending" },
+          { id: "approved", label: "Approved" },
+          { id: "rejected", label: "Rejected" },
+        ]}
+        activeTab={tab}
+        onTabChange={setTab}
+      >
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-sm">Loading…</div>
-        ) : items.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No expenses yet</div>
+          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <OpsEmpty message="No expenses yet" />
         ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 dark:bg-navy-950 text-[10px] uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Staff</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-4 py-3 font-semibold">
-                    {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") || "—"}
-                  </td>
-                  <td className="px-4 py-3 capitalize">{item.category}</td>
-                  <td className="px-4 py-3 font-bold">{formatMoney(item.amount)}</td>
-                  <td className="px-4 py-3 text-slate-500 max-w-[220px] truncate">
-                    {item.description}
-                  </td>
-                  <td className="px-4 py-3">{formatDate(item.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${statusBadgeClass(
-                        item.status
-                      )}`}
-                    >
-                      {item.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {item.status === "pending" && (
-                      <div className="inline-flex gap-2">
-                        <button
-                          disabled={busyId === item.id}
-                          onClick={() => approve(item.id, "approved")}
-                          className="text-xs font-bold text-emerald-700 hover:underline"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          disabled={busyId === item.id}
-                          onClick={() => approve(item.id, "rejected")}
-                          className="text-xs font-bold text-red-600 hover:underline"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </td>
+          <>
+            <table className="w-full text-left">
+              <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                <tr>
+                  <th className={opsTh}>Staff</th>
+                  <th className={opsTh}>Category</th>
+                  <th className={opsTh}>Amount</th>
+                  <th className={opsTh}>Description</th>
+                  <th className={opsTh}>Date</th>
+                  <th className={opsTh}>Status</th>
+                  <th className={`${opsTh} text-right`}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                {pageSlice.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50/80">
+                    <td className={`${opsTd} font-semibold`}>
+                      {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") ||
+                        "—"}
+                    </td>
+                    <td className={`${opsTd} capitalize`}>{item.category}</td>
+                    <td className={`${opsTd} font-bold`}>{formatMoney(item.amount)}</td>
+                    <td className={`${opsTd} max-w-[220px] truncate text-slate-500`}>
+                      {item.description}
+                    </td>
+                    <td className={opsTd}>{formatDate(item.createdAt)}</td>
+                    <td className={opsTd}>
+                      <OpsBadge status={item.status} />
+                    </td>
+                    <td className={`${opsTd} text-right`}>
+                      {item.status === "pending" && (
+                        <div className="inline-flex gap-2">
+                          <button
+                            disabled={busyId === item.id}
+                            onClick={() => approve(item.id, "approved")}
+                            className="text-xs font-bold text-emerald-700 hover:underline disabled:opacity-50"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            disabled={busyId === item.id}
+                            onClick={() => approve(item.id, "rejected")}
+                            className="text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <OpsPagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filtered.length}
+              onPageChange={setPage}
+            />
+          </>
         )}
-      </div>
-    </div>
-  )
-}
-
-function Card({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-4">
-      <p className="text-[11px] font-bold uppercase text-slate-400">{label}</p>
-      <p className="text-2xl font-extrabold text-navy-900 dark:text-white mt-1">{value}</p>
-    </div>
-  )
-}
-
-function Flash({ ok, text, onClose }: { ok: boolean; text: string; onClose: () => void }) {
-  return (
-    <div
-      className={`rounded-xl px-4 py-3 text-sm flex justify-between ${
-        ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
-      }`}
-    >
-      {text}
-      <button onClick={onClose} className="font-bold text-xs">
-        Dismiss
-      </button>
+      </OpsTableShell>
     </div>
   )
 }

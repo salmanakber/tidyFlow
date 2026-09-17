@@ -153,11 +153,11 @@ export function OpsBadge({ status }: { status?: string | null }) {
   const label = String(status || "—")
   const s = label.toLowerCase()
   let cls = "bg-slate-100 text-slate-600 border-slate-200"
-  if (["approved", "paid", "active", "completed", "synced", "resolved"].includes(s)) {
+  if (["approved", "paid", "active", "completed", "synced", "resolved", "read", "ok"].includes(s)) {
     cls = "bg-emerald-50 text-emerald-700 border-emerald-200"
-  } else if (["pending", "open", "in_progress", "assigned", "planned"].includes(s)) {
+  } else if (["pending", "open", "in_progress", "assigned", "planned", "unread"].includes(s)) {
     cls = "bg-amber-50 text-amber-800 border-amber-200"
-  } else if (["rejected", "failed", "cancelled", "high"].includes(s)) {
+  } else if (["rejected", "failed", "cancelled", "high", "expired", "low"].includes(s)) {
     cls = "bg-red-50 text-red-700 border-red-200"
   }
   return (
@@ -226,3 +226,64 @@ export function OpsTableShell({
 export const opsTh =
   "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap"
 export const opsTd = "px-4 py-3.5 text-sm align-middle"
+
+/** Client-side pagination controls for dense ops tables */
+export function OpsPagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (page: number) => void
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const safePage = Math.min(Math.max(1, page), totalPages)
+  const from = total === 0 ? 0 : (safePage - 1) * pageSize + 1
+  const to = Math.min(total, safePage * pageSize)
+
+  if (total === 0) return null
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-control-border bg-slate-50 px-5 py-2.5 sm:flex-row sm:items-center sm:justify-between dark:border-navy-800 dark:bg-navy-950">
+      <span className="font-mono text-[10px] text-slate-400">
+        SHOWING {from}–{to} OF {total}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(safePage - 1)}
+          className="h-7 rounded-md border border-slate-200 px-2.5 text-[10px] font-bold uppercase disabled:opacity-40 dark:border-navy-700"
+        >
+          Prev
+        </button>
+        <span className="px-2 font-mono text-[10px] font-bold text-navy-900 dark:text-white">
+          {safePage} / {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange(safePage + 1)}
+          className="h-7 rounded-md border border-slate-200 px-2.5 text-[10px] font-bold uppercase disabled:opacity-40 dark:border-navy-700"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function useOpsPageSlice<T>(items: T[], pageSize = 10) {
+  const [page, setPage] = React.useState(1)
+  const list = Array.isArray(items) ? items : []
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize))
+  React.useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
+  const slice = list.slice((page - 1) * pageSize, page * pageSize)
+  return { page, setPage, pageSize, total: list.length, slice, totalPages }
+}
+

@@ -18,6 +18,7 @@ import {
   OpsFlash,
   OpsEmpty,
   OpsTableShell,
+  OpsPagination,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
@@ -29,6 +30,17 @@ function asList(data: any): any[] {
   if (Array.isArray(data?.supplies)) return data.supplies
   return []
 }
+
+function forecastText(f: any): string {
+  if (!f) return "No forecast data"
+  if (typeof f === "string") return f
+  if (typeof f.message === "string") return f.message
+  if (typeof f.summary === "string") return f.summary
+  if (typeof f.hint === "string") return f.hint
+  return "Forecast available for your plan"
+}
+
+const PAGE_SIZE = 10
 
 export default function SuppliesPage() {
   return (
@@ -47,6 +59,7 @@ function Content() {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState("all")
+  const [page, setPage] = useState(1)
   const [form, setForm] = useState({
     name: "",
     unit: "pcs",
@@ -63,12 +76,13 @@ function Content() {
         adminGet("/api/supplies"),
         adminGet("/api/supplies/forecast").catch(() => null),
       ])
-      if (listRes.data.success) setItems(asList(listRes.data.data))
+      if (listRes.data?.success) setItems(asList(listRes.data.data))
       else {
         setItems([])
-        setError(listRes.data.message || "Failed")
+        setError(listRes.data?.message || "Failed")
       }
       if (forecastRes?.data?.success) setForecast(forecastRes.data.data)
+      else setForecast(null)
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to load supplies")
       setItems([])
@@ -80,6 +94,10 @@ function Content() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [tab])
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -130,15 +148,17 @@ function Content() {
     }
   }
 
-  const isLow = (i: any) => Number(i.currentStock) <= Number(i.minStock ?? 0)
+  const safeItems = Array.isArray(items) ? items : []
+  const isLow = (i: any) => Number(i?.currentStock ?? 0) <= Number(i?.minStock ?? 0)
 
   const filtered = useMemo(() => {
-    if (tab === "low") return items.filter(isLow)
-    if (tab === "ok") return items.filter((i) => !isLow(i))
-    return items
-  }, [items, tab])
+    if (tab === "low") return safeItems.filter(isLow)
+    if (tab === "ok") return safeItems.filter((i) => !isLow(i))
+    return safeItems
+  }, [safeItems, tab])
 
-  const lowStock = items.filter(isLow).length
+  const lowStock = safeItems.filter(isLow).length
+  const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div className="space-y-5">
@@ -175,17 +195,11 @@ function Content() {
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <OpsKpi label="Active items" value={items.length} />
+        <OpsKpi label="Active items" value={safeItems.length} />
         <OpsKpi label="Low stock" value={lowStock} hint={lowStock ? "Reorder soon" : undefined} />
         <OpsCard className="col-span-2 lg:col-span-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Forecast</p>
-          <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-            {forecast
-              ? typeof forecast === "string"
-                ? forecast
-                : forecast.message || forecast.summary || "Forecast available"
-              : "No forecast data"}
-          </p>
+          <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{forecastText(forecast)}</p>
         </OpsCard>
       </div>
 
@@ -239,91 +253,98 @@ function Content() {
         ]}
         activeTab={tab}
         onTabChange={setTab}
-        footer={<span>INVENTORY LEDGER</span>}
       >
         {loading ? (
           <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
         ) : filtered.length === 0 ? (
           <OpsEmpty message="No supply items yet" />
         ) : (
-          <table className="w-full text-left">
-            <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
-              <tr>
-                <th className={opsTh}>Item</th>
-                <th className={opsTh}>Stock</th>
-                <th className={opsTh}>Min</th>
-                <th className={opsTh}>Unit cost</th>
-                <th className={opsTh}>Status</th>
-                <th className={`${opsTh} text-right`}>Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
-              {filtered.map((item) => {
-                const low = isLow(item)
-                const max = Math.max(Number(item.minStock) * 2 || 1, Number(item.currentStock) || 1)
-                const pct = Math.min(100, (Number(item.currentStock) / max) * 100)
-                return (
-                  <tr
-                    key={item.id}
-                    className={low ? "bg-amber-50/40 dark:bg-amber-950/10" : "hover:bg-slate-50/80"}
-                  >
-                    <td className={opsTd}>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy-50 text-navy-700 dark:bg-navy-900 dark:text-amber-400">
-                          <Package size={16} />
+          <>
+            <table className="w-full text-left">
+              <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                <tr>
+                  <th className={opsTh}>Item</th>
+                  <th className={opsTh}>Stock</th>
+                  <th className={opsTh}>Min</th>
+                  <th className={opsTh}>Unit cost</th>
+                  <th className={opsTh}>Status</th>
+                  <th className={`${opsTh} text-right`}>Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                {pageSlice.map((item) => {
+                  const low = isLow(item)
+                  const max = Math.max(Number(item.minStock) * 2 || 1, Number(item.currentStock) || 1)
+                  const pct = Math.min(100, (Number(item.currentStock) / max) * 100)
+                  return (
+                    <tr
+                      key={item.id}
+                      className={low ? "bg-amber-50/40 dark:bg-amber-950/10" : "hover:bg-slate-50/80"}
+                    >
+                      <td className={opsTd}>
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy-50 text-navy-700 dark:bg-navy-900 dark:text-amber-400">
+                            <Package size={16} />
+                          </div>
+                          <div>
+                            <p className="font-bold text-navy-900 dark:text-white">{item.name}</p>
+                            <p className="font-mono text-[10px] text-slate-400">{item.unit || "units"}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-navy-900 dark:text-white">{item.name}</p>
-                          <p className="font-mono text-[10px] text-slate-400">{item.unit || "units"}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className={opsTd}>
-                      <input
-                        type="number"
-                        className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-sm dark:border-navy-800 dark:bg-navy-950"
-                        defaultValue={item.currentStock}
-                        onBlur={(e) => {
-                          const v = parseFloat(e.target.value)
-                          if (!Number.isNaN(v) && v !== Number(item.currentStock)) {
-                            adjustStock(item.id, v)
-                          }
-                        }}
-                      />
-                      <div className="mt-1.5 h-1 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-navy-900">
-                        <div
-                          className={`h-1 rounded-full ${low ? "bg-amber-600" : "bg-emerald-500"}`}
-                          style={{ width: `${pct}%` }}
+                      </td>
+                      <td className={opsTd}>
+                        <input
+                          type="number"
+                          className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-sm dark:border-navy-800 dark:bg-navy-950"
+                          defaultValue={item.currentStock}
+                          onBlur={(e) => {
+                            const v = parseFloat(e.target.value)
+                            if (!Number.isNaN(v) && v !== Number(item.currentStock)) {
+                              adjustStock(item.id, v)
+                            }
+                          }}
                         />
-                      </div>
-                    </td>
-                    <td className={`${opsTd} font-mono text-xs`}>{item.minStock ?? "—"}</td>
-                    <td className={`${opsTd} font-bold`}>{formatMoney(item.unitCost)}</td>
-                    <td className={opsTd}>
-                      {low ? (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">
-                          <AlertTriangle size={10} /> Low
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
-                          OK
-                        </span>
-                      )}
-                    </td>
-                    <td className={`${opsTd} text-right`}>
-                      <button
-                        onClick={() => remove(item.id)}
-                        className="rounded-lg p-1.5 text-red-600 hover:bg-red-50"
-                        title="Archive"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                        <div className="mt-1.5 h-1 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-navy-900">
+                          <div
+                            className={`h-1 rounded-full ${low ? "bg-amber-600" : "bg-emerald-500"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className={`${opsTd} font-mono text-xs`}>{item.minStock ?? "—"}</td>
+                      <td className={`${opsTd} font-bold`}>{formatMoney(item.unitCost)}</td>
+                      <td className={opsTd}>
+                        {low ? (
+                          <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">
+                            <AlertTriangle size={10} /> Low
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
+                            OK
+                          </span>
+                        )}
+                      </td>
+                      <td className={`${opsTd} text-right`}>
+                        <button
+                          onClick={() => remove(item.id)}
+                          className="rounded-lg p-1.5 text-red-600 hover:bg-red-50"
+                          title="Archive"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            <OpsPagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filtered.length}
+              onPageChange={setPage}
+            />
+          </>
         )}
       </OpsTableShell>
     </div>

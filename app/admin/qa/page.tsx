@@ -4,10 +4,18 @@ import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, formatDate } from "@/lib/admin-session"
-import { RefreshCw, ShieldCheck, Star } from "lucide-react"
+import { Star } from "lucide-react"
 import {
   OpsPageHeader,
   OpsRefreshButton,
+  OpsFlash,
+  OpsEmpty,
+  OpsKpi,
+  OpsCard,
+  OpsTableShell,
+  OpsPagination,
+  opsTh,
+  opsTd,
 } from "@/components/ops/OpsChrome"
 import {
   BarChart,
@@ -18,6 +26,8 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts"
+
+const PAGE_SIZE = 10
 
 export default function QAPage() {
   return (
@@ -34,6 +44,7 @@ function Content() {
   const [performance, setPerformance] = useState<{ stats: any[]; summary?: any } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [page, setPage] = useState(1)
 
   const load = async () => {
     try {
@@ -43,10 +54,14 @@ function Content() {
         adminGet("/api/qa"),
         adminGet("/api/qa/performance"),
       ])
-      if (qaRes.data.success) setScores(qaRes.data.data || [])
+      if (qaRes.data.success) {
+        const raw = qaRes.data.data
+        setScores(Array.isArray(raw) ? raw : [])
+      }
       if (perfRes.data.success) setPerformance(perfRes.data.data)
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to load QA data")
+      setScores([])
     } finally {
       setLoading(false)
     }
@@ -56,7 +71,8 @@ function Content() {
     load()
   }, [])
 
-  const stats = performance?.stats || []
+  const safeScores = Array.isArray(scores) ? scores : []
+  const stats = Array.isArray(performance?.stats) ? performance!.stats : []
   const summary = performance?.summary || {}
   const chartData = stats.slice(0, 8).map((s: any) => ({
     name: (s.cleaner?.name || s.cleanerName || s.name || `ID ${s.cleaner?.id || s.cleanerId}`)
@@ -64,8 +80,10 @@ function Content() {
     score: Number(s.combinedScore ?? s.averageOverall ?? 0),
   }))
 
+  const pageSlice = safeScores.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <OpsPageHeader
         eyebrow="Finance"
         title="QA Performance"
@@ -73,15 +91,11 @@ function Content() {
         actions={<OpsRefreshButton onClick={load} loading={loading} />}
       />
 
-      {error && (
-        <div className="rounded-xl bg-red-50 border border-red-200 text-red-800 px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="QA reviews" value={scores.length} />
-        <Stat
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <OpsKpi label="QA reviews" value={safeScores.length} />
+        <OpsKpi
           label="Avg QA score"
           value={
             summary.averageOverallScore != null
@@ -89,7 +103,7 @@ function Content() {
               : "—"
           }
         />
-        <Stat
+        <OpsKpi
           label="Avg completion %"
           value={
             summary.averageCompletionRate != null
@@ -97,18 +111,20 @@ function Content() {
               : "—"
           }
         />
-        <Stat label="Cleaners scored" value={summary.cleanersWithScores ?? stats.length} />
+        <OpsKpi label="Cleaners scored" value={summary.cleanersWithScores ?? stats.length} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="xl:col-span-2 bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-5">
-          <h2 className="font-bold text-navy-900 dark:text-white mb-4">Cleaner combined scores</h2>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <OpsCard className="xl:col-span-2">
+          <h2 className="mb-4 text-sm font-bold text-navy-900 dark:text-white">
+            Cleaner combined scores
+          </h2>
           {loading ? (
-            <div className="h-64 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
-          ) : chartData.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
-              No performance data yet
+            <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+              Loading…
             </div>
+          ) : chartData.length === 0 ? (
+            <OpsEmpty message="No performance data yet" />
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -122,26 +138,29 @@ function Content() {
               </ResponsiveContainer>
             </div>
           )}
-        </div>
+        </OpsCard>
 
-        <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-5">
-          <h2 className="font-bold text-navy-900 dark:text-white mb-4">Top performers</h2>
+        <OpsCard>
+          <h2 className="mb-4 text-sm font-bold text-navy-900 dark:text-white">Top performers</h2>
           <div className="space-y-3">
             {stats.slice(0, 5).map((s: any, idx: number) => (
-              <div key={s.cleaner?.id || s.cleanerId || idx} className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+              <div
+                key={s.cleaner?.id || s.cleanerId || idx}
+                className="flex items-center justify-between gap-2"
+              >
+                <div className="flex min-w-0 items-center gap-2">
                   <span
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
                       idx === 0 ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"
                     }`}
                   >
                     {idx + 1}
                   </span>
-                  <span className="text-sm font-semibold truncate">
+                  <span className="truncate text-sm font-semibold">
                     {s.cleaner?.name || s.cleanerName || s.name || `Cleaner ${s.cleanerId}`}
                   </span>
                 </div>
-                <span className="font-mono font-bold text-sm text-amber-700">
+                <span className="font-mono text-sm font-bold text-amber-700">
                   {Number(s.combinedScore ?? s.averageOverall ?? 0).toFixed(0)}
                 </span>
               </div>
@@ -150,61 +169,65 @@ function Content() {
               <p className="text-sm text-slate-500">No cleaner stats yet</p>
             )}
           </div>
-        </div>
+        </OpsCard>
       </div>
 
-      <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border overflow-hidden">
-        <div className="p-4 border-b border-control-border font-bold text-navy-900 dark:text-white">
-          Recent QA scores
-        </div>
+      <OpsTableShell
+        title="Recent QA scores"
+        badge={
+          <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+            {safeScores.length}
+          </span>
+        }
+      >
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-sm">Loading…</div>
-        ) : scores.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No QA scores recorded</div>
+          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+        ) : safeScores.length === 0 ? (
+          <OpsEmpty message="No QA scores recorded" />
         ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 dark:bg-navy-950 text-[10px] uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Job</th>
-                <th className="px-4 py-3">Overall</th>
-                <th className="px-4 py-3">Cleanliness</th>
-                <th className="px-4 py-3">Timeliness</th>
-                <th className="px-4 py-3">Reviewer</th>
-                <th className="px-4 py-3">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
-              {scores.slice(0, 40).map((s) => (
-                <tr key={s.id}>
-                  <td className="px-4 py-3 font-semibold">
-                    {s.task?.title || `Task #${s.taskId}`}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 font-bold text-amber-700">
-                      <Star size={12} /> {s.overallScore}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono">{s.cleanlinessScore ?? "—"}</td>
-                  <td className="px-4 py-3 font-mono">{s.timelinessScore ?? "—"}</td>
-                  <td className="px-4 py-3 text-slate-500">
-                    {[s.reviewer?.firstName, s.reviewer?.lastName].filter(Boolean).join(" ") || "—"}
-                  </td>
-                  <td className="px-4 py-3">{formatDate(s.createdAt)}</td>
+          <>
+            <table className="w-full text-left">
+              <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                <tr>
+                  <th className={opsTh}>Job</th>
+                  <th className={opsTh}>Overall</th>
+                  <th className={opsTh}>Cleanliness</th>
+                  <th className={opsTh}>Timeliness</th>
+                  <th className={opsTh}>Reviewer</th>
+                  <th className={opsTh}>Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                {pageSlice.map((s) => (
+                  <tr key={s.id} className="hover:bg-slate-50/80">
+                    <td className={`${opsTd} font-semibold`}>
+                      {s.task?.title || `Task #${s.taskId}`}
+                    </td>
+                    <td className={opsTd}>
+                      <span className="inline-flex items-center gap-1 font-bold text-amber-700">
+                        <Star size={12} /> {s.overallScore}
+                      </span>
+                    </td>
+                    <td className={`${opsTd} font-mono`}>{s.cleanlinessScore ?? "—"}</td>
+                    <td className={`${opsTd} font-mono`}>{s.timelinessScore ?? "—"}</td>
+                    <td className={`${opsTd} text-slate-500`}>
+                      {[s.reviewer?.firstName, s.reviewer?.lastName].filter(Boolean).join(" ") ||
+                        "—"}
+                    </td>
+                    <td className={opsTd}>{formatDate(s.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <OpsPagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={safeScores.length}
+              onPageChange={setPage}
+            />
+          </>
         )}
-      </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-4">
-      <p className="text-[11px] font-bold uppercase text-slate-400">{label}</p>
-      <p className="text-2xl font-extrabold text-navy-900 dark:text-white mt-1">{value}</p>
+      </OpsTableShell>
     </div>
   )
 }

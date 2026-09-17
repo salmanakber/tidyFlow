@@ -3,13 +3,24 @@
 import { useEffect, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
-import { adminGet, adminPost, adminPatch, formatDate, formatMoney, statusBadgeClass } from "@/lib/admin-session"
-import { RefreshCw, FileText, Loader2, Send, Plus } from "lucide-react"
+import { adminGet, adminPost, adminPatch, formatDate, formatMoney } from "@/lib/admin-session"
+import { FileText, Loader2, Send, Plus } from "lucide-react"
 import {
   OpsPageHeader,
   OpsRefreshButton,
   OpsPrimaryButton,
+  OpsFlash,
+  OpsEmpty,
+  OpsBadge,
+  OpsKpi,
+  OpsCard,
+  OpsTableShell,
+  OpsPagination,
+  opsTh,
+  opsTd,
 } from "@/components/ops/OpsChrome"
+
+const PAGE_SIZE = 10
 
 export default function ClientInvoicesPage() {
   return (
@@ -31,6 +42,8 @@ function Content() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([])
   const [creating, setCreating] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [tab, setTab] = useState("all")
+  const [page, setPage] = useState(1)
 
   const load = async () => {
     try {
@@ -40,14 +53,20 @@ function Content() {
         adminGet("/api/client-invoices"),
         adminGet("/api/client-invoices/eligible-tasks").catch(() => ({ data: { success: false } })),
       ])
-      if (invRes.data.success) setInvoices(invRes.data.data || [])
-      else setError(invRes.data.message || "Failed to load invoices")
+      if (invRes.data.success) {
+        const raw = invRes.data.data
+        setInvoices(Array.isArray(raw) ? raw : [])
+      } else {
+        setInvoices([])
+        setError(invRes.data.message || "Failed to load invoices")
+      }
       if (elRes.data?.success) {
         const raw = elRes.data.data
         setEligible(Array.isArray(raw) ? raw : raw?.tasks || [])
       }
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed to load")
+      setInvoices([])
     } finally {
       setLoading(false)
     }
@@ -56,6 +75,10 @@ function Content() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    setPage(1)
+  }, [tab])
 
   const toggleTask = (id: number) => {
     setSelectedTaskIds((prev) =>
@@ -116,13 +139,22 @@ function Content() {
     }
   }
 
-  const unpaid = invoices.filter((i) => i.status !== "paid").length
-  const revenue = invoices
+  const safeInvoices = Array.isArray(invoices) ? invoices : []
+  const filtered =
+    tab === "all"
+      ? safeInvoices
+      : tab === "unpaid"
+        ? safeInvoices.filter((i) => i.status !== "paid")
+        : safeInvoices.filter((i) => String(i.status) === tab)
+  const unpaid = safeInvoices.filter((i) => i.status !== "paid").length
+  const revenue = safeInvoices
     .filter((i) => i.status === "paid")
     .reduce((s, i) => s + Number(i.total ?? i.amount ?? 0), 0)
+  const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const safeEligible = Array.isArray(eligible) ? eligible : []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <OpsPageHeader
         eyebrow="Finance"
         title="Client invoices"
@@ -137,157 +169,153 @@ function Content() {
         }
       />
 
-      {toast && <Flash ok text={toast} onClose={() => setToast("")} />}
-      {error && <Flash ok={false} text={error} onClose={() => setError("")} />}
+      {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+      {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <Stat label="Invoices" value={invoices.length} />
-        <Stat label="Unpaid" value={unpaid} />
-        <Stat label="Paid total" value={formatMoney(revenue)} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <OpsKpi label="Invoices" value={safeInvoices.length} />
+        <OpsKpi label="Unpaid" value={unpaid} />
+        <OpsKpi label="Paid total" value={formatMoney(revenue)} />
       </div>
 
       {showCreate && (
-        <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-navy-900 dark:text-white flex items-center gap-2">
-              <FileText size={16} className="text-amber-600" /> Select eligible jobs
-            </h2>
-            <button onClick={() => setShowCreate(false)} className="text-sm font-semibold text-slate-500">
-              Close
-            </button>
-          </div>
-          {eligible.length === 0 ? (
-            <p className="text-sm text-slate-500">No eligible jobs found for invoicing.</p>
-          ) : (
-            <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg">
-              {eligible.map((t: any) => (
-                <label
-                  key={t.id}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedTaskIds.includes(t.id)}
-                    onChange={() => toggleTask(t.id)}
-                    className="rounded text-amber-600"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate">{t.title}</div>
-                    <div className="text-xs text-slate-400 truncate">
-                      {t.property?.address || t.propertyAddress || "—"}
-                    </div>
-                  </div>
-                  <span className="font-mono text-xs text-slate-500">#{t.id}</span>
-                </label>
-              ))}
+        <OpsCard>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-navy-900 dark:text-white">
+                <FileText size={16} className="text-amber-600" /> Select eligible jobs
+              </h2>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="text-sm font-semibold text-slate-500"
+              >
+                Close
+              </button>
             </div>
-          )}
-          <div className="flex justify-end">
-            <button
-              onClick={create}
-              disabled={creating || !selectedTaskIds.length}
-              className="inline-flex items-center gap-2 bg-navy-900 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
-            >
-              {creating ? <Loader2 className="animate-spin" size={14} /> : null}
-              Create from {selectedTaskIds.length} job(s)
-            </button>
+            {safeEligible.length === 0 ? (
+              <p className="text-sm text-slate-500">No eligible jobs found for invoicing.</p>
+            ) : (
+              <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100">
+                {safeEligible.map((t: any) => (
+                  <label
+                    key={t.id}
+                    className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.includes(t.id)}
+                      onChange={() => toggleTask(t.id)}
+                      className="rounded text-amber-600"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-semibold">{t.title}</div>
+                      <div className="truncate text-xs text-slate-400">
+                        {t.property?.address || t.propertyAddress || "—"}
+                      </div>
+                    </div>
+                    <span className="font-mono text-xs text-slate-500">#{t.id}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end">
+              <OpsPrimaryButton
+                onClick={create}
+                disabled={creating || !selectedTaskIds.length}
+              >
+                {creating ? <Loader2 className="animate-spin" size={14} /> : null}
+                Create from {selectedTaskIds.length} job(s)
+              </OpsPrimaryButton>
+            </div>
           </div>
-        </div>
+        </OpsCard>
       )}
 
-      <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border overflow-hidden">
+      <OpsTableShell
+        title="Invoices"
+        badge={
+          <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+            {filtered.length}
+          </span>
+        }
+        tabs={[
+          { id: "all", label: "All" },
+          { id: "unpaid", label: "Unpaid" },
+          { id: "paid", label: "Paid" },
+        ]}
+        activeTab={tab}
+        onTabChange={setTab}
+      >
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-sm">Loading…</div>
-        ) : invoices.length === 0 ? (
-          <div className="py-16 text-center text-sm text-slate-500">No client invoices yet</div>
+          <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <OpsEmpty message="No client invoices yet" />
         ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-slate-50 dark:bg-navy-950 text-[10px] uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Invoice</th>
-                <th className="px-4 py-3">Client</th>
-                <th className="px-4 py-3">Total</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
-              {invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <td className="px-4 py-3 font-semibold">
-                    #{inv.invoiceNumber || inv.id}
-                    <div className="text-xs text-slate-400 font-normal">
-                      {inv.task?.title || inv.property?.address || ""}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {inv.clientName || inv.property?.clientName || "—"}
-                    <div className="text-xs text-slate-400">{inv.clientEmail || ""}</div>
-                  </td>
-                  <td className="px-4 py-3 font-bold">
-                    {formatMoney(inv.total ?? inv.amount ?? inv.totalAmount)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${statusBadgeClass(
-                        inv.status
-                      )}`}
-                    >
-                      {inv.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{formatDate(inv.createdAt || inv.issuedAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex gap-2">
-                      {inv.status !== "paid" && (
+          <>
+            <table className="w-full text-left">
+              <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                <tr>
+                  <th className={opsTh}>Invoice</th>
+                  <th className={opsTh}>Client</th>
+                  <th className={opsTh}>Total</th>
+                  <th className={opsTh}>Status</th>
+                  <th className={opsTh}>Date</th>
+                  <th className={`${opsTh} text-right`}>Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                {pageSlice.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-slate-50/80">
+                    <td className={`${opsTd} font-semibold`}>
+                      #{inv.invoiceNumber || inv.id}
+                      <div className="text-xs font-normal text-slate-400">
+                        {inv.task?.title || inv.property?.address || ""}
+                      </div>
+                    </td>
+                    <td className={opsTd}>
+                      {inv.clientName || inv.property?.clientName || "—"}
+                      <div className="text-xs text-slate-400">{inv.clientEmail || ""}</div>
+                    </td>
+                    <td className={`${opsTd} font-bold`}>
+                      {formatMoney(inv.total ?? inv.amount ?? inv.totalAmount)}
+                    </td>
+                    <td className={opsTd}>
+                      <OpsBadge status={inv.status} />
+                    </td>
+                    <td className={opsTd}>{formatDate(inv.createdAt || inv.issuedAt)}</td>
+                    <td className={`${opsTd} text-right`}>
+                      <div className="inline-flex gap-2">
+                        {inv.status !== "paid" && (
+                          <button
+                            disabled={busyId === inv.id}
+                            onClick={() => markPaid(inv.id)}
+                            className="text-xs font-bold text-emerald-700 hover:underline disabled:opacity-50"
+                          >
+                            Mark paid
+                          </button>
+                        )}
                         <button
                           disabled={busyId === inv.id}
-                          onClick={() => markPaid(inv.id)}
-                          className="text-xs font-bold text-emerald-700 hover:underline"
+                          onClick={() => sendInvoice(inv.id)}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline disabled:opacity-50"
                         >
-                          Mark paid
+                          <Send size={12} /> Send
                         </button>
-                      )}
-                      <button
-                        disabled={busyId === inv.id}
-                        onClick={() => sendInvoice(inv.id)}
-                        className="text-xs font-bold text-amber-700 hover:underline inline-flex items-center gap-1"
-                      >
-                        <Send size={12} /> Send
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <OpsPagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filtered.length}
+              onPageChange={setPage}
+            />
+          </>
         )}
-      </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-white dark:bg-control-darkCard rounded-xl border border-control-border p-4">
-      <p className="text-[11px] font-bold uppercase text-slate-400">{label}</p>
-      <p className="text-2xl font-extrabold text-navy-900 dark:text-white mt-1">{value}</p>
-    </div>
-  )
-}
-
-function Flash({ ok, text, onClose }: { ok: boolean; text: string; onClose: () => void }) {
-  return (
-    <div
-      className={`rounded-xl px-4 py-3 text-sm flex justify-between ${
-        ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
-      }`}
-    >
-      {text}
-      <button onClick={onClose} className="font-bold text-xs">
-        Dismiss
-      </button>
+      </OpsTableShell>
     </div>
   )
 }
