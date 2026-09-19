@@ -47,6 +47,7 @@ import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 import HeaderNotifications from "@/components/ops/HeaderNotifications"
 import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
 import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
+import { OpsLoader } from "@/components/ops/OpsLoader"
 import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 
 interface User {
@@ -411,7 +412,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-control-canvas dark:bg-control-darkCanvas">
-        <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-amber-600" />
+        <OpsLoader message="Opening company workspace…" size="lg" />
       </div>
     )
   }

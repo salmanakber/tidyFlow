@@ -50,6 +50,7 @@ import {
   isCompanyWorkspaceRole,
 } from "@/lib/company-slug"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
+import { OpsLoader } from "@/components/ops/OpsLoader"
 
 interface User {
   id: number
@@ -237,7 +238,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-control-canvas dark:bg-control-darkCanvas">
-        <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-amber-600" />
+        <OpsLoader message="Loading admin console…" size="lg" />
       </div>
     )
   }

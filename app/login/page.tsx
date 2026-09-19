@@ -49,10 +49,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
-  const [mode, setMode] = useState<"login" | "forgot" | "reset">("login")
+  const [mode, setMode] = useState<"login" | "otp" | "forgot" | "reset">("login")
   const [otp, setOtp] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [info, setInfo] = useState("")
+  const [resendingOtp, setResendingOtp] = useState(false)
 
   useEffect(() => {
     configureAdminApiClient()
@@ -88,6 +89,71 @@ export default function LoginPage() {
       .catch(() => {})
   }, [router, mode])
 
+  const finishLogin = async (token: string, user: any, company: any) => {
+    storeAdminSession(token, user, rememberMe)
+
+    const slug =
+      company?.slug ||
+      (user.companyId
+        ? buildCompanySlug({ id: user.companyId, name: company?.name })
+        : null)
+
+    if (company?.id) {
+      localStorage.setItem("selectedCompanyId", String(company.id))
+    }
+
+    let plan = planFieldsFromCompany(company)
+    const hasPlanSignal =
+      plan.subscriptionStatus != null ||
+      plan.planTier != null ||
+      plan.isTrialActive != null ||
+      plan.trialEndsAt != null ||
+      typeof plan.needsPlan === "boolean"
+
+    if (!hasPlanSignal) {
+      try {
+        const me = await axios.get("/api/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (me.data?.success) {
+          const meCompany = me.data.data?.company
+          const meNeeds =
+            typeof me.data.data?.needsPlan === "boolean"
+              ? me.data.data.needsPlan
+              : meCompany?.needsPlan
+          plan = planFieldsFromCompany(meCompany || company, meNeeds)
+        }
+      } catch {
+        /* proceed with login company fields */
+      }
+    }
+
+    const path = resolvePostLoginPath({
+      role: user.role,
+      companyId: user.companyId || company?.id,
+      companyName: company?.name,
+      companySlug: slug,
+      ...plan,
+    })
+
+    if (String(path).startsWith("/account/billing")) {
+      unlockBillingSession(token, user, rememberMe)
+    }
+
+    window.location.href = path
+  }
+
+  const handleRequiresOtp = (payload?: { message?: string; email?: string }) => {
+    if (payload?.email) setEmail(payload.email)
+    setOtp("")
+    setMode("otp")
+    setInfo(
+      payload?.message ||
+        "We emailed a one-time code to verify this sign-in. Enter it below."
+    )
+    setError("")
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
@@ -100,66 +166,92 @@ export default function LoginPage() {
         password,
       })
 
+      if (response.data?.requiresOTP) {
+        handleRequiresOtp({
+          message: response.data.message,
+          email: response.data?.data?.email || email,
+        })
+        return
+      }
+
       if (response.data.success) {
         const { token, user, company } = response.data.data
-        storeAdminSession(token, user, rememberMe)
-
-        const slug =
-          company?.slug ||
-          (user.companyId
-            ? buildCompanySlug({ id: user.companyId, name: company?.name })
-            : null)
-
-        if (company?.id) {
-          localStorage.setItem("selectedCompanyId", String(company.id))
-        }
-
-        let plan = planFieldsFromCompany(company)
-        const hasPlanSignal =
-          plan.subscriptionStatus != null ||
-          plan.planTier != null ||
-          plan.isTrialActive != null ||
-          plan.trialEndsAt != null ||
-          typeof plan.needsPlan === "boolean"
-
-        if (!hasPlanSignal) {
-          try {
-            const me = await axios.get("/api/auth/me", {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-            if (me.data?.success) {
-              const meCompany = me.data.data?.company
-              const meNeeds =
-                typeof me.data.data?.needsPlan === "boolean"
-                  ? me.data.data.needsPlan
-                  : meCompany?.needsPlan
-              plan = planFieldsFromCompany(meCompany || company, meNeeds)
-            }
-          } catch {
-            /* proceed with login company fields */
-          }
-        }
-
-        const path = resolvePostLoginPath({
-          role: user.role,
-          companyId: user.companyId || company?.id,
-          companyName: company?.name,
-          companySlug: slug,
-          ...plan,
-        })
-
-        if (String(path).startsWith("/account/billing")) {
-          unlockBillingSession(token, user, rememberMe)
-        }
-
-        window.location.href = path
+        await finishLogin(token, user, company)
       } else {
         setError(response.data.message || "Login failed")
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || "An error occurred during login")
+      if (err.response?.data?.requiresOTP) {
+        handleRequiresOtp({
+          message: err.response.data.message,
+          email: err.response.data?.data?.email || email,
+        })
+      } else {
+        setError(err.response?.data?.message || "An error occurred during login")
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError("")
+    setInfo("")
+    setLoading(true)
+    try {
+      const response = await axios.post("/api/auth/login", {
+        email,
+        password,
+        otp: otp.trim(),
+      })
+
+      if (response.data?.requiresOTP && !response.data?.success) {
+        setError(response.data.message || "Invalid or expired code")
+        setInfo("Check your email for the latest code, or resend below.")
+        return
+      }
+
+      if (response.data.success) {
+        const { token, user, company } = response.data.data
+        await finishLogin(token, user, company)
+      } else {
+        setError(response.data.message || "Could not verify code")
+      }
+    } catch (err: any) {
+      if (err.response?.data?.requiresOTP) {
+        setError(err.response.data.message || "Invalid or expired code")
+        setInfo("Request a new code if this one expired.")
+      } else {
+        setError(err.response?.data?.message || "Could not verify code")
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resendLoginOtp = async () => {
+    setResendingOtp(true)
+    setError("")
+    try {
+      // Same login without otp re-triggers email send (existing API contract)
+      const response = await axios.post("/api/auth/login", { email, password })
+      if (response.data?.requiresOTP || response.data?.success === false) {
+        setInfo("A new code was sent to your email.")
+        setOtp("")
+      } else if (response.data?.success) {
+        const { token, user, company } = response.data.data
+        await finishLogin(token, user, company)
+      }
+    } catch (err: any) {
+      if (err.response?.data?.requiresOTP) {
+        setInfo("A new code was sent to your email.")
+        setOtp("")
+      } else {
+        setError(err.response?.data?.message || "Could not resend code")
+      }
+    } finally {
+      setResendingOtp(false)
     }
   }
 
@@ -271,9 +363,11 @@ export default function LoginPage() {
                   <p className="text-xs text-slate-300">
                     {mode === "login"
                       ? "Company workspace sign-in"
-                      : mode === "forgot"
-                        ? "Reset your password"
-                        : "Enter the code from your email"}
+                      : mode === "otp"
+                        ? "Enter the code from your email"
+                        : mode === "forgot"
+                          ? "Reset your password"
+                          : "Enter the code from your email"}
                   </p>
                 </div>
               </div>
@@ -354,6 +448,62 @@ export default function LoginPage() {
                   >
                     {loading ? "Signing in…" : "Sign in to workspace"}
                   </button>
+                </form>
+              )}
+
+              {mode === "otp" && (
+                <form onSubmit={handleOtpSubmit} className="space-y-4">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                    Code sent to <span className="font-bold">{email}</span>. It expires in about 10
+                    minutes.
+                  </div>
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      One-time code
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      autoFocus
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\s/g, ""))}
+                      required
+                      minLength={4}
+                      maxLength={8}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-center font-mono text-2xl font-bold tracking-[0.35em] text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="••••••"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={loading || otp.trim().length < 4}
+                    className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {loading ? "Verifying…" : "Verify & continue"}
+                  </button>
+                  <div className="flex flex-col gap-2 text-center text-sm">
+                    <button
+                      type="button"
+                      disabled={resendingOtp}
+                      onClick={() => void resendLoginOtp()}
+                      className="font-semibold text-amber-700 hover:text-amber-800 disabled:opacity-50"
+                    >
+                      {resendingOtp ? "Sending…" : "Resend code"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("login")
+                        setOtp("")
+                        setError("")
+                        setInfo("")
+                      }}
+                      className="font-semibold text-slate-600 hover:text-navy-900"
+                    >
+                      Back to sign in
+                    </button>
+                  </div>
                 </form>
               )}
 

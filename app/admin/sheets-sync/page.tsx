@@ -237,8 +237,19 @@ export default function SheetsSyncPage() {
   }
 
   const openSheet = () => {
-    const url = connection?.sheetUrl || connection?.googleSheetUrl || sheetUrl
-    if (url) window.open(url, "_blank")
+    const url =
+      connection?.spreadsheetUrl ||
+      connection?.sheetUrl ||
+      connection?.googleSheetUrl ||
+      sheetUrl ||
+      (connection?.spreadsheetId
+        ? `https://docs.google.com/spreadsheets/d/${connection.spreadsheetId}/edit`
+        : "")
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer")
+    } else {
+      setError("No spreadsheet URL on this connection — reconfigure the sheet link.")
+    }
   }
 
   return (
@@ -349,7 +360,13 @@ export default function SheetsSyncPage() {
                     type="button"
                     onClick={() => {
                       setStep("connect")
-                      setSheetUrl(connection?.sheetUrl || "")
+                      setSheetUrl(
+                        connection?.spreadsheetUrl ||
+                          connection?.sheetUrl ||
+                          (connection?.spreadsheetId
+                            ? `https://docs.google.com/spreadsheets/d/${connection.spreadsheetId}/edit`
+                            : "")
+                      )
                     }}
                     className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-control-border px-3 text-xs font-bold hover:border-amber-600"
                   >

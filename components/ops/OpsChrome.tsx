@@ -6,6 +6,9 @@
  */
 import React from "react"
 import { RefreshCw } from "lucide-react"
+import { OpsLoadingPanel, OpsSpinner } from "@/components/ops/OpsLoader"
+
+export { OpsLoader, OpsLoadingPanel, OpsSpinner } from "@/components/ops/OpsLoader"
 
 export function OpsPageHeader({
   eyebrow,
@@ -89,9 +92,10 @@ export function OpsRefreshButton({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-control-border bg-white px-3 text-xs font-bold text-slate-700 hover:border-amber-600 hover:text-amber-700 dark:border-amber-800/50 dark:bg-control-darkCard dark:text-slate-200 dark:hover:border-amber-500 dark:hover:text-amber-300"
+      disabled={loading}
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-control-border bg-white px-3 text-xs font-bold text-slate-700 hover:border-amber-600 hover:text-amber-700 disabled:opacity-50 dark:border-amber-800/50 dark:bg-control-darkCard dark:text-slate-200 dark:hover:border-amber-500 dark:hover:text-amber-300"
     >
-      <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+      {loading ? <OpsSpinner /> : <RefreshCw size={14} />}
       Refresh
     </button>
   )
@@ -190,7 +194,21 @@ export function OpsEmpty({
   )
 }
 
-export function OpsSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
+export function OpsSkeleton({
+  rows = 5,
+  cols = 4,
+  branded = true,
+  message,
+}: {
+  rows?: number
+  cols?: number
+  /** Show branded TidyFlow loader above skeleton (default true) */
+  branded?: boolean
+  message?: string
+}) {
+  if (branded) {
+    return <OpsLoadingPanel message={message || "Loading…"} rows={rows} />
+  }
   return (
     <div className="animate-pulse space-y-0 p-2">
       <div className="mb-2 flex gap-2 px-2">

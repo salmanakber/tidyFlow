@@ -8,9 +8,10 @@ import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   Wallet,
   AlertCircle,
-  Loader2,
   Play,
   FileDown,
+  CheckCircle2,
+  Banknote,
 } from "lucide-react"
 import {
   OpsPageHeader,
@@ -20,13 +21,21 @@ import {
   OpsEmpty,
   OpsBadge,
   OpsKpi,
-  OpsCard,
   OpsTableShell,
   OpsPagination,
   OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
+import {
+  OpsDrawer,
+  OpsField,
+  OpsSecondaryButton,
+  OpsRowAction,
+  OpsDateField,
+  opsFieldCls,
+} from "@/components/ops/OpsForm"
+import { OpsSpinner } from "@/components/ops/OpsLoader"
 
 const PAGE_SIZE = 10
 
@@ -76,6 +85,7 @@ function PayrollContent() {
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [generating, setGenerating] = useState(false)
+  const [showRun, setShowRun] = useState(false)
   const [periodStart, setPeriodStart] = useState(
     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
   )
@@ -136,6 +146,14 @@ function PayrollContent() {
     tab === "all" ? safeRecords : safeRecords.filter((r) => String(r.status) === tab)
   const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
+  const openRunForMonth = () => {
+    const start = new Date(year, month - 1, 1).toISOString().slice(0, 10)
+    const end = new Date(year, month, 0).toISOString().slice(0, 10)
+    setPeriodStart(start)
+    setPeriodEnd(end)
+    setShowRun(true)
+  }
+
   const generate = async () => {
     try {
       setGenerating(true)
@@ -150,6 +168,7 @@ function PayrollContent() {
       if (res.data.success) {
         const count = res.data.data?.generated ?? res.data.generated ?? 0
         setToast(res.data.message || `Generated ${count} record(s)`)
+        setShowRun(false)
         await load()
       } else {
         setError(res.data.message || "Generate failed")
@@ -190,8 +209,10 @@ function PayrollContent() {
     }
   }
 
-  const inputCls =
-    "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+  const monthLabel = new Date(year, month - 1, 1).toLocaleString(undefined, {
+    month: "long",
+    year: "numeric",
+  })
 
   return (
     <div className="space-y-5">
@@ -199,24 +220,38 @@ function PayrollContent() {
         eyebrow="Finance"
         title="Payroll"
         subtitle="Generate, approve, and pay staff for the selected period"
-        actions={<OpsRefreshButton onClick={load} loading={loading} />}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <OpsRefreshButton onClick={load} loading={loading} />
+            <OpsPrimaryButton onClick={openRunForMonth}>
+              <Play size={14} /> Run payroll
+            </OpsPrimaryButton>
+          </div>
+        }
       />
 
       {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
       {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
       {alerts && alerts.totalActionCount > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-navy-900 p-4 text-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-navy-950 p-4 text-white shadow-sm">
           <div className="flex items-center gap-3">
-            <AlertCircle className="text-amber-400" size={18} />
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20">
+              <AlertCircle className="text-amber-400" size={18} />
+            </span>
             <div className="text-sm">
-              <span className="font-mono font-bold text-amber-400">ACTIONS NEEDED</span>
-              <span className="ml-2 text-slate-300">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                Actions needed
+              </span>
+              <p className="mt-0.5 text-slate-300">
                 {alerts.pendingHoursCount} pending hours · {alerts.pendingPayrollCount} pending
                 payroll · {alerts.unpaidPayrollCount} unpaid
-              </span>
+              </p>
             </div>
           </div>
+          <OpsPrimaryButton onClick={openRunForMonth}>
+            <Wallet size={14} /> Run now
+          </OpsPrimaryButton>
         </div>
       )}
 
@@ -227,72 +262,37 @@ function PayrollContent() {
         <OpsKpi label="Period total" value={formatMoney(stats.total)} />
       </div>
 
-      <OpsCard>
-        <h2 className="mb-4 flex items-center gap-2 text-sm font-bold text-navy-900 dark:text-white">
-          <Play size={16} className="text-amber-600" /> Run payroll
-        </h2>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Period start
-            <input
-              type="date"
-              value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
-              className={inputCls}
-            />
-          </label>
-          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Period end
-            <input
-              type="date"
-              value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
-              className={inputCls}
-            />
-          </label>
-          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Type
-            <select
-              value={payrollType}
-              onChange={(e) => setPayrollType(e.target.value as any)}
-              className={inputCls}
-            >
-              <option value="hourly">Hourly</option>
-              <option value="fixed">Fixed salary</option>
-            </select>
-          </label>
-          <div className="flex items-end">
-            <OpsPrimaryButton onClick={generate} disabled={generating}>
-              {generating ? <Loader2 className="animate-spin" size={16} /> : <Wallet size={16} />}
-              Generate
-            </OpsPrimaryButton>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-control-border bg-white px-4 py-3 dark:border-amber-900/40 dark:bg-control-darkCard">
+        <div>
+          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+            Viewing period
+          </p>
+          <p className="text-sm font-bold text-navy-900 dark:text-white">{monthLabel}</p>
         </div>
-      </OpsCard>
-
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <select
-          value={month}
-          onChange={(e) => setMonth(Number(e.target.value))}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold dark:border-navy-800 dark:bg-navy-950"
-        >
-          {Array.from({ length: 12 }, (_, i) => (
-            <option key={i + 1} value={i + 1}>
-              {new Date(2000, i, 1).toLocaleString(undefined, { month: "long" })}
-            </option>
-          ))}
-        </select>
-        <select
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold dark:border-navy-800 dark:bg-navy-950"
-        >
-          {[year - 1, year, year + 1].map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap gap-2">
+          <select
+            value={month}
+            onChange={(e) => setMonth(Number(e.target.value))}
+            className={`${opsFieldCls} h-9 w-auto py-1.5 text-xs font-semibold`}
+          >
+            {Array.from({ length: 12 }, (_, i) => (
+              <option key={i + 1} value={i + 1}>
+                {new Date(2000, i, 1).toLocaleString(undefined, { month: "long" })}
+              </option>
+            ))}
+          </select>
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className={`${opsFieldCls} h-9 w-auto py-1.5 text-xs font-semibold`}
+          >
+            {[year - 1, year, year + 1].map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <OpsTableShell
@@ -311,11 +311,17 @@ function PayrollContent() {
         ]}
         activeTab={tab}
         onTabChange={setTab}
+        footer={<span>STAFF PAY · {monthLabel.toUpperCase()}</span>}
       >
         {loading ? (
           <OpsSkeleton rows={6} cols={6} />
         ) : filtered.length === 0 ? (
-          <OpsEmpty message="No payroll records for this month" />
+          <OpsEmpty
+            message="No payroll records for this month"
+            hint="Run payroll for the period to generate staff payment lines"
+            ctaLabel="Run payroll"
+            onCta={openRunForMonth}
+          />
         ) : (
           <>
             <table className="w-full text-left">
@@ -331,11 +337,20 @@ function PayrollContent() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
                 {pageSlice.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-navy-900/40">
-                    <td className={`${opsTd} font-semibold text-navy-900 dark:text-white`}>
-                      {personName(r.user)}
-                      <div className="text-[11px] font-normal text-slate-400">
-                        {r.payrollType || "—"}
+                  <tr key={r.id} className="hover:bg-amber-50/40 dark:hover:bg-navy-900/50">
+                    <td className={opsTd}>
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy-100 text-xs font-bold text-navy-800 dark:bg-navy-900 dark:text-amber-400">
+                          {personName(r.user).slice(0, 1).toUpperCase()}
+                        </span>
+                        <div>
+                          <p className="font-bold text-navy-900 dark:text-white">
+                            {personName(r.user)}
+                          </p>
+                          <p className="font-mono text-[10px] uppercase text-slate-400">
+                            {r.payrollType || "—"}
+                          </p>
+                        </div>
                       </div>
                     </td>
                     <td className={`${opsTd} text-slate-600 dark:text-slate-300`}>
@@ -344,39 +359,39 @@ function PayrollContent() {
                     <td className={`${opsTd} font-mono text-slate-600`}>
                       {r.hoursWorked != null ? Number(r.hoursWorked).toFixed(1) : "—"}
                     </td>
-                    <td className={`${opsTd} font-bold text-navy-900 dark:text-white`}>
+                    <td className={`${opsTd} font-mono text-base font-black text-navy-900 dark:text-white`}>
                       {formatMoney(r.netSalary ?? r.totalAmount)}
                     </td>
                     <td className={opsTd}>
                       <OpsBadge status={r.status} />
                     </td>
                     <td className={opsTd}>
-                      <div className="flex justify-end gap-2">
+                      <div className="flex flex-wrap justify-end gap-1">
                         {r.status === "pending" && (
-                          <button
+                          <OpsRowAction
+                            tone="emerald"
                             onClick={() => setStatus(r.id, "approved")}
                             disabled={actionId === r.id}
-                            className="rounded px-2 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
                           >
-                            Approve
-                          </button>
+                            <CheckCircle2 size={12} /> Approve
+                          </OpsRowAction>
                         )}
                         {(r.status === "approved" || r.status === "pending") && (
-                          <button
+                          <OpsRowAction
+                            tone="amber"
                             onClick={() => setStatus(r.id, "paid")}
                             disabled={actionId === r.id}
-                            className="rounded px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
                           >
-                            Mark paid
-                          </button>
+                            <Banknote size={12} /> Mark paid
+                          </OpsRowAction>
                         )}
-                        <button
+                        <OpsRowAction
+                          tone="neutral"
                           onClick={() => openInvoice(r.id)}
                           disabled={actionId === r.id}
-                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                         >
-                          <FileDown size={12} /> Invoice
-                        </button>
+                          <FileDown size={12} /> Payslip
+                        </OpsRowAction>
                       </div>
                     </td>
                   </tr>
@@ -392,6 +407,83 @@ function PayrollContent() {
           </>
         )}
       </OpsTableShell>
+
+      <OpsDrawer
+        open={showRun}
+        onClose={() => setShowRun(false)}
+        eyebrow="Payroll run"
+        title="Generate payroll"
+        subtitle="Create payment lines for the selected period"
+        footer={
+          <>
+            <OpsSecondaryButton onClick={() => setShowRun(false)}>Cancel</OpsSecondaryButton>
+            <OpsPrimaryButton onClick={generate} disabled={generating}>
+              {generating ? <OpsSpinner className="border-amber-100 border-t-white" /> : <Wallet size={14} />}
+              Generate records
+            </OpsPrimaryButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-slate-50 p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:via-navy-950 dark:to-navy-950">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+              Run preview
+            </p>
+            <p className="mt-1 text-lg font-black text-navy-900 dark:text-white">
+              {formatDate(periodStart)} → {formatDate(periodEnd)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Type: <span className="font-bold capitalize text-navy-800 dark:text-slate-200">{payrollType}</span>
+              {" · "}Tax auto-calc enabled
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <OpsDateField
+              label="Period start"
+              required
+              value={periodStart}
+              onChange={setPeriodStart}
+            />
+            <OpsDateField
+              label="Period end"
+              required
+              value={periodEnd}
+              onChange={setPeriodEnd}
+            />
+          </div>
+
+          <OpsField label="Pay type" required>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { id: "hourly", label: "Hourly", hint: "From approved hours" },
+                  { id: "fixed", label: "Fixed", hint: "Salary schedule" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setPayrollType(opt.id)}
+                  className={`rounded-xl border px-3 py-3 text-left transition ${
+                    payrollType === opt.id
+                      ? "border-amber-500 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/40"
+                      : "border-slate-200 bg-white hover:border-amber-300 dark:border-navy-800 dark:bg-navy-950"
+                  }`}
+                >
+                  <p className="text-sm font-bold text-navy-900 dark:text-white">{opt.label}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{opt.hint}</p>
+                </button>
+              ))}
+            </div>
+          </OpsField>
+
+          <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-500 dark:border-navy-800 dark:bg-navy-950">
+            Generated lines appear as <strong>pending</strong>. Approve each (or mark paid) from the
+            ledger. Hours still pending approval are not auto-included.
+          </p>
+        </div>
+      </OpsDrawer>
     </div>
   )
 }

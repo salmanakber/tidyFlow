@@ -4,14 +4,13 @@
  * Job inspector slide-over — matches control-panel reference drawer
  * (navy head, amber accents, dense form).
  */
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useRef, useCallback } from "react"
 import axios from "axios"
 import {
   X,
   MapPin,
   User as UserIcon,
   ChevronDown,
-  Loader2,
   Calendar,
   ClipboardList,
   Camera,
@@ -21,6 +20,7 @@ import {
   Share2,
   ScrollText,
 } from "lucide-react"
+import { OpsLoader, OpsSpinner } from "@/components/ops/OpsLoader"
 import SmartAssignPanel from "@/components/ops/SmartAssignPanel"
 import LiveMapPanel from "@/components/ops/LiveMapPanel"
 import AuditTrailDrawer from "@/components/ops/AuditTrailDrawer"
@@ -137,6 +137,24 @@ function cleanerLabel(u?: JobCleaner | JobTask["assignedUser"] | null) {
 
 type Tab = "details" | "schedule" | "checklist" | "proofs" | "hours" | "gps"
 
+const DRAWER_WIDTH_KEY = "tidyflow_job_drawer_width"
+const DRAWER_MIN = 360
+const DRAWER_MAX_RATIO = 0.92
+const DRAWER_DEFAULT_RATIO = 0.5
+
+function clampDrawerWidth(px: number) {
+  if (typeof window === "undefined") return px
+  const max = Math.floor(window.innerWidth * DRAWER_MAX_RATIO)
+  return Math.max(DRAWER_MIN, Math.min(max, Math.round(px)))
+}
+
+function readStoredDrawerWidth() {
+  if (typeof window === "undefined") return null
+  const raw = Number(localStorage.getItem(DRAWER_WIDTH_KEY))
+  if (!Number.isFinite(raw) || raw < DRAWER_MIN) return null
+  return clampDrawerWidth(raw)
+}
+
 export default function JobInspectorDrawer({
   open,
   onClose,
@@ -166,6 +184,14 @@ export default function JobInspectorDrawer({
   const [shareBusy, setShareBusy] = useState(false)
   const [shareFlash, setShareFlash] = useState("")
   const [auditOpen, setAuditOpen] = useState(false)
+  const [drawerWidth, setDrawerWidth] = useState(() => {
+    if (typeof window === "undefined") return 520
+    return readStoredDrawerWidth() || Math.round(window.innerWidth * DRAWER_DEFAULT_RATIO)
+  })
+  const [isDesktop, setIsDesktop] = useState(false)
+  const resizingRef = useRef(false)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -176,6 +202,68 @@ export default function JobInspectorDrawer({
     isRecurring: false,
     recurringPattern: "weekly",
   })
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)")
+    const apply = () => {
+      setIsDesktop(mq.matches)
+      setDrawerWidth((w) => clampDrawerWidth(w))
+    }
+    apply()
+    mq.addEventListener("change", apply)
+    window.addEventListener("resize", apply)
+    return () => {
+      mq.removeEventListener("change", apply)
+      window.removeEventListener("resize", apply)
+    }
+  }, [])
+
+  const onResizeMove = useCallback((e: MouseEvent | TouchEvent) => {
+    if (!resizingRef.current) return
+    const clientX = "touches" in e ? e.touches[0]?.clientX : e.clientX
+    if (clientX == null) return
+    const delta = startXRef.current - clientX
+    const next = clampDrawerWidth(startWidthRef.current + delta)
+    setDrawerWidth(next)
+    e.preventDefault?.()
+  }, [])
+
+  const stopResize = useCallback(() => {
+    if (!resizingRef.current) return
+    resizingRef.current = false
+    document.body.style.cursor = ""
+    document.body.style.userSelect = ""
+    setDrawerWidth((w) => {
+      const clamped = clampDrawerWidth(w)
+      try {
+        localStorage.setItem(DRAWER_WIDTH_KEY, String(clamped))
+      } catch {
+        /* ignore */
+      }
+      return clamped
+    })
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener("mousemove", onResizeMove)
+    window.addEventListener("mouseup", stopResize)
+    window.addEventListener("touchmove", onResizeMove, { passive: false })
+    window.addEventListener("touchend", stopResize)
+    return () => {
+      window.removeEventListener("mousemove", onResizeMove)
+      window.removeEventListener("mouseup", stopResize)
+      window.removeEventListener("touchmove", onResizeMove)
+      window.removeEventListener("touchend", stopResize)
+    }
+  }, [onResizeMove, stopResize])
+
+  const startResize = (clientX: number) => {
+    resizingRef.current = true
+    startXRef.current = clientX
+    startWidthRef.current = drawerWidth
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+  }
 
   useEffect(() => {
     if (!open) return
@@ -403,10 +491,40 @@ export default function JobInspectorDrawer({
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 right-0 z-[70] flex w-full flex-col border-l border-control-border bg-white shadow-2xl transition-transform duration-200 ease-out sm:w-1/2 sm:max-w-[50vw] dark:border-control-darkBorder dark:bg-control-darkCard ${
+        className={`job-inspector-drawer fixed inset-y-0 right-0 z-[70] flex w-full flex-col border-l border-control-border bg-white shadow-2xl transition-transform duration-200 ease-out dark:border-control-darkBorder dark:bg-control-darkCard sm:max-w-[92vw] ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
+        style={isDesktop ? { width: drawerWidth } : { width: "100%" }}
       >
+        {/* Drag handle — left edge */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize job drawer"
+          title="Drag to resize"
+          className="absolute inset-y-0 left-0 z-20 hidden w-3 cursor-col-resize touch-none sm:block"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            startResize(e.clientX)
+          }}
+          onTouchStart={(e) => {
+            const x = e.touches[0]?.clientX
+            if (x == null) return
+            e.stopPropagation()
+            startResize(x)
+          }}
+        >
+          <span className="absolute inset-y-0 left-0 w-1 bg-transparent transition group-hover:bg-amber-500/40" />
+          <span className="absolute left-0 top-1/2 flex h-12 w-3 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-control-border bg-slate-100 shadow-sm dark:border-navy-700 dark:bg-navy-900">
+            <span className="flex flex-col gap-0.5">
+              <span className="h-0.5 w-2.5 rounded-full bg-slate-400" />
+              <span className="h-0.5 w-2.5 rounded-full bg-slate-400" />
+              <span className="h-0.5 w-2.5 rounded-full bg-slate-400" />
+            </span>
+          </span>
+        </div>
+
         <div className="flex items-start justify-between border-b border-navy-900 bg-navy-950 p-4 text-white sm:p-5">
           <div className="min-w-0 pr-3">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
@@ -604,7 +722,7 @@ export default function JobInspectorDrawer({
               <div className="space-y-3">
                 {detailLoading ? (
                   <div className="flex justify-center py-10">
-                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                    <OpsLoader message="Loading…" size="sm" />
                   </div>
                 ) : (
                   <>
@@ -656,7 +774,7 @@ export default function JobInspectorDrawer({
               <div className="space-y-3">
                 {detailLoading ? (
                   <div className="flex justify-center py-10">
-                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                    <OpsLoader message="Loading…" size="sm" />
                   </div>
                 ) : photos.length === 0 ? (
                   <p className="py-8 text-center text-sm text-slate-400">No photo proofs yet</p>
@@ -695,7 +813,7 @@ export default function JobInspectorDrawer({
               <div className="space-y-2">
                 {detailLoading ? (
                   <div className="flex justify-center py-10">
-                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                    <OpsLoader message="Loading…" size="sm" />
                   </div>
                 ) : timeLogs.length === 0 ? (
                   <p className="py-8 text-center text-sm text-slate-400">No time logs yet</p>
@@ -743,12 +861,12 @@ export default function JobInspectorDrawer({
                       {liveForJob.filter((c) => c.isLive).length} live · refreshes every 30s
                     </p>
                   </div>
-                  {gpsLoading && <Loader2 size={16} className="animate-spin text-amber-400" />}
+                  {gpsLoading && <OpsSpinner />}
                 </div>
 
                 {gpsLoading && gpsPoints.length === 0 ? (
                   <div className="flex justify-center py-10">
-                    <Loader2 className="animate-spin text-amber-600" size={22} />
+                    <OpsLoader message="Loading…" size="sm" />
                   </div>
                 ) : (
                   <LiveMapPanel
@@ -834,7 +952,7 @@ export default function JobInspectorDrawer({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:bg-navy-900 dark:text-amber-300"
                 >
                   {shareBusy ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <OpsSpinner className="border-white/30 border-t-white" />
                   ) : (
                     <Share2 size={14} />
                   )}
@@ -847,7 +965,7 @@ export default function JobInspectorDrawer({
                   disabled={saving}
                   className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-1.5 font-mono text-xs font-bold text-white shadow-amber-glow hover:bg-amber-700 disabled:opacity-50"
                 >
-                  {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {saving ? <OpsSpinner className="border-amber-100 border-t-white" /> : null}
                   {task ? "Save changes" : "Create job"}
                 </button>
               )}

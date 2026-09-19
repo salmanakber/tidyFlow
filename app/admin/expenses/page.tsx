@@ -5,7 +5,7 @@ import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, formatDate, formatMoney } from "@/lib/admin-session"
 import { useUrlQueryState } from "@/hooks/useUrlQueryState"
-import { Plus, Loader2, Receipt } from "lucide-react"
+import { Plus, Receipt, Check, X } from "lucide-react"
 import {
   OpsPageHeader,
   OpsRefreshButton,
@@ -14,15 +14,29 @@ import {
   OpsEmpty,
   OpsBadge,
   OpsKpi,
-  OpsCard,
   OpsTableShell,
   OpsPagination,
   OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
+import {
+  OpsDrawer,
+  OpsField,
+  OpsSecondaryButton,
+  OpsRowAction,
+  opsFieldCls,
+} from "@/components/ops/OpsForm"
+import { OpsSpinner } from "@/components/ops/OpsLoader"
 
 const PAGE_SIZE = 10
+
+const CATEGORIES = [
+  { id: "supplies", label: "Supplies" },
+  { id: "travel", label: "Travel" },
+  { id: "equipment", label: "Equipment" },
+  { id: "other", label: "Other" },
+]
 
 export default function ExpensesPage() {
   return (
@@ -138,8 +152,12 @@ function Content() {
   const filtered =
     tab === "all" ? safeItems : safeItems.filter((i) => String(i.status) === tab)
   const pending = safeItems.filter((i) => i.status === "pending").length
+  const approved = safeItems.filter((i) => i.status === "approved").length
   const totalPending = safeItems
     .filter((i) => i.status === "pending")
+    .reduce((s, i) => s + Number(i.amount || 0), 0)
+  const totalApproved = safeItems
+    .filter((i) => i.status === "approved")
     .reduce((s, i) => s + Number(i.amount || 0), 0)
   const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const pendingOnPage = pageSlice.filter((i) => i.status === "pending")
@@ -170,11 +188,16 @@ function Content() {
       <OpsPageHeader
         eyebrow="Finance"
         title="Expenses"
-        subtitle="Track and approve staff expense claims"
+        subtitle="Track claims, approve spend, and keep books clean"
         actions={
           <div className="flex gap-2">
             <OpsRefreshButton onClick={load} loading={loading} />
-            <OpsPrimaryButton onClick={() => setShowForm(true)}>
+            <OpsPrimaryButton
+              onClick={() => {
+                setForm({ category: "supplies", amount: "", description: "" })
+                setShowForm(true)
+              }}
+            >
               <Plus size={14} /> Add expense
             </OpsPrimaryButton>
           </div>
@@ -184,77 +207,26 @@ function Content() {
       {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
       {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
-      <div className="grid grid-cols-2 gap-3">
-        <OpsKpi label="Pending approvals" value={pending} />
-        <OpsKpi label="Pending amount" value={formatMoney(totalPending)} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <OpsKpi label="Pending" value={pending} />
+        <OpsKpi label="Pending $" value={formatMoney(totalPending)} />
+        <OpsKpi label="Approved" value={approved} />
+        <OpsKpi label="Approved $" value={formatMoney(totalApproved)} />
       </div>
-
-      {showForm && (
-        <OpsCard>
-          <form onSubmit={create} className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <label className="space-y-1 text-xs font-semibold">
-              Category
-              <select
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                <option value="supplies">Supplies</option>
-                <option value="travel">Travel</option>
-                <option value="equipment">Equipment</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-xs font-semibold">
-              Amount
-              <input
-                required
-                type="number"
-                step="0.01"
-                min="0"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              />
-            </label>
-            <label className="space-y-1 text-xs font-semibold md:col-span-2">
-              Description
-              <input
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </label>
-            <div className="flex justify-end gap-2 md:col-span-4">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 text-sm font-semibold"
-              >
-                Cancel
-              </button>
-              <OpsPrimaryButton type="submit" disabled={saving}>
-                {saving ? <Loader2 className="animate-spin" size={14} /> : <Receipt size={14} />}
-                Submit
-              </OpsPrimaryButton>
-            </div>
-          </form>
-        </OpsCard>
-      )}
 
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
           <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
-            {selected.size} selected
+            {selected.size} claim{selected.size === 1 ? "" : "s"} selected
           </p>
           <button
             type="button"
             disabled={bulkBusy}
             onClick={bulkApprove}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold uppercase text-white disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm disabled:opacity-50"
           >
-            {bulkBusy ? "Approving…" : "Approve selected"}
+            {bulkBusy ? <OpsSpinner className="border-emerald-100 border-t-white" /> : <Check size={14} />}
+            Approve selected
           </button>
         </div>
       )}
@@ -275,12 +247,14 @@ function Content() {
         ]}
         activeTab={tab}
         onTabChange={setTab}
+        footer={<span>STAFF SPEND · BULK APPROVE</span>}
       >
         {loading ? (
           <OpsSkeleton rows={6} cols={7} />
         ) : filtered.length === 0 ? (
           <OpsEmpty
             message="No expenses yet"
+            hint="Log supplies, travel, or equipment claims for approval"
             ctaLabel="Add expense"
             onCta={() => setShowForm(true)}
           />
@@ -296,7 +270,7 @@ function Content() {
                       onChange={togglePagePending}
                       disabled={pendingIds.length === 0}
                       aria-label="Select pending on page"
-                      className="rounded border-slate-300 disabled:opacity-40"
+                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 disabled:opacity-40"
                     />
                   </th>
                   <th className={opsTh}>Staff</th>
@@ -310,7 +284,7 @@ function Content() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
                 {pageSlice.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/80">
+                  <tr key={item.id} className="hover:bg-amber-50/40 dark:hover:bg-navy-900/50">
                     <td className={opsTd}>
                       {item.status === "pending" ? (
                         <input
@@ -318,40 +292,48 @@ function Content() {
                           checked={selected.has(item.id)}
                           onChange={() => toggleOne(item.id)}
                           aria-label={`Select expense ${item.id}`}
-                          className="rounded border-slate-300"
+                          className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                         />
                       ) : null}
                     </td>
-                    <td className={`${opsTd} font-semibold`}>
-                      {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") ||
-                        "—"}
+                    <td className={opsTd}>
+                      <p className="font-bold text-navy-900 dark:text-white">
+                        {[item.user?.firstName, item.user?.lastName].filter(Boolean).join(" ") ||
+                          "—"}
+                      </p>
                     </td>
-                    <td className={`${opsTd} capitalize`}>{item.category}</td>
-                    <td className={`${opsTd} font-bold`}>{formatMoney(item.amount)}</td>
-                    <td className={`${opsTd} max-w-[220px] truncate text-slate-500`}>
-                      {item.description}
+                    <td className={opsTd}>
+                      <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:border-navy-700 dark:bg-navy-900 dark:text-slate-300">
+                        {item.category}
+                      </span>
                     </td>
-                    <td className={opsTd}>{formatDate(item.createdAt)}</td>
+                    <td className={`${opsTd} font-mono text-base font-black text-navy-900 dark:text-white`}>
+                      {formatMoney(item.amount)}
+                    </td>
+                    <td className={`${opsTd} max-w-[240px] text-slate-500`}>
+                      <p className="line-clamp-2">{item.description}</p>
+                    </td>
+                    <td className={`${opsTd} text-slate-500`}>{formatDate(item.createdAt)}</td>
                     <td className={opsTd}>
                       <OpsBadge status={item.status} />
                     </td>
                     <td className={`${opsTd} text-right`}>
                       {item.status === "pending" && (
-                        <div className="inline-flex gap-2">
-                          <button
+                        <div className="inline-flex gap-1">
+                          <OpsRowAction
+                            tone="emerald"
                             disabled={busyId === item.id}
                             onClick={() => approve(item.id, "approved")}
-                            className="text-xs font-bold text-emerald-700 hover:underline disabled:opacity-50"
                           >
-                            Approve
-                          </button>
-                          <button
+                            <Check size={12} /> Approve
+                          </OpsRowAction>
+                          <OpsRowAction
+                            tone="danger"
                             disabled={busyId === item.id}
                             onClick={() => approve(item.id, "rejected")}
-                            className="text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
                           >
-                            Reject
-                          </button>
+                            <X size={12} /> Reject
+                          </OpsRowAction>
                         </div>
                       )}
                     </td>
@@ -368,6 +350,78 @@ function Content() {
           </>
         )}
       </OpsTableShell>
+
+      <OpsDrawer
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        eyebrow="New claim"
+        title="Add expense"
+        subtitle="Submit a staff spend claim for manager approval"
+        footer={
+          <>
+            <OpsSecondaryButton onClick={() => setShowForm(false)}>Cancel</OpsSecondaryButton>
+            <OpsPrimaryButton
+              type="submit"
+              disabled={saving || !form.amount || !form.description}
+              onClick={() => {
+                const formEl = document.getElementById("expense-create-form") as HTMLFormElement | null
+                formEl?.requestSubmit()
+              }}
+            >
+              {saving ? <OpsSpinner className="border-amber-100 border-t-white" /> : <Receipt size={14} />}
+              Submit claim
+            </OpsPrimaryButton>
+          </>
+        }
+      >
+        <form id="expense-create-form" onSubmit={create} className="space-y-4">
+          <div className="rounded-xl border border-control-border bg-slate-50 p-4 dark:border-navy-800 dark:bg-navy-950">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+              Category
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setForm({ ...form, category: c.id })}
+                  className={`rounded-lg border px-3 py-2.5 text-left text-sm font-bold transition ${
+                    form.category === c.id
+                      ? "border-amber-500 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-200"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-amber-300 dark:border-navy-800 dark:bg-navy-900 dark:text-slate-300"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <OpsField label="Amount" required hint="Enter the total claimed in your company currency">
+            <input
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              className={opsFieldCls}
+              value={form.amount}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              placeholder="0.00"
+            />
+          </OpsField>
+
+          <OpsField label="Description" required>
+            <textarea
+              required
+              rows={4}
+              className={`${opsFieldCls} resize-none`}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="What was purchased and why…"
+            />
+          </OpsField>
+        </form>
+      </OpsDrawer>
     </div>
   )
 }

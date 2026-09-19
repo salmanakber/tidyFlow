@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
 import { adminGet, adminPost, adminPatch, formatDate, formatMoney } from "@/lib/admin-session"
 import { useUrlQueryState } from "@/hooks/useUrlQueryState"
-import { FileText, Loader2, Send, Plus } from "lucide-react"
+import { FileText, Send, Plus, CheckCircle2, Mail } from "lucide-react"
 import {
   OpsPageHeader,
   OpsRefreshButton,
@@ -14,13 +14,19 @@ import {
   OpsEmpty,
   OpsBadge,
   OpsKpi,
-  OpsCard,
   OpsTableShell,
   OpsPagination,
   OpsSkeleton,
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
+import {
+  OpsDrawer,
+  OpsSecondaryButton,
+  OpsRowAction,
+  OpsSelectCard,
+} from "@/components/ops/OpsForm"
+import { OpsSpinner } from "@/components/ops/OpsLoader"
 
 const PAGE_SIZE = 10
 
@@ -46,6 +52,7 @@ function Content() {
   const [busyId, setBusyId] = useState<number | null>(null)
   const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
+  const [query, setQuery] = useState("")
 
   const load = async () => {
     try {
@@ -80,7 +87,7 @@ function Content() {
 
   useEffect(() => {
     setPage(1)
-  }, [tab])
+  }, [tab, query])
 
   const toggleTask = (id: number) => {
     setSelectedTaskIds((prev) =>
@@ -142,29 +149,63 @@ function Content() {
   }
 
   const safeInvoices = Array.isArray(invoices) ? invoices : []
-  const filtered =
-    tab === "all"
-      ? safeInvoices
-      : tab === "unpaid"
-        ? safeInvoices.filter((i) => i.status !== "paid")
-        : safeInvoices.filter((i) => String(i.status) === tab)
+  const safeEligible = Array.isArray(eligible) ? eligible : []
+
+  const filtered = useMemo(() => {
+    let list = safeInvoices
+    if (tab === "unpaid") list = list.filter((i) => i.status !== "paid")
+    else if (tab !== "all") list = list.filter((i) => String(i.status) === tab)
+    const q = query.trim().toLowerCase()
+    if (q) {
+      list = list.filter((i) => {
+        const hay = [
+          i.invoiceNumber,
+          i.id,
+          i.clientName,
+          i.clientEmail,
+          i.property?.clientName,
+          i.task?.title,
+          i.property?.address,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    return list
+  }, [safeInvoices, tab, query])
+
   const unpaid = safeInvoices.filter((i) => i.status !== "paid").length
   const revenue = safeInvoices
     .filter((i) => i.status === "paid")
     .reduce((s, i) => s + Number(i.total ?? i.amount ?? 0), 0)
+  const outstanding = safeInvoices
+    .filter((i) => i.status !== "paid")
+    .reduce((s, i) => s + Number(i.total ?? i.amount ?? 0), 0)
   const pageSlice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const safeEligible = Array.isArray(eligible) ? eligible : []
+
+  const selectedJobs = safeEligible.filter((t) => selectedTaskIds.includes(t.id))
+  const estimatedTotal = selectedJobs.reduce(
+    (s, t) => s + Number(t.price ?? t.amount ?? t.clientPrice ?? 0),
+    0
+  )
 
   return (
     <div className="space-y-5">
       <OpsPageHeader
         eyebrow="Finance"
         title="Client invoices"
-        subtitle="Bill clients for completed jobs"
+        subtitle="Bill clients for completed jobs and track collections"
         actions={
           <div className="flex gap-2">
             <OpsRefreshButton onClick={load} loading={loading} />
-            <OpsPrimaryButton onClick={() => setShowCreate(true)}>
+            <OpsPrimaryButton
+              onClick={() => {
+                setSelectedTaskIds([])
+                setShowCreate(true)
+              }}
+            >
               <Plus size={14} /> Create invoice
             </OpsPrimaryButton>
           </div>
@@ -174,67 +215,27 @@ function Content() {
       {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
       {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <OpsKpi label="Invoices" value={safeInvoices.length} />
         <OpsKpi label="Unpaid" value={unpaid} />
-        <OpsKpi label="Paid total" value={formatMoney(revenue)} />
+        <OpsKpi label="Outstanding" value={formatMoney(outstanding)} />
+        <OpsKpi label="Collected" value={formatMoney(revenue)} />
       </div>
 
-      {showCreate && (
-        <OpsCard>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-sm font-bold text-navy-900 dark:text-white">
-                <FileText size={16} className="text-amber-600" /> Select eligible jobs
-              </h2>
-              <button
-                onClick={() => setShowCreate(false)}
-                className="text-sm font-semibold text-slate-500"
-              >
-                Close
-              </button>
-            </div>
-            {safeEligible.length === 0 ? (
-              <p className="text-sm text-slate-500">No eligible jobs found for invoicing.</p>
-            ) : (
-              <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100">
-                {safeEligible.map((t: any) => (
-                  <label
-                    key={t.id}
-                    className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedTaskIds.includes(t.id)}
-                      onChange={() => toggleTask(t.id)}
-                      className="rounded text-amber-600"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold">{t.title}</div>
-                      <div className="truncate text-xs text-slate-400">
-                        {t.property?.address || t.propertyAddress || "—"}
-                      </div>
-                    </div>
-                    <span className="font-mono text-xs text-slate-500">#{t.id}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            <div className="flex justify-end">
-              <OpsPrimaryButton
-                onClick={create}
-                disabled={creating || !selectedTaskIds.length}
-              >
-                {creating ? <Loader2 className="animate-spin" size={14} /> : null}
-                Create from {selectedTaskIds.length} job(s)
-              </OpsPrimaryButton>
-            </div>
-          </div>
-        </OpsCard>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search invoice, client, job…"
+          className="h-9 min-w-[220px] flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-600/15 dark:border-navy-800 dark:bg-navy-950 sm:max-w-xs"
+        />
+        <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          {safeEligible.length} jobs ready to bill
+        </span>
+      </div>
 
       <OpsTableShell
-        title="Invoices"
+        title="Invoice ledger"
         stickyHeader
         badge={
           <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
@@ -248,12 +249,14 @@ function Content() {
         ]}
         activeTab={tab}
         onTabChange={setTab}
+        footer={<span>CLIENT BILLING · PAGINATED</span>}
       >
         {loading ? (
           <OpsSkeleton rows={6} cols={6} />
         ) : filtered.length === 0 ? (
           <OpsEmpty
             message="No client invoices yet"
+            hint="Pick completed jobs and generate a professional invoice in one step"
             ctaLabel="Create invoice"
             onCta={() => setShowCreate(true)}
           />
@@ -266,48 +269,61 @@ function Content() {
                   <th className={opsTh}>Client</th>
                   <th className={opsTh}>Total</th>
                   <th className={opsTh}>Status</th>
-                  <th className={opsTh}>Date</th>
+                  <th className={opsTh}>Issued</th>
                   <th className={`${opsTh} text-right`}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
                 {pageSlice.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/80">
-                    <td className={`${opsTd} font-semibold`}>
-                      #{inv.invoiceNumber || inv.id}
-                      <div className="text-xs font-normal text-slate-400">
-                        {inv.task?.title || inv.property?.address || ""}
+                  <tr key={inv.id} className="hover:bg-amber-50/40 dark:hover:bg-navy-900/50">
+                    <td className={opsTd}>
+                      <div className="flex items-start gap-2.5">
+                        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-navy-950 text-amber-400">
+                          <FileText size={14} />
+                        </span>
+                        <div>
+                          <p className="font-bold text-navy-900 dark:text-white">
+                            #{inv.invoiceNumber || inv.id}
+                          </p>
+                          <p className="mt-0.5 max-w-[220px] truncate text-xs text-slate-400">
+                            {inv.task?.title || inv.property?.address || "Client invoice"}
+                          </p>
+                        </div>
                       </div>
                     </td>
                     <td className={opsTd}>
-                      {inv.clientName || inv.property?.clientName || "—"}
-                      <div className="text-xs text-slate-400">{inv.clientEmail || ""}</div>
+                      <p className="font-semibold text-navy-900 dark:text-white">
+                        {inv.clientName || inv.property?.clientName || "—"}
+                      </p>
+                      <p className="text-xs text-slate-400">{inv.clientEmail || ""}</p>
                     </td>
-                    <td className={`${opsTd} font-bold`}>
+                    <td className={`${opsTd} font-mono text-base font-black text-navy-900 dark:text-white`}>
                       {formatMoney(inv.total ?? inv.amount ?? inv.totalAmount)}
                     </td>
                     <td className={opsTd}>
                       <OpsBadge status={inv.status} />
                     </td>
-                    <td className={opsTd}>{formatDate(inv.createdAt || inv.issuedAt)}</td>
+                    <td className={`${opsTd} text-slate-500`}>
+                      {formatDate(inv.createdAt || inv.issuedAt)}
+                    </td>
                     <td className={`${opsTd} text-right`}>
-                      <div className="inline-flex gap-2">
+                      <div className="inline-flex flex-wrap justify-end gap-1">
                         {inv.status !== "paid" && (
-                          <button
+                          <OpsRowAction
+                            tone="emerald"
                             disabled={busyId === inv.id}
                             onClick={() => markPaid(inv.id)}
-                            className="text-xs font-bold text-emerald-700 hover:underline disabled:opacity-50"
                           >
-                            Mark paid
-                          </button>
+                            <CheckCircle2 size={12} /> Mark paid
+                          </OpsRowAction>
                         )}
-                        <button
+                        <OpsRowAction
+                          tone="amber"
                           disabled={busyId === inv.id}
                           onClick={() => sendInvoice(inv.id)}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline disabled:opacity-50"
                         >
                           <Send size={12} /> Send
-                        </button>
+                        </OpsRowAction>
                       </div>
                     </td>
                   </tr>
@@ -323,6 +339,101 @@ function Content() {
           </>
         )}
       </OpsTableShell>
+
+      <OpsDrawer
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        eyebrow="Create"
+        title="New client invoice"
+        subtitle="Select completed jobs to bill together"
+        wide
+        footer={
+          <>
+            <OpsSecondaryButton onClick={() => setShowCreate(false)}>Cancel</OpsSecondaryButton>
+            <OpsPrimaryButton onClick={create} disabled={creating || !selectedTaskIds.length}>
+              {creating ? <OpsSpinner className="border-amber-100 border-t-white" /> : <FileText size={14} />}
+              Create from {selectedTaskIds.length || 0} job
+              {selectedTaskIds.length === 1 ? "" : "s"}
+            </OpsPrimaryButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:to-navy-950">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+              Draft summary
+            </p>
+            <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <p className="text-2xl font-black text-navy-900 dark:text-white">
+                  {selectedTaskIds.length} job{selectedTaskIds.length === 1 ? "" : "s"}
+                </p>
+                <p className="text-xs text-slate-500">Selected for this invoice</p>
+              </div>
+              {estimatedTotal > 0 ? (
+                <div className="text-right">
+                  <p className="font-mono text-lg font-black text-amber-700 dark:text-amber-400">
+                    {formatMoney(estimatedTotal)}
+                  </p>
+                  <p className="text-[10px] uppercase text-slate-400">Est. from job prices</p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {safeEligible.length === 0 ? (
+            <OpsEmpty
+              message="No eligible jobs"
+              hint="Complete jobs with billable amounts first, then come back here"
+            />
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Eligible jobs · {safeEligible.length}
+                </p>
+                <button
+                  type="button"
+                  className="text-[11px] font-bold text-amber-700 hover:text-amber-800"
+                  onClick={() =>
+                    setSelectedTaskIds(
+                      selectedTaskIds.length === safeEligible.length
+                        ? []
+                        : safeEligible.map((t) => t.id)
+                    )
+                  }
+                >
+                  {selectedTaskIds.length === safeEligible.length ? "Clear all" : "Select all"}
+                </button>
+              </div>
+              <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+                {safeEligible.map((t: any) => (
+                  <OpsSelectCard
+                    key={t.id}
+                    selected={selectedTaskIds.includes(t.id)}
+                    onClick={() => toggleTask(t.id)}
+                    title={t.title || `Job #${t.id}`}
+                    meta={t.property?.address || t.propertyAddress || "No address"}
+                    trailing={
+                      <span className="font-mono text-[10px] font-bold text-slate-400">
+                        #{t.id}
+                        {t.price != null || t.amount != null
+                          ? ` · ${formatMoney(t.price ?? t.amount)}`
+                          : ""}
+                      </span>
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs text-slate-500 dark:border-navy-800 dark:bg-navy-950">
+            <Mail size={14} className="mt-0.5 flex-shrink-0 text-amber-600" />
+            After creating, use Send on the row to email the client. Mark paid when payment lands.
+          </p>
+        </div>
+      </OpsDrawer>
     </div>
   )
 }

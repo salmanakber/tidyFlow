@@ -32,11 +32,11 @@ import {
   Calendar,
   Repeat,
   Trash2,
-  Loader2,
   Clock,
   User as UserIcon,
   Filter,
 } from "lucide-react"
+import { OpsLoader } from "@/components/ops/OpsLoader"
 
 const BOARD_COLUMNS = ["PLANNED", "ASSIGNED", "IN_PROGRESS", "SUBMITTED", "APPROVED"]
 const PAGE_SIZE = 20
@@ -514,9 +514,7 @@ export default function TasksPage() {
     <AdminLayout>
       <Suspense
         fallback={
-          <div className="flex justify-center py-20">
-            <Loader2 className="animate-spin text-amber-600" size={28} />
-          </div>
+          <OpsLoader message="Loading tasks…" size="lg" fullPage />
         }
       >
         <TasksContent />
