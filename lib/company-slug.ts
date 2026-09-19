@@ -64,6 +64,8 @@ export const COMPANY_ROUTE_MAP: Record<string, string> = {
   'checklist-templates': 'checklist-templates',
   notifications: 'notifications',
   digests: 'digests',
+  monitor: 'live-monitor',
+  'live-monitor': 'live-monitor',
   // Platform admin only: company-config, ai
 }
 

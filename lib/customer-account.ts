@@ -13,6 +13,11 @@ export function getCustomerToken(): string | null {
   )
 }
 
+/** Prefer customer portal token; fall back to admin workspace token (billing access). */
+export function getAccountAccessToken(): string | null {
+  return getCustomerToken() || getAdminToken()
+}
+
 export function getAdminToken(): string | null {
   if (typeof window === "undefined") return null
   return localStorage.getItem("authToken") || sessionStorage.getItem("authToken")

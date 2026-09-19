@@ -5,10 +5,41 @@ import { useRouter } from "next/navigation"
 import axios from "axios"
 import Link from "next/link"
 import GoogleSignInButton from "@/components/GoogleSignInButton"
+import AppDownloadBanner from "@/components/AppDownloadBanner"
 import { configureAdminApiClient } from "@/lib/admin-api-client"
-import { getAdminToken, storeAdminSession } from "@/lib/customer-account"
-import { resolvePostLoginPath } from "@/lib/post-login-path"
+import {
+  CUSTOMER_TOKEN_KEY,
+  CUSTOMER_USER_KEY,
+  getAdminToken,
+  storeAdminSession,
+} from "@/lib/customer-account"
+import { companyNeedsPlan, resolvePostLoginPath } from "@/lib/post-login-path"
 import { buildCompanySlug } from "@/lib/company-slug"
+
+/** Mirror admin session into customer keys so /account/billing APIs work. */
+function unlockBillingSession(token: string, user: unknown, rememberMe: boolean) {
+  if (rememberMe) {
+    localStorage.setItem(CUSTOMER_TOKEN_KEY, token)
+    localStorage.setItem(CUSTOMER_USER_KEY, JSON.stringify(user))
+    sessionStorage.removeItem(CUSTOMER_TOKEN_KEY)
+    sessionStorage.removeItem(CUSTOMER_USER_KEY)
+  } else {
+    sessionStorage.setItem(CUSTOMER_TOKEN_KEY, token)
+    sessionStorage.setItem(CUSTOMER_USER_KEY, JSON.stringify(user))
+    localStorage.removeItem(CUSTOMER_TOKEN_KEY)
+    localStorage.removeItem(CUSTOMER_USER_KEY)
+  }
+}
+
+function planFieldsFromCompany(company: any, meNeedsPlan?: boolean | null) {
+  return {
+    subscriptionStatus: company?.subscriptionStatus ?? null,
+    planTier: company?.planTier ?? null,
+    isTrialActive: company?.isTrialActive ?? null,
+    trialEndsAt: company?.trialEndsAt ?? null,
+    needsPlan: typeof meNeedsPlan === "boolean" ? meNeedsPlan : company?.needsPlan ?? null,
+  }
+}
 
 /** Company owner / manager sign-in (platform admins also use this). Customers: /account/login */
 export default function LoginPage() {
@@ -30,14 +61,25 @@ export default function LoginPage() {
         if (!res.data?.success) return
         const user = res.data.data.user
         const company = res.data.data.company
-        router.push(
-          resolvePostLoginPath({
-            role: user?.role,
-            companyId: user?.companyId || company?.id,
-            companyName: company?.name,
-            companySlug: company?.slug,
-          })
-        )
+        const needsPlan =
+          typeof res.data.data?.needsPlan === "boolean"
+            ? res.data.data.needsPlan
+            : typeof company?.needsPlan === "boolean"
+              ? company.needsPlan
+              : companyNeedsPlan(planFieldsFromCompany(company))
+
+        const path = resolvePostLoginPath({
+          role: user?.role,
+          companyId: user?.companyId || company?.id,
+          companyName: company?.name,
+          companySlug: company?.slug,
+          ...planFieldsFromCompany(company, needsPlan),
+        })
+
+        if (path === "/account/billing") {
+          unlockBillingSession(token, user, true)
+        }
+        router.push(path)
       })
       .catch(() => {})
   }, [router])
@@ -67,12 +109,45 @@ export default function LoginPage() {
           localStorage.setItem("selectedCompanyId", String(company.id))
         }
 
-        window.location.href = resolvePostLoginPath({
+        let plan = planFieldsFromCompany(company)
+        const hasPlanSignal =
+          plan.subscriptionStatus != null ||
+          plan.planTier != null ||
+          plan.isTrialActive != null ||
+          plan.trialEndsAt != null ||
+          typeof plan.needsPlan === "boolean"
+
+        if (!hasPlanSignal) {
+          try {
+            const me = await axios.get("/api/auth/me", {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (me.data?.success) {
+              const meCompany = me.data.data?.company
+              const meNeeds =
+                typeof me.data.data?.needsPlan === "boolean"
+                  ? me.data.data.needsPlan
+                  : meCompany?.needsPlan
+              plan = planFieldsFromCompany(meCompany || company, meNeeds)
+            }
+          } catch {
+            /* proceed with login company fields */
+          }
+        }
+
+        const path = resolvePostLoginPath({
           role: user.role,
           companyId: user.companyId || company?.id,
           companyName: company?.name,
           companySlug: slug,
+          ...plan,
         })
+
+        if (path === "/account/billing") {
+          unlockBillingSession(token, user, rememberMe)
+        }
+
+        window.location.href = path
       } else {
         setError(response.data.message || "Login failed")
       }
@@ -206,6 +281,8 @@ export default function LoginPage() {
                 </div>
                 <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
               </div>
+
+              <AppDownloadBanner variant="compact" />
 
               <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
                 <p>

@@ -7,7 +7,7 @@ import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
 import {
   clearAdminSession,
   clearCustomerSession,
-  getCustomerToken,
+  getAccountAccessToken,
   getCustomerUserEmail,
   isTrialCurrentlyActive,
   trialDaysRemaining,
@@ -153,16 +153,24 @@ export default function CustomerBillingPage() {
   const [showSetup, setShowSetup] = useState(false)
   const pendingCheckout = useRef<{ tier: string; useTrial: boolean } | null>(null)
 
-  const authHeaders = () => ({ Authorization: `Bearer ${getCustomerToken()}` })
+  const authHeaders = () => ({ Authorization: `Bearer ${getAccountAccessToken()}` })
 
   const load = useCallback(async () => {
     setLoading(true)
     setMessage(null)
     try {
-      const token = getCustomerToken()
+      const token = getAccountAccessToken()
       if (!token) {
         window.location.href = "/account/login"
         return
+      }
+      // Keep a customer-portal token for billing APIs even when arriving from admin login
+      if (typeof window !== "undefined" && token) {
+        const hasCustomer =
+          localStorage.getItem("customerAuthToken") || sessionStorage.getItem("customerAuthToken")
+        if (!hasCustomer) {
+          localStorage.setItem("customerAuthToken", token)
+        }
       }
       // Scrub leftover admin tokens + HTTP-only cookie from older builds
       clearAdminSession()

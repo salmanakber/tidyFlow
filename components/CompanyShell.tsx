@@ -80,6 +80,7 @@ const OWNER_NAV: NavItem[] = [
   // Navigate
   { name: "Home", page: "dashboard", icon: LayoutDashboard, group: "navigate" },
   { name: "Tasks", page: "jobs", icon: ClipboardList, group: "navigate" },
+  { name: "Live monitor", page: "monitor", icon: Crosshair, group: "navigate" },
   { name: "Calendar", page: "calendar", icon: Calendar, group: "navigate" },
   {
     name: "Task Sync",
@@ -243,6 +244,19 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           router.replace("/login")
           return
         }
+        if (res.data.data?.needsPlan) {
+          try {
+            localStorage.setItem("customerAuthToken", token)
+            localStorage.setItem(
+              "customerUserData",
+              JSON.stringify(res.data.data.user || {})
+            )
+          } catch {
+            /* ignore */
+          }
+          window.location.href = "/account/billing?tab=plans&from=app"
+          return
+        }
         setUser(res.data.data.user)
         setCompanyName(res.data.data.company?.name || "")
       } catch {
@@ -275,8 +289,8 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         kind: "action",
         id: "live-map",
         name: "Open live map / GPS",
-        href: wsHref("safety"),
-        icon: MapPin,
+        href: wsHref("monitor"),
+        icon: Crosshair,
       },
       {
         kind: "action",
@@ -553,6 +567,27 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           </div>
 
           <div className="flex items-center gap-2">
+            {user &&
+              ["OWNER", "MANAGER", "COMPANY_ADMIN", "DEVELOPER"].includes(
+                String(user.role || "").toUpperCase()
+              ) && (
+                <Link
+                  href="/account/billing?tab=usage"
+                  className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 dark:border-navy-800 dark:bg-navy-950 dark:text-slate-300 dark:hover:border-amber-700/50 dark:hover:bg-navy-900 sm:inline-flex"
+                >
+                  <CreditCard size={14} className="text-amber-600" />
+                  Billing &amp; usage
+                </Link>
+              )}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:bg-amber-50 dark:border-navy-800 dark:bg-navy-950 dark:text-slate-300 dark:hover:border-amber-700/40"
+              title="Toggle theme"
+            >
+              {darkMode ? <Sun size={14} className="text-amber-500" /> : <Moon size={14} className="text-navy-700" />}
+              <span className="hidden sm:inline">{darkMode ? "Dark" : "Light"}</span>
+            </button>
             <Link
               href={`${wsHref("jobs")}?create=1`}
               className="hidden items-center gap-2 rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-amber-glow transition hover:bg-amber-700 active:scale-95 sm:inline-flex"
@@ -584,6 +619,18 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                     >
                       <Settings size={14} /> Profile
                     </Link>
+                    {user &&
+                      ["OWNER", "MANAGER", "COMPANY_ADMIN", "DEVELOPER"].includes(
+                        String(user.role || "").toUpperCase()
+                      ) && (
+                        <Link
+                          href="/account/billing?tab=usage"
+                          onClick={() => setUserMenu(false)}
+                          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-navy-900 sm:hidden"
+                        >
+                          <CreditCard size={14} /> Billing &amp; usage
+                        </Link>
+                      )}
                     <button
                       onClick={logout}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-600 hover:bg-red-50"

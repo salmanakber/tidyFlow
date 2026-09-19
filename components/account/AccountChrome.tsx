@@ -6,7 +6,7 @@ import axios from "axios"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
 import {
   clearCustomerSession,
-  getCustomerToken,
+  getAccountAccessToken,
   getCustomerUser,
   storeAdminSession,
 } from "@/lib/customer-account"
@@ -47,7 +47,7 @@ export default function AccountChrome({
   const [workspaceError, setWorkspaceError] = useState("")
 
   useEffect(() => {
-    const token = getCustomerToken()
+    const token = getAccountAccessToken()
     if (!token) return
     axios
       .get("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
@@ -66,7 +66,7 @@ export default function AccountChrome({
   const canOpenWorkspace = WORKSPACE_ROLES.has(role)
 
   const openWorkspace = async () => {
-    const token = getCustomerToken()
+    const token = getAccountAccessToken()
     if (!token) {
       window.location.href = "/login"
       return

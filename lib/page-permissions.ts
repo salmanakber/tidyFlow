@@ -16,6 +16,7 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   '/admin/rota': PERMISSIONS.TASKS_VIEW,
   '/admin/recurring-jobs': PERMISSIONS.TASKS_VIEW,
   '/admin/issues': PERMISSIONS.TASKS_VIEW,
+  '/admin/live-monitor': PERMISSIONS.TASKS_VIEW,
   
   // Users
   '/admin/users': PERMISSIONS.USERS_VIEW,
