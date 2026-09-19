@@ -4,8 +4,6 @@ import { requireAuth, requireCompanyScope } from '@/lib/rbac';
 import { TaskStatus, UserRole } from '@prisma/client';
 
 const INVOICE_ELIGIBLE_STATUSES = [
-  'ASSIGNED',
-  'IN_PROGRESS',
   'SUBMITTED',
   'QA_REVIEW',
   'APPROVED',
@@ -13,7 +11,7 @@ const INVOICE_ELIGIBLE_STATUSES = [
   'ARCHIVED',
 ];
 
-/** Tasks eligible for client invoicing (no active invoice). Supports period + group filters. */
+/** Tasks ready for client invoicing (same status set as POST create). Supports search + group filters. */
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
