@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma';
 import { createNotification } from '@/lib/notifications';
 import { sendSMS } from '@/lib/sms';
+import { emitRealtimeEvent } from '@/lib/realtime';
 
 export async function triggerSOSAlert(params: {
   userId: number;
@@ -59,6 +60,19 @@ export async function triggerSOSAlert(params: {
       await sendSMS({ to: manager.phone, message });
     }
   }
+
+  await emitRealtimeEvent({
+    type: 'safety:sos',
+    companyId: params.companyId,
+    userId: params.userId,
+    taskId: params.taskId,
+    payload: {
+      sosAlertId: alert.id,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      cleanerName,
+    },
+  }).catch(() => {});
 
   return alert;
 }

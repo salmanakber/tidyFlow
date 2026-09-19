@@ -148,23 +148,31 @@ export function OpsFlash({
 /** Empty state with optional single CTA */
 export function OpsEmpty({
   message,
+  hint,
   ctaLabel,
   onCta,
   ctaHref,
 }: {
   message: string
+  hint?: string
   ctaLabel?: string
   onCta?: () => void
   ctaHref?: string
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-      <p className="max-w-sm text-sm text-slate-500 dark:text-slate-400">{message}</p>
+    <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+      <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-slate-200 bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+        <span className="h-2 w-2 rounded-full bg-amber-500/80" />
+      </div>
+      <p className="max-w-sm text-sm font-medium text-slate-600 dark:text-slate-300">{message}</p>
+      {hint ? (
+        <p className="max-w-sm text-xs text-slate-400 dark:text-slate-500">{hint}</p>
+      ) : null}
       {ctaLabel && (onCta || ctaHref) && (
         ctaHref ? (
           <a
             href={ctaHref}
-            className="inline-flex h-9 items-center rounded-lg bg-amber-600 px-3.5 text-xs font-bold text-white hover:bg-amber-700"
+            className="mt-2 inline-flex h-9 items-center rounded-lg bg-amber-600 px-3.5 text-xs font-bold text-white hover:bg-amber-700"
           >
             {ctaLabel}
           </a>
@@ -172,7 +180,7 @@ export function OpsEmpty({
           <button
             type="button"
             onClick={onCta}
-            className="inline-flex h-9 items-center rounded-lg bg-amber-600 px-3.5 text-xs font-bold text-white hover:bg-amber-700"
+            className="mt-2 inline-flex h-9 items-center rounded-lg bg-amber-600 px-3.5 text-xs font-bold text-white hover:bg-amber-700"
           >
             {ctaLabel}
           </button>

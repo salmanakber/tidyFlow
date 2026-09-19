@@ -16,6 +16,7 @@ export type RealtimeEventType =
   | 'cleaner:location'
   | 'task:tracker'
   | 'task:geofence'
+  | 'safety:sos'
   | 'chat:message';
 
 export interface RealtimeEvent {

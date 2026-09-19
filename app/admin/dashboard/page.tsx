@@ -466,18 +466,21 @@ export default function AdminDashboard() {
               value={unassignedToday.length}
               icon={UserX}
               warn={unassignedToday.length > 0}
+              href={`${wsHref("jobs")}?status=unassigned`}
             />
             <CommandStat
               label="Off-site GPS"
               value={offSiteCount}
               icon={MapPin}
               warn={offSiteCount > 0}
+              href={wsHref("monitor")}
             />
             <CommandStat
               label="Open SOS"
               value={sosCount}
               icon={ShieldAlert}
               warn={sosCount > 0}
+              href={`${wsHref("safety")}?tab=sos`}
             />
             <div className="flex flex-col justify-center bg-white px-4 py-3 dark:bg-navy-950">
               <p className="font-mono text-[9px] font-bold uppercase text-slate-500">
@@ -987,14 +990,16 @@ function CommandStat({
   value,
   icon: Icon,
   warn,
+  href,
 }: {
   label: string
   value: number
   icon: React.ComponentType<{ className?: string; size?: number }>
   warn?: boolean
+  href?: string
 }) {
-  return (
-    <div className="bg-white px-4 py-3 dark:bg-navy-950">
+  const inner = (
+    <>
       <div className="flex items-center justify-between font-mono text-[9px] font-bold uppercase text-slate-500">
         <span>{label}</span>
         <Icon size={12} className={warn ? "text-amber-600 dark:text-amber-400" : "text-slate-400"} />
@@ -1006,8 +1011,19 @@ function CommandStat({
       >
         {value}
       </p>
-    </div>
+    </>
   )
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block bg-white px-4 py-3 transition hover:bg-amber-50/80 dark:bg-navy-950 dark:hover:bg-navy-900"
+      >
+        {inner}
+      </Link>
+    )
+  }
+  return <div className="bg-white px-4 py-3 dark:bg-navy-950">{inner}</div>
 }
 
 function TelemetryKpi({

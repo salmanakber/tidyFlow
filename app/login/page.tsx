@@ -49,11 +49,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
+  const [mode, setMode] = useState<"login" | "forgot" | "reset">("login")
+  const [otp, setOtp] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [info, setInfo] = useState("")
 
   useEffect(() => {
     configureAdminApiClient()
     const token = getAdminToken()
-    if (!token) return
+    if (!token || mode !== "login") return
 
     axios
       .get("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
@@ -82,11 +86,12 @@ export default function LoginPage() {
         router.push(path)
       })
       .catch(() => {})
-  }, [router])
+  }, [router, mode])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setInfo("")
     setLoading(true)
 
     try {
@@ -158,6 +163,53 @@ export default function LoginPage() {
     }
   }
 
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError("")
+    setInfo("")
+    setLoading(true)
+    try {
+      const res = await axios.post("/api/auth/forgot-password", { email })
+      if (res.data?.success) {
+        setInfo(res.data.message || "Check your email for a reset code.")
+        setMode("reset")
+      } else {
+        setError(res.data?.message || "Could not send reset code")
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Could not send reset code")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError("")
+    setInfo("")
+    setLoading(true)
+    try {
+      const res = await axios.post("/api/auth/reset-password", {
+        email,
+        otp,
+        password: newPassword,
+      })
+      if (res.data?.success) {
+        setInfo("Password updated. Sign in with your new password.")
+        setPassword("")
+        setNewPassword("")
+        setOtp("")
+        setMode("login")
+      } else {
+        setError(res.data?.message || "Could not reset password")
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Could not reset password")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#F7F4EF]">
       <div className="pointer-events-none absolute inset-0">
@@ -216,7 +268,13 @@ export default function LoginPage() {
                   <p className="text-lg font-black tracking-tight">
                     Tidy<span className="text-amber-400">Flow</span>
                   </p>
-                  <p className="text-xs text-slate-300">Company workspace sign-in</p>
+                  <p className="text-xs text-slate-300">
+                    {mode === "login"
+                      ? "Company workspace sign-in"
+                      : mode === "forgot"
+                        ? "Reset your password"
+                        : "Enter the code from your email"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -227,75 +285,201 @@ export default function LoginPage() {
                   {error}
                 </div>
               )}
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <label className="block space-y-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Email
-                  </span>
-                  <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
-                    placeholder="you@company.com"
-                  />
-                </label>
-
-                <label className="block space-y-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Password
-                  </span>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
-                    placeholder="Enter your password"
-                  />
-                </label>
-
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input
-                    id="remember"
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                  />
-                  Remember me
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {loading ? "Signing in…" : "Sign in to workspace"}
-                </button>
-              </form>
-
-              <div className="mt-5">
-                <div className="mb-4 flex items-center gap-3 text-xs text-slate-400">
-                  <span className="h-px flex-1 bg-slate-200" />
-                  or
-                  <span className="h-px flex-1 bg-slate-200" />
+              {info && (
+                <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                  {info}
                 </div>
-                <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
-              </div>
+              )}
 
-              <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
-                <p>
-                  Managing subscription only?{" "}
-                  <Link href="/account/login" className="font-bold text-amber-700 hover:text-amber-800">
-                    Billing login
-                  </Link>
-                </p>
-              </div>
+              {mode === "login" && (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Email
+                    </span>
+                    <input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="you@company.com"
+                    />
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Password
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError("")
+                          setInfo("")
+                          setMode("forgot")
+                        }}
+                        className="text-[11px] font-bold text-amber-700 hover:text-amber-800"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                    <input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="Enter your password"
+                    />
+                  </label>
+
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                      id="remember"
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    Remember me
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {loading ? "Signing in…" : "Sign in to workspace"}
+                  </button>
+                </form>
+              )}
+
+              {mode === "forgot" && (
+                <form onSubmit={handleForgot} className="space-y-4">
+                  <p className="text-sm text-slate-600">
+                    Enter your work email and we&apos;ll send a one-time code to reset your password.
+                  </p>
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Email
+                    </span>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="you@company.com"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {loading ? "Sending…" : "Send reset code"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("login")
+                      setError("")
+                      setInfo("")
+                    }}
+                    className="w-full text-center text-sm font-semibold text-slate-600 hover:text-navy-900"
+                  >
+                    Back to sign in
+                  </button>
+                </form>
+              )}
+
+              {mode === "reset" && (
+                <form onSubmit={handleReset} className="space-y-4">
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Email
+                    </span>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Reset code
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="6-digit code"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      New password
+                    </span>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                      minLength={8}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                      placeholder="At least 8 characters"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {loading ? "Updating…" : "Update password"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("login")
+                      setError("")
+                      setInfo("")
+                    }}
+                    className="w-full text-center text-sm font-semibold text-slate-600 hover:text-navy-900"
+                  >
+                    Back to sign in
+                  </button>
+                </form>
+              )}
+
+              {mode === "login" && (
+                <>
+                  <div className="mt-5">
+                    <div className="mb-4 flex items-center gap-3 text-xs text-slate-400">
+                      <span className="h-px flex-1 bg-slate-200" />
+                      or
+                      <span className="h-px flex-1 bg-slate-200" />
+                    </div>
+                    <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
+                  </div>
+
+                  <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
+                    <p>
+                      Managing subscription only?{" "}
+                      <Link href="/account/login" className="font-bold text-amber-700 hover:text-amber-800">
+                        Billing login
+                      </Link>
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -303,3 +487,4 @@ export default function LoginPage() {
     </div>
   )
 }
+

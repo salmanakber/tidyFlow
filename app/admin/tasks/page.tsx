@@ -140,7 +140,7 @@ function TasksContent() {
 
   useEffect(() => {
     const create = searchParams?.get("create")
-    const id = searchParams?.get("id")
+    const id = searchParams?.get("task") || searchParams?.get("id")
     const smart = searchParams?.get("smart")
     if (create === "1") {
       setSelected(null)

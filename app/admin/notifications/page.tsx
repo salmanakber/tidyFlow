@@ -18,11 +18,14 @@ import {
   opsTd,
 } from "@/components/ops/OpsChrome"
 import { formatDate } from "@/lib/admin-session"
-import { Bell, Check, CheckCheck, Trash2 } from "lucide-react"
+import { Bell, Check, CheckCheck, ExternalLink, Trash2 } from "lucide-react"
+import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
+import { resolveNotificationHref } from "@/lib/notification-links"
 
 const PAGE_SIZE = 10
 
 export default function NotificationsPage() {
+  const { href } = useCompanyWorkspace()
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -42,7 +45,7 @@ export default function NotificationsPage() {
       setError("")
       const res = await axios.get("/api/notifications", {
         headers: headers(),
-        params: { limit: 200 },
+        params: { limit: 100 },
       })
       if (res.data.success) {
         const raw = res.data.data
@@ -103,6 +106,19 @@ export default function NotificationsPage() {
     } catch (e: any) {
       setError(e.response?.data?.message || "Failed")
     }
+  }
+
+  const openNotif = async (n: any) => {
+    if (isUnread(n)) {
+      try {
+        await axios.post(`/api/notifications/${n.id}/read`, {}, { headers: headers() })
+      } catch {
+        /* continue */
+      }
+    }
+    const dest = resolveNotificationHref(n, href)
+    if (dest) window.location.href = dest
+    else await load()
   }
 
   const remove = async (id: number) => {
@@ -219,7 +235,12 @@ export default function NotificationsPage() {
           {loading ? (
             <OpsSkeleton rows={6} cols={6} />
           ) : filtered.length === 0 ? (
-            <OpsEmpty message="No notifications yet" />
+            <OpsEmpty
+              message={tab === "unread" ? "No unread alerts" : "No notifications yet"}
+              hint="Job assignments, SOS, and GPS flags will show up here"
+              ctaLabel="Open Live monitor"
+              ctaHref={href("monitor")}
+            />
           ) : (
             <>
               <table className="w-full text-left">
@@ -244,6 +265,7 @@ export default function NotificationsPage() {
                 <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
                   {pageSlice.map((n) => {
                     const unreadRow = isUnread(n)
+                    const dest = resolveNotificationHref(n, href)
                     return (
                       <tr
                         key={n.id}
@@ -259,20 +281,29 @@ export default function NotificationsPage() {
                           />
                         </td>
                         <td className={opsTd}>
-                          <div className="flex items-start gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void openNotif(n)}
+                            className="flex w-full items-start gap-2 text-left"
+                          >
                             <Bell
                               size={14}
                               className={unreadRow ? "mt-0.5 text-amber-600" : "mt-0.5 text-slate-300"}
                             />
                             <div>
-                              <p className="font-bold text-navy-900 dark:text-white">
+                              <p className="font-bold text-navy-900 hover:text-amber-800 dark:text-white dark:hover:text-amber-300">
                                 {n.title || n.message?.slice(0, 60) || `Alert #${n.id}`}
                               </p>
                               <p className="mt-0.5 max-w-md text-xs text-slate-500 line-clamp-2">
                                 {n.body || n.message || n.content || ""}
                               </p>
+                              {dest ? (
+                                <p className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                                  Open related <ExternalLink size={10} />
+                                </p>
+                              ) : null}
                             </div>
-                          </div>
+                          </button>
                         </td>
                         <td className={`${opsTd} font-mono text-[10px] uppercase text-slate-500`}>
                           {n.type || "general"}
@@ -285,6 +316,16 @@ export default function NotificationsPage() {
                         </td>
                         <td className={`${opsTd} text-right`}>
                           <div className="inline-flex gap-1">
+                            {dest && (
+                              <button
+                                type="button"
+                                onClick={() => void openNotif(n)}
+                                className="rounded-lg p-1.5 text-amber-700 hover:bg-amber-50"
+                                title="Open"
+                              >
+                                <ExternalLink size={14} />
+                              </button>
+                            )}
                             {unreadRow && (
                               <button
                                 type="button"

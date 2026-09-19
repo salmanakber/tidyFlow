@@ -44,6 +44,10 @@ import {
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
+import HeaderNotifications from "@/components/ops/HeaderNotifications"
+import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
+import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
+import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 
 interface User {
   id: number
@@ -181,6 +185,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const [cmdIndex, setCmdIndex] = useState(0)
   const cmdInputRef = useRef<HTMLInputElement>(null)
   const headerSearchRef = useRef<HTMLInputElement>(null)
+  const { status: liveStatus } = useOpsRealtime(() => {}, !loading && !!user)
 
   const openCommandPalette = useCallback(() => {
     setCmdOpen(true)
@@ -459,9 +464,25 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         </div>
 
         <div className="flex items-center justify-between border-b border-amber-900/30 bg-navy-900/80 px-4 py-2 font-mono text-[11px]">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-            <span className="text-slate-300">LIVE</span>
+          <div className="flex items-center gap-1.5" title={
+            liveStatus === "live"
+              ? "Realtime connected"
+              : liveStatus === "connecting"
+                ? "Connecting…"
+                : "Realtime offline — polling"
+          }>
+            <span
+              className={`h-2 w-2 rounded-full ${
+                liveStatus === "live"
+                  ? "animate-pulse bg-emerald-500"
+                  : liveStatus === "connecting"
+                    ? "animate-pulse bg-amber-400"
+                    : "bg-slate-500"
+              }`}
+            />
+            <span className="text-slate-300">
+              {liveStatus === "live" ? "LIVE" : liveStatus === "connecting" ? "SYNC…" : "OFFLINE"}
+            </span>
           </div>
           <span className="truncate font-bold text-amber-400">
             {user?.role?.replace(/_/g, " ")}
@@ -588,6 +609,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
               {darkMode ? <Sun size={14} className="text-amber-500" /> : <Moon size={14} className="text-navy-700" />}
               <span className="hidden sm:inline">{darkMode ? "Dark" : "Light"}</span>
             </button>
+            <HeaderNotifications />
             <Link
               href={`${wsHref("jobs")}?create=1`}
               className="hidden items-center gap-2 rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-amber-glow transition hover:bg-amber-700 active:scale-95 sm:inline-flex"
@@ -645,7 +667,9 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         </header>
 
         <main className="flex-1 overflow-y-auto p-3 sm:p-6">
-          <div className="mx-auto max-w-[1600px] space-y-6">
+          <div className="mx-auto max-w-[1600px] space-y-4 sm:space-y-6">
+            <OpsCriticalBanner />
+            <OpsOnboardingCard />
             <OpsStatusLegend compact />
             {children}
           </div>
