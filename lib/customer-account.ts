@@ -41,9 +41,16 @@ export function storeCustomerSession(token: string, user: unknown, remember: boo
   }
 }
 
-/** Admin console login — does NOT unlock /account customer portal. */
-export function storeAdminSession(token: string, user: unknown, remember: boolean) {
-  clearCustomerSession()
+/** Admin console login — optionally keep customer billing token for deep-links. */
+export function storeAdminSession(
+  token: string,
+  user: unknown,
+  remember: boolean,
+  opts?: { keepCustomer?: boolean }
+) {
+  if (!opts?.keepCustomer) {
+    clearCustomerSession()
+  }
 
   if (remember) {
     localStorage.setItem("authToken", token)

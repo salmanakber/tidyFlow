@@ -5,6 +5,7 @@ import Link from "next/link"
 import axios from "axios"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
 import {
+  clearAdminSession,
   clearCustomerSession,
   getAccountAccessToken,
   getCustomerUser,
@@ -63,7 +64,7 @@ export default function AccountChrome({
       .catch(() => null)
   }, [])
 
-  const canOpenWorkspace = WORKSPACE_ROLES.has(role)
+  const canOpenWorkspace = !role || WORKSPACE_ROLES.has(role)
 
   const openWorkspace = async () => {
     const token = getAccountAccessToken()
@@ -84,19 +85,33 @@ export default function AccountChrome({
         return
       }
       const { token: adminToken, user, company, path } = res.data.data
-      storeAdminSession(adminToken, user, true)
+      storeAdminSession(adminToken, user, true, { keepCustomer: true })
+      try {
+        localStorage.setItem("customerAuthToken", adminToken)
+        localStorage.setItem("customerUserData", JSON.stringify(user || {}))
+      } catch {
+        /* ignore */
+      }
       if (company?.id) localStorage.setItem("selectedCompanyId", String(company.id))
       window.location.href = path || "/login"
     } catch (e: any) {
-      setWorkspaceError(e.response?.data?.message || "Could not open workspace")
+      setWorkspaceError(
+        e.response?.data?.message || e.message || "Could not open workspace"
+      )
     } finally {
       setOpeningWorkspace(false)
     }
   }
 
-  const signOut = () => {
+  const signOut = async () => {
     clearCustomerSession()
-    window.location.href = "/account/login"
+    clearAdminSession()
+    try {
+      await axios.post("/api/auth/clear-admin-session").catch(() => null)
+    } catch {
+      /* ignore */
+    }
+    window.location.href = "/login"
   }
 
   const initials = `${(firstName || email || "T").slice(0, 1)}${(lastName || "").slice(0, 1)}`.toUpperCase()
@@ -109,19 +124,28 @@ export default function AccountChrome({
           __html: `
         .account-shell {
           min-height: 100vh;
-          background: radial-gradient(1000px 400px at 50% 0%, ${T.amberSoft} 0%, transparent 100%), ${T.canvas};
+          background:
+            radial-gradient(900px 380px at 12% -10%, rgba(245,158,11,0.18), transparent 55%),
+            radial-gradient(700px 320px at 100% 0%, rgba(15,39,68,0.08), transparent 50%),
+            ${T.canvas};
           font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
           padding: 18px 12px 120px;
           box-sizing: border-box;
         }
-        .account-wrap { max-width: 960px; margin: 0 auto; width: 100%; }
+        .account-wrap { max-width: 980px; margin: 0 auto; width: 100%; }
         .account-header {
           display: flex;
           flex-wrap: wrap;
           align-items: flex-start;
           justify-content: space-between;
           gap: 14px;
-          margin-bottom: 18px;
+          margin-bottom: 20px;
+          padding: 16px 18px;
+          border-radius: 20px;
+          border: 1px solid ${T.border};
+          background: rgba(255,255,255,0.88);
+          box-shadow: 0 18px 40px rgba(15,39,68,0.06);
+          backdrop-filter: blur(8px);
         }
         .account-identity {
           display: flex;
@@ -133,10 +157,10 @@ export default function AccountChrome({
         .account-avatar {
           width: 48px;
           height: 48px;
-          border-radius: 50%;
+          border-radius: 16px;
           object-fit: cover;
           border: 2px solid ${T.border};
-          background: ${T.amberSoft};
+          background: linear-gradient(145deg, ${T.amberSoft}, #fff);
           color: ${T.navy};
           display: grid;
           place-items: center;
@@ -144,7 +168,7 @@ export default function AccountChrome({
           font-size: 16px;
           flex-shrink: 0;
         }
-        .account-title { font-size: 22px; font-weight: 800; color: ${T.ink}; margin: 4px 0 0; line-height: 1.2; }
+        .account-title { font-size: 22px; font-weight: 800; color: ${T.ink}; margin: 4px 0 0; line-height: 1.2; letter-spacing: -0.02em; }
         .account-sub { margin: 6px 0 0; font-size: 13px; color: ${T.inkMid}; word-break: break-word; }
         .account-nav { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
         .account-actions {
@@ -170,6 +194,10 @@ export default function AccountChrome({
           box-shadow: 0 8px 20px rgba(217, 119, 6, 0.22);
         }
         .workspace-btn:disabled { opacity: 0.65; cursor: wait; }
+        .account-body {
+          display: grid;
+          gap: 16px;
+        }
         @media (min-width: 640px) {
           .account-shell { padding: 32px 16px 120px; }
           .account-title { font-size: 28px; }
@@ -193,7 +221,7 @@ export default function AccountChrome({
               </Link>
               <div style={{ minWidth: 0 }}>
                 <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: T.amberDeep, margin: 0 }}>
-                  TIDYFLOW
+                  TIDYFLOW ACCOUNT
                 </p>
                 <h1 className="account-title">{title}</h1>
                 <p className="account-sub">{subtitle || displayName}</p>
@@ -226,7 +254,7 @@ export default function AccountChrome({
             </button>
           </div>
         </header>
-        {children}
+        <div className="account-body">{children}</div>
       </div>
       <AppDownloadBanner variant="sticky" />
     </main>

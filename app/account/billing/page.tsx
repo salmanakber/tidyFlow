@@ -12,7 +12,6 @@ import {
   isTrialCurrentlyActive,
   trialDaysRemaining,
 } from "@/lib/customer-account"
-import AppDownloadBanner from "@/components/AppDownloadBanner"
 import AccountChrome from "@/components/account/AccountChrome"
 import AccountSetupModal from "@/components/account/AccountSetupModal"
 import AccountUpgradeBanner from "@/components/account/AccountUpgradeBanner"
@@ -161,7 +160,7 @@ export default function CustomerBillingPage() {
     try {
       const token = getAccountAccessToken()
       if (!token) {
-        window.location.href = "/account/login"
+        window.location.href = "/login"
         return
       }
       // Keep a customer-portal token for billing APIs even when arriving from admin login
@@ -220,7 +219,7 @@ export default function CustomerBillingPage() {
     } catch (err: any) {
       if (err?.response?.status === 401) {
         clearCustomerSession()
-        window.location.href = "/account/login"
+        window.location.href = "/login"
         return
       }
       setMessage(err?.response?.data?.message || "Could not load billing")
@@ -475,8 +474,6 @@ export default function CustomerBillingPage() {
             void load()
           }}
         />
-
-        <AppDownloadBanner variant="hero" />
 
         {!loading ? (
           <AccountUpgradeBanner
@@ -1082,25 +1079,29 @@ function UsageDashboard({
 }
 
 const card: CSSProperties = {
-  background: T.surface,
+  background: "rgba(255,255,255,0.96)",
   border: `1px solid ${T.border}`,
-  borderRadius: 16,
-  padding: 18,
-  boxShadow: "0 8px 24px rgba(11,30,54,0.04)",
+  borderRadius: 18,
+  padding: 20,
+  boxShadow: "0 12px 32px rgba(11,30,54,0.05)",
 }
 
 const tabBar: CSSProperties = {
   display: "flex",
-  gap: 8,
-  marginBottom: 16,
+  gap: 6,
+  marginBottom: 18,
   flexWrap: "wrap",
+  padding: 6,
+  borderRadius: 14,
+  background: "rgba(255,255,255,0.72)",
+  border: `1px solid ${T.border}`,
 }
 
 const tabBtn: CSSProperties = {
-  border: `1px solid ${T.border}`,
-  background: T.surface,
-  borderRadius: 999,
-  padding: "8px 14px",
+  border: "1px solid transparent",
+  background: "transparent",
+  borderRadius: 10,
+  padding: "9px 14px",
   fontSize: 13,
   fontWeight: 600,
   color: T.inkMid,
@@ -1111,6 +1112,7 @@ const tabBtnActive: CSSProperties = {
   background: T.navy,
   borderColor: T.navy,
   color: "#fff",
+  boxShadow: "0 6px 16px rgba(15,39,68,0.18)",
 }
 
 const statLabel: CSSProperties = {

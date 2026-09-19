@@ -9,7 +9,7 @@ import {
   adminDelete,
   formatDate,
 } from "@/lib/admin-session"
-import {
+import { 
   OpsPageHeader,
   OpsKpi,
   OpsRefreshButton,
@@ -209,7 +209,7 @@ function Content() {
         <OpsKpi label="Owners" value={owners} />
         <OpsKpi label="Managers" value={managers} />
         <OpsKpi label="Cleaners" value={cleaners} />
-      </div>
+        </div>
 
       {showForm && (
         <form
@@ -218,7 +218,7 @@ function Content() {
         >
           <label className="space-y-1 text-xs font-semibold">
             Name
-            <input
+                  <input
               required
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
               value={form.name}
@@ -227,7 +227,7 @@ function Content() {
           </label>
           <label className="space-y-1 text-xs font-semibold">
             Email
-            <input
+                  <input
               required
               type="email"
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
@@ -237,7 +237,7 @@ function Content() {
           </label>
           <label className="space-y-1 text-xs font-semibold">
             Role
-            <select
+                  <select
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -246,12 +246,12 @@ function Content() {
                 <option key={r} value={r}>
                   {r}
                 </option>
-              ))}
-            </select>
+                    ))}
+                  </select>
           </label>
           <label className="space-y-1 text-xs font-semibold">
             Password
-            <input
+                  <input
               required
               type="password"
               minLength={6}
@@ -262,8 +262,8 @@ function Content() {
           </label>
           <div className="flex justify-end gap-2 md:col-span-4">
             <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm font-semibold">
-              Cancel
-            </button>
+                  Cancel
+                </button>
             <OpsPrimaryButton type="submit" disabled={saving}>
               {saving ? <Loader2 className="animate-spin" size={14} /> : <UserPlus size={14} />}
               Create
@@ -335,15 +335,15 @@ function Content() {
                       <td className={`${opsTd} text-xs text-slate-500`}>{formatDate(u.createdAt)}</td>
                       <td className={`${opsTd} text-right`}>
                         <div className="inline-flex gap-1">
-                          <button
+                <button
                             type="button"
                             disabled={busyId === u.id}
                             onClick={() => toggleActive(u)}
                             className="rounded-lg px-2 py-1 text-[10px] font-bold uppercase text-navy-700 hover:bg-navy-50 dark:text-amber-400"
                           >
                             {active ? "Deactivate" : "Activate"}
-                          </button>
-                          <button
+                </button>
+                <button
                             type="button"
                             disabled={busyId === u.id}
                             onClick={() => remove(u.id)}
@@ -354,9 +354,9 @@ function Content() {
                               <Loader2 size={14} className="animate-spin" />
                             ) : (
                               <Trash2 size={14} />
-                            )}
-                          </button>
-                        </div>
+                  )}
+                </button>
+              </div>
                       </td>
                     </tr>
                   )

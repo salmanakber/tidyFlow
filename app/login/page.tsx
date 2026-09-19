@@ -76,7 +76,7 @@ export default function LoginPage() {
           ...planFieldsFromCompany(company, needsPlan),
         })
 
-        if (path === "/account/billing") {
+        if (String(path).startsWith("/account/billing")) {
           unlockBillingSession(token, user, true)
         }
         router.push(path)
@@ -143,7 +143,7 @@ export default function LoginPage() {
           ...plan,
         })
 
-        if (path === "/account/billing") {
+        if (String(path).startsWith("/account/billing")) {
           unlockBillingSession(token, user, rememberMe)
         }
 
@@ -167,18 +167,24 @@ export default function LoginPage() {
       </div>
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-4 py-10 lg:grid lg:grid-cols-2 lg:items-center lg:gap-12 lg:px-8">
-        <div className="mb-8 hidden lg:mb-0 lg:block">
+        <div className="mb-8 lg:mb-0">
+          <div className="mb-6 max-w-md">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700">
+              Get the mobile app
+            </p>
+            <AppDownloadBanner variant="loginHero" />
+          </div>
           <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700">
             Operations workspace
           </p>
-          <h1 className="mt-3 max-w-md text-4xl font-black tracking-tight text-navy-950 xl:text-5xl">
+          <h1 className="mt-3 max-w-md text-3xl font-black tracking-tight text-navy-950 sm:text-4xl xl:text-5xl">
             Run jobs, team &amp; live GPS in one place.
           </h1>
           <p className="mt-4 max-w-md text-base leading-relaxed text-slate-600">
             Sign in to dispatch cleaners, approve hours, and manage your company — the same ops
             stack your mobile team already uses.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3 text-xs font-semibold text-slate-500">
+          <div className="mt-8 hidden flex-wrap gap-3 text-xs font-semibold text-slate-500 sm:flex">
             <span className="rounded-full border border-amber-200 bg-white/80 px-3 py-1.5">
               Smart assign
             </span>
@@ -281,8 +287,6 @@ export default function LoginPage() {
                 </div>
                 <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
               </div>
-
-              <AppDownloadBanner variant="compact" />
 
               <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
                 <p>

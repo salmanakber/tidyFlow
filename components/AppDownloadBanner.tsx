@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { getAndroidPlayStoreUrl, getIosAppStoreUrl } from "@/lib/app-store-links"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
 
-type Variant = "hero" | "compact" | "sticky"
+type Variant = "hero" | "compact" | "sticky" | "loginHero"
 
 function AppleIcon() {
   return (
@@ -122,6 +122,21 @@ export default function AppDownloadBanner({ variant = "hero" }: { variant?: Vari
           </div>
           {buttons}
         </div>
+      </div>
+    )
+  }
+
+  if (variant === "loginHero") {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+        }}
+      >
+        <StoreButton href={ios} kicker="Download on the" title="App Store" icon={<AppleIcon />} />
+        <StoreButton href={android} kicker="Get it on" title="Google Play" icon={<PlayIcon />} />
       </div>
     )
   }
