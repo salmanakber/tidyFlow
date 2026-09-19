@@ -59,7 +59,17 @@ export default function BillingPage() {
           eyebrow="Finance"
           title="Billing"
           subtitle="Your TidyFlow subscription and invoices"
-          actions={<OpsRefreshButton onClick={load} loading={loading} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/account/billing"
+                className="inline-flex h-9 items-center rounded-lg border border-amber-600/40 bg-amber-50 px-3 text-xs font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+              >
+                Open billing portal
+              </a>
+              <OpsRefreshButton onClick={load} loading={loading} />
+            </div>
+          }
         />
         {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 

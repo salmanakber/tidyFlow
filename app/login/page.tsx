@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import axios from "axios"
+import Link from "next/link"
 import GoogleSignInButton from "@/components/GoogleSignInButton"
 import { configureAdminApiClient } from "@/lib/admin-api-client"
 import { getAdminToken, storeAdminSession } from "@/lib/customer-account"
@@ -83,96 +84,138 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-control-canvas relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-amber-100/60 via-transparent to-navy-100/40 pointer-events-none" />
+    <div className="relative min-h-screen overflow-hidden bg-[#F7F4EF]">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-24 top-0 h-80 w-80 rounded-full bg-amber-300/30 blur-3xl" />
+        <div className="absolute -right-16 bottom-0 h-96 w-96 rounded-full bg-navy-900/10 blur-3xl" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.55),transparent_40%)]" />
+      </div>
 
-      <div className="max-w-md w-full mx-4 relative z-10">
-        <div className="bg-white rounded-2xl shadow-xl border border-control-border p-8">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 overflow-hidden shadow-amber-glow bg-gradient-to-br from-amber-500 to-amber-700">
-              <img src="/assets/new-icon.png" alt="TidyFlow" className="w-full h-full object-cover" />
-            </div>
-            <h1 className="text-3xl font-extrabold text-navy-900 tracking-tight">
-              Tidy<span className="text-amber-600">Flow</span>
-            </h1>
-            <p className="text-slate-500 mt-2 text-sm font-medium">
-              Sign in to your company workspace
-            </p>
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-4 py-10 lg:grid lg:grid-cols-2 lg:items-center lg:gap-12 lg:px-8">
+        <div className="mb-8 hidden lg:mb-0 lg:block">
+          <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700">
+            Operations workspace
+          </p>
+          <h1 className="mt-3 max-w-md text-4xl font-black tracking-tight text-navy-950 xl:text-5xl">
+            Run jobs, team &amp; live GPS in one place.
+          </h1>
+          <p className="mt-4 max-w-md text-base leading-relaxed text-slate-600">
+            Sign in to dispatch cleaners, approve hours, and manage your company — the same ops
+            stack your mobile team already uses.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3 text-xs font-semibold text-slate-500">
+            <span className="rounded-full border border-amber-200 bg-white/80 px-3 py-1.5">
+              Smart assign
+            </span>
+            <span className="rounded-full border border-amber-200 bg-white/80 px-3 py-1.5">
+              Live tracking
+            </span>
+            <span className="rounded-full border border-amber-200 bg-white/80 px-3 py-1.5">
+              Payroll &amp; invoices
+            </span>
           </div>
+        </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-2">
-                Email address
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/30 focus:border-amber-600 transition text-slate-900"
-                placeholder="you@company.com"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/30 focus:border-amber-600 transition text-slate-900"
-                placeholder="Enter your password"
-              />
+        <div className="mx-auto w-full max-w-md">
+          <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/90 shadow-[0_30px_80px_rgba(15,39,68,0.12)] backdrop-blur">
+            <div className="border-b border-slate-100 bg-navy-950 px-6 py-5 text-white">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-white/10 ring-1 ring-amber-400/40">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/assets/logot-transparent.png"
+                    alt="TidyFlow"
+                    className="h-10 w-10 object-contain"
+                    onError={(e) => {
+                      ;(e.target as HTMLImageElement).src = "/assets/new-icon.png"
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="text-lg font-black tracking-tight">
+                    Tidy<span className="text-amber-400">Flow</span>
+                  </p>
+                  <p className="text-xs text-slate-300">Company workspace sign-in</p>
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center">
-              <input
-                id="remember"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 text-amber-600 border-slate-300 rounded focus:ring-amber-500"
-              />
-              <label htmlFor="remember" className="ml-2 text-sm text-slate-600">
-                Remember me
-              </label>
+            <div className="p-6 sm:p-8">
+              {error && (
+                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <label className="block space-y-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    Email
+                  </span>
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                    placeholder="you@company.com"
+                  />
+                </label>
+
+                <label className="block space-y-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    Password
+                  </span>
+                  <input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-navy-900 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+                    placeholder="Enter your password"
+                  />
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    id="remember"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  Remember me
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-xl bg-amber-600 py-3.5 text-sm font-bold text-white shadow-amber-glow transition hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {loading ? "Signing in…" : "Sign in to workspace"}
+                </button>
+              </form>
+
+              <div className="mt-5">
+                <div className="mb-4 flex items-center gap-3 text-xs text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" />
+                  or
+                  <span className="h-px flex-1 bg-slate-200" />
+                </div>
+                <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
+              </div>
+
+              <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
+                <p>
+                  Managing subscription only?{" "}
+                  <Link href="/account/login" className="font-bold text-amber-700 hover:text-amber-800">
+                    Billing login
+                  </Link>
+                </p>
+              </div>
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold shadow-amber-glow transition disabled:opacity-50"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
-
-          <div className="mt-5">
-            <div className="flex items-center gap-3 text-xs text-slate-400 mb-4">
-              <span className="flex-1 h-px bg-slate-200" />
-              or
-              <span className="flex-1 h-px bg-slate-200" />
-            </div>
-            <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
-          </div>
-
-          <div className="mt-6 text-center text-sm text-slate-600">
-            Customer billing account?{" "}
-            <a href="/account/login" className="text-amber-700 hover:text-amber-800 font-semibold">
-              Sign in here
-            </a>
           </div>
         </div>
       </div>

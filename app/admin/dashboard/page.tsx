@@ -445,11 +445,11 @@ export default function AdminDashboard() {
         {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
 
         {/* Dispatch command center */}
-        <section className="overflow-hidden rounded-xl border border-navy-800/80 bg-navy-950 text-white shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-800 px-4 py-2.5">
+        <section className="overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-slate-50 shadow-sm dark:border-amber-900/40 dark:from-navy-950 dark:via-control-darkCard dark:to-navy-950">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 px-4 py-2.5 dark:border-navy-800">
             <div className="flex items-center gap-2">
-              <Radio size={14} className={`text-amber-400 ${liveBusy ? "animate-pulse" : ""}`} />
-              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400">
+              <Radio size={14} className={`text-amber-700 dark:text-amber-400 ${liveBusy ? "animate-pulse" : ""}`} />
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400">
                 Dispatch command center
               </p>
             </div>
@@ -460,7 +460,7 @@ export default function AdminDashboard() {
               <Sparkles size={12} /> AI Smart fill → Rota
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-px bg-navy-800 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-px bg-amber-100/80 dark:bg-navy-800 sm:grid-cols-4">
             <CommandStat
               label="Unassigned today"
               value={unassignedToday.length}
@@ -479,22 +479,22 @@ export default function AdminDashboard() {
               icon={ShieldAlert}
               warn={sosCount > 0}
             />
-            <div className="flex flex-col justify-center bg-navy-950 px-4 py-3">
+            <div className="flex flex-col justify-center bg-white px-4 py-3 dark:bg-navy-950">
               <p className="font-mono text-[9px] font-bold uppercase text-slate-500">
                 Bulk fill
               </p>
               <Link
                 href={wsHref("rota")}
-                className="mt-1 text-sm font-bold text-amber-400 hover:text-amber-300"
+                className="mt-1 text-sm font-bold text-amber-700 hover:text-amber-800 dark:text-amber-400"
               >
                 Open rota matrix →
               </Link>
             </div>
           </div>
 
-          <div className="border-t border-navy-800 px-4 py-3">
+          <div className="border-t border-amber-100 px-4 py-3 dark:border-navy-800">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
                 Today&apos;s unassigned · {unassignedToday.length}
               </p>
             </div>
@@ -505,23 +505,23 @@ export default function AdminDashboard() {
                 ctaHref={createJobHref}
               />
             ) : (
-              <ul className="divide-y divide-navy-800/80">
+              <ul className="divide-y divide-amber-100 dark:divide-navy-800/80">
                 {unassignedToday.slice(0, 8).map((task) => (
                   <li
                     key={task.id}
                     className="flex flex-wrap items-center justify-between gap-2 py-2.5"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">
-                        <span className="mr-2 font-mono text-xs text-amber-400">
+                      <p className="truncate text-sm font-semibold text-navy-900 dark:text-white">
+                        <span className="mr-2 font-mono text-xs text-amber-700 dark:text-amber-400">
                           #JOB-{task.id}
                         </span>
                         {task.title}
                       </p>
-                      <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">
+                      <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
                         <MapPin size={10} />
                         {task.property?.address || "—"}
-                        <span className="text-slate-600">·</span>
+                        <span className="text-slate-300">·</span>
                         {scheduleLabel(task.scheduledDate)}
                       </p>
                     </div>
@@ -551,22 +551,22 @@ export default function AdminDashboard() {
         </section>
 
         {stats && (stats.openIssues > 0 || atRisk > 0) && (
-          <section className="flex flex-col justify-between gap-4 rounded-xl border border-navy-800 bg-navy-900 p-4 text-white shadow-sm lg:flex-row lg:items-center">
+          <section className="flex flex-col justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-navy-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-white lg:flex-row lg:items-center">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/20 text-amber-400">
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/20 text-amber-700 dark:text-amber-400">
                 <AlertCircle className="h-4 w-4" />
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-                  <span className="font-bold text-amber-400">AUTONOMOUS DISPATCH SENTINEL</span>
+                  <span className="font-bold text-amber-800 dark:text-amber-400">AUTONOMOUS DISPATCH SENTINEL</span>
                   <span className="text-slate-400">•</span>
-                  <span className="text-slate-200">
+                  <span className="text-slate-700 dark:text-slate-200">
                     {stats.openIssues > 0
                       ? `${stats.openIssues} critical issue${stats.openIssues === 1 ? "" : "s"} require attention`
                       : `${atRisk} shift${atRisk === 1 ? "" : "s"} need assignment`}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-slate-400">
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   Resolve conflicts before they delay today&apos;s cleanings.
                 </p>
               </div>
@@ -994,14 +994,14 @@ function CommandStat({
   warn?: boolean
 }) {
   return (
-    <div className="bg-navy-950 px-4 py-3">
+    <div className="bg-white px-4 py-3 dark:bg-navy-950">
       <div className="flex items-center justify-between font-mono text-[9px] font-bold uppercase text-slate-500">
         <span>{label}</span>
-        <Icon size={12} className={warn ? "text-amber-400" : "text-slate-600"} />
+        <Icon size={12} className={warn ? "text-amber-600 dark:text-amber-400" : "text-slate-400"} />
       </div>
       <p
         className={`mt-1 font-mono text-2xl font-black tabular-nums ${
-          warn ? "text-amber-400" : "text-white"
+          warn ? "text-amber-700 dark:text-amber-400" : "text-navy-900 dark:text-white"
         }`}
       >
         {value}

@@ -4,11 +4,25 @@ import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
 import axios from "axios"
 import { SUBSCRIBE_THEME as T } from "@/lib/public-plan-scope"
-import { clearCustomerSession, getCustomerToken, getCustomerUser } from "@/lib/customer-account"
+import {
+  clearCustomerSession,
+  getCustomerToken,
+  getCustomerUser,
+  storeAdminSession,
+} from "@/lib/customer-account"
 import AppDownloadBanner from "@/components/AppDownloadBanner"
 import { ghostBtn } from "@/components/account/accountUi"
 
 type AccountPage = "billing" | "settings"
+
+const WORKSPACE_ROLES = new Set([
+  "OWNER",
+  "MANAGER",
+  "COMPANY_ADMIN",
+  "DEVELOPER",
+  "SUPER_ADMIN",
+  "ADMIN_UNIQUE",
+])
 
 export default function AccountChrome({
   title,
@@ -28,6 +42,9 @@ export default function AccountChrome({
   const [firstName, setFirstName] = useState(stored?.firstName || "")
   const [lastName, setLastName] = useState(stored?.lastName || "")
   const [email, setEmail] = useState(stored?.email || "")
+  const [role, setRole] = useState(String(stored?.role || "").toUpperCase())
+  const [openingWorkspace, setOpeningWorkspace] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState("")
 
   useEffect(() => {
     const token = getCustomerToken()
@@ -41,9 +58,41 @@ export default function AccountChrome({
         setFirstName(user.firstName || "")
         setLastName(user.lastName || "")
         setEmail(user.email || "")
+        setRole(String(user.role || "").toUpperCase())
       })
       .catch(() => null)
   }, [])
+
+  const canOpenWorkspace = WORKSPACE_ROLES.has(role)
+
+  const openWorkspace = async () => {
+    const token = getCustomerToken()
+    if (!token) {
+      window.location.href = "/login"
+      return
+    }
+    try {
+      setOpeningWorkspace(true)
+      setWorkspaceError("")
+      const res = await axios.post(
+        "/api/auth/open-workspace",
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!res.data?.success) {
+        setWorkspaceError(res.data?.message || "Could not open workspace")
+        return
+      }
+      const { token: adminToken, user, company, path } = res.data.data
+      storeAdminSession(adminToken, user, true)
+      if (company?.id) localStorage.setItem("selectedCompanyId", String(company.id))
+      window.location.href = path || "/login"
+    } catch (e: any) {
+      setWorkspaceError(e.response?.data?.message || "Could not open workspace")
+    } finally {
+      setOpeningWorkspace(false)
+    }
+  }
 
   const signOut = () => {
     clearCustomerSession()
@@ -105,18 +154,28 @@ export default function AccountChrome({
           width: 100%;
         }
         .account-actions > * { flex: 1 1 auto; justify-content: center; min-height: 42px; }
-        .account-split { display: grid; grid-template-columns: 1fr; gap: 10px; }
-        .account-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .workspace-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          border: none;
+          border-radius: 12px;
+          padding: 10px 14px;
+          font-size: 13px;
+          font-weight: 800;
+          background: ${T.amber};
+          color: ${T.navy};
+          cursor: pointer;
+          box-shadow: 0 8px 20px rgba(217, 119, 6, 0.22);
+        }
+        .workspace-btn:disabled { opacity: 0.65; cursor: wait; }
         @media (min-width: 640px) {
           .account-shell { padding: 32px 16px 120px; }
           .account-title { font-size: 28px; }
           .account-avatar { width: 56px; height: 56px; }
           .account-actions { width: auto; }
           .account-actions > * { flex: 0 0 auto; }
-          .account-split { grid-template-columns: 1fr 1fr; }
-        }
-        @media (min-width: 860px) {
-          .account-split-3 { grid-template-columns: 1fr 1fr 1fr; }
         }
       `,
         }}
@@ -141,11 +200,26 @@ export default function AccountChrome({
               </div>
             </div>
             <nav className="account-nav">
-              <NavLink href="/account/billing" label="Dashboard" current={active === "billing"} />
+              <NavLink href="/account/billing" label="Billing" current={active === "billing"} />
               <NavLink href="/account/settings" label="Settings" current={active === "settings"} />
             </nav>
+            {workspaceError ? (
+              <p style={{ margin: "10px 0 0", color: "#b91c1c", fontSize: 12, fontWeight: 600 }}>
+                {workspaceError}
+              </p>
+            ) : null}
           </div>
           <div className="account-actions">
+            {canOpenWorkspace && (
+              <button
+                type="button"
+                className="workspace-btn"
+                disabled={openingWorkspace}
+                onClick={openWorkspace}
+              >
+                {openingWorkspace ? "Opening…" : "Open web app"}
+              </button>
+            )}
             {extraActions}
             <button type="button" onClick={signOut} style={ghostBtn}>
               Sign out
