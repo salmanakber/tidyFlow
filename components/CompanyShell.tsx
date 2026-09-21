@@ -49,6 +49,7 @@ import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
 import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
 import { OpsLoader } from "@/components/ops/OpsLoader"
 import { useOpsRealtime } from "@/hooks/useOpsRealtime"
+import { parseOpsCommand, type ParsedCommand } from "@/lib/ops-command-parse"
 
 interface User {
   id: number
@@ -168,8 +169,23 @@ const OWNER_NAV: NavItem[] = [
 ]
 
 type CmdEntry =
-  | { kind: "action"; id: string; name: string; href: string; icon: NavItem["icon"] }
-  | { kind: "page"; id: string; name: string; href: string; icon: NavItem["icon"]; page: string }
+  | {
+      kind: "action"
+      id: string
+      name: string
+      href: string
+      icon: NavItem["icon"]
+      detail?: string
+    }
+  | {
+      kind: "page"
+      id: string
+      name: string
+      href: string
+      icon: NavItem["icon"]
+      page: string
+      detail?: string
+    }
 
 export default function CompanyShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -314,6 +330,20 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
       },
       {
         kind: "action",
+        id: "draft-invoices",
+        name: "Draft client invoices (ready to bill)",
+        href: `${wsHref("invoices")}?create=1`,
+        icon: FileText,
+      },
+      {
+        kind: "action",
+        id: "smart-fill-rota",
+        name: "Rota AI smart fill",
+        href: `${wsHref("rota")}?smart=1`,
+        icon: CalendarDays,
+      },
+      {
+        kind: "action",
         id: "send-digest",
         name: "Send digest",
         href: wsHref("digests"),
@@ -336,16 +366,25 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const cmdEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
     const match = (name: string) => !q || name.toLowerCase().includes(q)
+    const nl: ParsedCommand[] = q.length >= 2 ? parseOpsCommand(search, wsHref) : []
     return {
+      ask: nl,
       actions: actionCommands.filter((a) => match(a.name)),
       pages: pageCommands.filter((p) => match(p.name)),
     }
-  }, [actionCommands, pageCommands, search])
+  }, [actionCommands, pageCommands, search, wsHref])
 
-  const flatCmd = useMemo(
-    () => [...cmdEntries.actions, ...cmdEntries.pages],
-    [cmdEntries]
-  )
+  const flatCmd = useMemo(() => {
+    const askAs: CmdEntry[] = cmdEntries.ask.map((a) => ({
+      kind: "action" as const,
+      id: a.id,
+      name: a.label,
+      href: a.href,
+      icon: Sparkles,
+      detail: a.detail,
+    }))
+    return [...askAs, ...cmdEntries.actions, ...cmdEntries.pages]
+  }, [cmdEntries])
 
   useEffect(() => {
     setCmdIndex(0)
@@ -567,7 +606,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 readOnly
                 onFocus={openCommandPalette}
                 onClick={openCommandPalette}
-                placeholder="Command jump…"
+                placeholder="Ask TidyFlow… ⌘K"
                 className="w-full cursor-pointer rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-12 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-amber-600 focus:outline-none dark:border-navy-900 dark:bg-navy-950 dark:text-slate-100"
               />
               <button
@@ -693,7 +732,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={onCmdKeyDown}
-                placeholder="Actions or jump to page…"
+                placeholder="Ask: unassigned tomorrow · bill client · job #42…"
                 className="w-full bg-transparent py-3.5 text-sm font-medium text-navy-900 outline-none placeholder:text-slate-400 dark:text-white"
               />
               <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 sm:inline dark:border-navy-800 dark:bg-navy-950">
@@ -702,9 +741,53 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
             </div>
             <div className="max-h-80 overflow-y-auto py-2">
               {flatCmd.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-slate-400">No matches</p>
+                <p className="px-4 py-8 text-center text-sm text-slate-400">
+                  Try “unassigned today”, “create invoice”, or a page name
+                </p>
               ) : (
                 <>
+                  {cmdEntries.ask.length > 0 && (
+                    <div className="mb-1">
+                      <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-600">
+                        Ask TidyFlow
+                      </div>
+                      {cmdEntries.ask.map((item) => {
+                        const idx = flatCmd.findIndex((f) => f.id === item.id)
+                        const active = idx === cmdIndex
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onMouseEnter={() => setCmdIndex(idx)}
+                            onClick={() => jumpToHref(item.href)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
+                              active
+                                ? "bg-amber-50 text-navy-900 dark:bg-amber-950/30 dark:text-white"
+                                : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-navy-900"
+                            }`}
+                          >
+                            <span className="min-w-0">
+                              <span className="flex items-center gap-2.5 font-semibold">
+                                <Sparkles
+                                  size={15}
+                                  className={active ? "text-amber-600" : "text-amber-500/70"}
+                                />
+                                {item.label}
+                              </span>
+                              {item.detail && (
+                                <span className="mt-0.5 block pl-7 text-[11px] font-normal text-slate-400">
+                                  {item.detail}
+                                </span>
+                              )}
+                            </span>
+                            {active && (
+                              <CornerDownLeft size={14} className="shrink-0 text-amber-600" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                   {cmdEntries.actions.length > 0 && (
                     <div className="mb-1">
                       <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -781,7 +864,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
             <div className="flex items-center gap-3 border-t border-control-border bg-slate-50 px-4 py-2 font-mono text-[10px] text-slate-400 dark:border-amber-900/30 dark:bg-navy-950">
               <span>↑↓ navigate</span>
               <span>↵ open</span>
-              <span className="ml-auto">esc close</span>
+              <span className="ml-auto">natural language · esc</span>
             </div>
           </div>
         </div>

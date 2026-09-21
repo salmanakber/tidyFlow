@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, Suspense, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import axios from "axios"
 import AdminLayout from "@/components/AdminLayout"
 import {
@@ -11,7 +12,9 @@ import {
   OpsRefreshButton,
   OpsPagination,
   OpsSkeleton,
+  OpsPrimaryButton,
 } from "@/components/ops/OpsChrome"
+import { OpsDrawer, OpsSecondaryButton } from "@/components/ops/OpsForm"
 import {
   ChevronLeft,
   ChevronRight,
@@ -22,6 +25,8 @@ import {
   X,
   Sparkles,
   Loader2,
+  MapPin,
+  Check,
 } from "lucide-react"
 import { getCleanerRecommendations } from "@/lib/ops-ai"
 
@@ -85,7 +90,35 @@ function mondayOf(d: Date) {
   return x
 }
 
+type SmartProposal = {
+  taskId: number
+  title: string
+  address?: string
+  scheduledDate?: string
+  cleanerId: number
+  cleanerName: string
+  reason?: string
+  score?: number
+}
+
 export default function RotaBuilderPage() {
+  return (
+    <AdminLayout>
+      <Suspense
+        fallback={
+          <div className="p-6">
+            <OpsSkeleton rows={4} cols={4} message="Loading rota…" />
+          </div>
+        }
+      >
+        <RotaContent />
+      </Suspense>
+    </AdminLayout>
+  )
+}
+
+function RotaContent() {
+  const searchParams = useSearchParams()
   const [rotaData, setRotaData] = useState<RotaData | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedWeek, setSelectedWeek] = useState(() =>
@@ -98,6 +131,9 @@ export default function RotaBuilderPage() {
   const [error, setError] = useState("")
   const [page, setPage] = useState(1)
   const [smartBusy, setSmartBusy] = useState(false)
+  const [smartPreview, setSmartPreview] = useState(false)
+  const [proposals, setProposals] = useState<SmartProposal[]>([])
+  const [applying, setApplying] = useState(false)
 
   const weekDates = useMemo(() => {
     const start = new Date(selectedWeek + "T12:00:00")
@@ -177,7 +213,7 @@ export default function RotaBuilderPage() {
     }
   }
 
-  /** Uses existing /api/ai/recommend-cleaners — does not change mobile contracts */
+  /** Preview AI picks — manager confirms before any assign (mobile contracts unchanged). */
   const smartFillUnassigned = async () => {
     const unassigned = (Array.isArray(rotaData?.tasks) ? rotaData!.tasks : []).filter(
       (t) => !t.assignedUser
@@ -186,46 +222,89 @@ export default function RotaBuilderPage() {
       setToast("No unassigned jobs this week")
       return
     }
-    if (
-      !confirm(
-        `AI will suggest and assign cleaners for ${unassigned.length} unassigned job${
-          unassigned.length === 1 ? "" : "s"
-        }. Continue?`
-      )
-    ) {
-      return
-    }
     try {
       setSmartBusy(true)
       setError("")
-      let filled = 0
-      for (const task of unassigned) {
+      setProposals([])
+      setSmartPreview(true)
+      const next: SmartProposal[] = []
+      for (const task of unassigned.slice(0, 24)) {
         const rec = await getCleanerRecommendations({
           taskId: task.id,
           propertyId: task.property?.id,
           scheduledDate: task.scheduledDate,
         })
-        const pick = rec?.recommended?.userId
-        if (!pick) continue
-        try {
-          await axios.post(
-            "/api/admin/rota/assign",
-            { taskId: task.id, cleanerId: pick },
-            { headers: authHeaders(), params: companyParams() }
-          )
-          filled += 1
-        } catch {
-          /* skip failed assign */
-        }
+        const pick = rec?.recommended
+        if (!pick?.userId) continue
+        next.push({
+          taskId: task.id,
+          title: task.title,
+          address: task.property?.address,
+          scheduledDate: task.scheduledDate,
+          cleanerId: pick.userId,
+          cleanerName: pick.name,
+          reason: pick.reason,
+          score: pick.score,
+        })
       }
-      setToast(`Smart scheduling filled ${filled} of ${unassigned.length} jobs`)
-      await loadRota()
+      setProposals(next)
+      if (next.length === 0) {
+        setToast("AI found no matches for unassigned jobs this week")
+      }
     } catch (e: any) {
       setError(e.response?.data?.message || "Smart scheduling failed")
+      setSmartPreview(false)
     } finally {
       setSmartBusy(false)
     }
   }
+
+  const applySmartProposals = async () => {
+    if (!proposals.length) return
+    try {
+      setApplying(true)
+      setError("")
+      let filled = 0
+      for (const p of proposals) {
+        try {
+          await axios.post(
+            "/api/admin/rota/assign",
+            { taskId: p.taskId, cleanerId: p.cleanerId },
+            { headers: authHeaders(), params: companyParams() }
+          )
+          filled += 1
+        } catch {
+          /* skip */
+        }
+      }
+      setToast(`Applied ${filled} of ${proposals.length} AI assignments`)
+      setSmartPreview(false)
+      setProposals([])
+      await loadRota()
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed to apply assignments")
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const removeProposal = (taskId: number) => {
+    setProposals((prev) => prev.filter((p) => p.taskId !== taskId))
+  }
+
+  const smartAutoRan = useRef(false)
+
+  // Deep link ?smart=1 opens AI fill preview when data is ready
+  useEffect(() => {
+    if (searchParams.get("smart") !== "1") return
+    if (smartAutoRan.current) return
+    if (loading || !rotaData) return
+    const unassigned = (rotaData.tasks || []).filter((t) => !t.assignedUser)
+    if (unassigned.length === 0) return
+    smartAutoRan.current = true
+    void smartFillUnassigned()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loading, rotaData?.tasks?.length])
 
   const handleCloneWeek = async () => {
     if (!confirm("Clone this week’s assignments to the next week?")) return
@@ -280,8 +359,7 @@ export default function RotaBuilderPage() {
   const todayKey = new Date().toISOString().split("T")[0]
 
   return (
-    <AdminLayout>
-      <div className="space-y-5">
+    <div className="space-y-5">
         <OpsPageHeader
           eyebrow="Fleet rota matrix"
           title="Schedule & assignments"
@@ -556,8 +634,102 @@ export default function RotaBuilderPage() {
             </>
           )}
         </div>
+
+        <OpsDrawer
+          open={smartPreview}
+          onClose={() => {
+            if (applying || smartBusy) return
+            setSmartPreview(false)
+            setProposals([])
+          }}
+          eyebrow="AI smart fill"
+          title="Review proposed assignments"
+          subtitle="Nothing is saved until you apply — remove any row you disagree with"
+          wide
+          footer={
+            <>
+              <OpsSecondaryButton
+                onClick={() => {
+                  setSmartPreview(false)
+                  setProposals([])
+                }}
+                disabled={applying}
+              >
+                Cancel
+              </OpsSecondaryButton>
+              <OpsPrimaryButton
+                onClick={applySmartProposals}
+                disabled={applying || proposals.length === 0 || smartBusy}
+              >
+                {applying ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Check size={14} />
+                )}
+                Apply {proposals.length} assignment{proposals.length === 1 ? "" : "s"}
+              </OpsPrimaryButton>
+            </>
+          }
+        >
+          {smartBusy ? (
+            <div className="flex flex-col items-center gap-3 py-12">
+              <Loader2 size={28} className="animate-spin text-amber-600" />
+              <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Ranking cleaners for this week…
+              </p>
+            </div>
+          ) : proposals.length === 0 ? (
+            <OpsEmpty message="No AI matches for unassigned jobs this week" />
+          ) : (
+            <ul className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+              {proposals.map((p) => (
+                <li
+                  key={p.taskId}
+                  className="rounded-xl border border-slate-200 bg-white p-3 dark:border-navy-800 dark:bg-navy-950"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-navy-900 dark:text-white">
+                        <span className="mr-1.5 font-mono text-xs text-amber-700">
+                          #JOB-{p.taskId}
+                        </span>
+                        {p.title}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                        <MapPin size={10} />
+                        {p.address || "—"}
+                      </p>
+                      <div className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 dark:bg-amber-950/30">
+                        <p className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                          → {p.cleanerName}
+                          {p.score != null ? (
+                            <span className="ml-2 font-mono text-[10px] font-normal text-amber-700/80">
+                              score {Math.round(p.score)}
+                            </span>
+                          ) : null}
+                        </p>
+                        {p.reason && (
+                          <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
+                            {p.reason}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeProposal(p.taskId)}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      title="Remove from batch"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </OpsDrawer>
       </div>
-    </AdminLayout>
   )
 }
 

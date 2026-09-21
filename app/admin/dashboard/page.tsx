@@ -35,6 +35,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { JobStatusBadge } from "@/components/ops/JobInspectorDrawer"
+import OpsNeedsMeBrief, { buildNeedsMeItems } from "@/components/ops/OpsNeedsMeBrief"
 import { fetchLiveCleaners } from "@/lib/ops-tracking"
 import { getCleanerRecommendations } from "@/lib/ops-ai"
 import { adminGet, adminPatch } from "@/lib/admin-session"
@@ -193,6 +194,8 @@ export default function AdminDashboard() {
   const [sosCount, setSosCount] = useState(0)
   const [liveBusy, setLiveBusy] = useState(false)
   const [assigningId, setAssigningId] = useState<number | null>(null)
+  const [billableGroups, setBillableGroups] = useState(0)
+  const [bulkAssignBusy, setBulkAssignBusy] = useState(false)
   const liveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadLiveCounts = useCallback(async () => {
@@ -241,9 +244,12 @@ export default function AdminDashboard() {
         ...(companyId ? { "X-Company-Id": companyId } : {}),
       }
 
-      const [overviewRes, revenueRes] = await Promise.all([
+      const [overviewRes, revenueRes, eligibleRes] = await Promise.all([
         axios.get("/api/dashboard/overview", { headers }),
         axios.get("/api/revenue/overview", { headers }).catch(() => null),
+        adminGet("/api/client-invoices/eligible-tasks", {
+          params: { groupBy: "client" },
+        }).catch(() => null),
         loadLiveCounts(),
       ])
 
@@ -260,6 +266,13 @@ export default function AdminDashboard() {
           currentMonthRevenue: revenueRes.data.data.currentMonthRevenue ?? 0,
           percentageChange: revenueRes.data.data.percentageChange ?? 0,
         })
+      }
+
+      if (eligibleRes?.data?.success) {
+        const groups = eligibleRes.data.groups
+        setBillableGroups(Array.isArray(groups) ? groups.length : 0)
+      } else {
+        setBillableGroups(0)
       }
       setLastUpdated(new Date())
     } catch (err: any) {
@@ -282,6 +295,69 @@ export default function AdminDashboard() {
     [todayTasks]
   )
 
+  const overdueToday = useMemo(() => {
+    const now = Date.now()
+    return todayTasks.filter((t) => {
+      if (!t.scheduledDate) return false
+      if (["COMPLETED", "APPROVED", "ARCHIVED", "CANCELLED"].includes(String(t.status).toUpperCase())) {
+        return false
+      }
+      return new Date(t.scheduledDate).getTime() < now - 60 * 60 * 1000
+    }).length
+  }, [todayTasks])
+
+  const needsMeItems = useMemo(
+    () =>
+      buildNeedsMeItems({
+        unassignedToday: unassignedToday.length,
+        sosCount,
+        offSiteCount,
+        openIssues: stats?.openIssues || 0,
+        billableGroups,
+        overdueJobs: overdueToday,
+        wsHref: (page) => wsHref(page),
+      }),
+    [
+      unassignedToday.length,
+      sosCount,
+      offSiteCount,
+      stats?.openIssues,
+      billableGroups,
+      overdueToday,
+      wsHref,
+    ]
+  )
+
+  const bulkAiAssignUnassigned = async () => {
+    if (!unassignedToday.length) return
+    setBulkAssignBusy(true)
+    setToast(`AI filling ${unassignedToday.length} unassigned job${unassignedToday.length === 1 ? "" : "s"}…`)
+    let filled = 0
+    try {
+      for (const task of unassignedToday.slice(0, 12)) {
+        try {
+          const rec = await getCleanerRecommendations({
+            taskId: task.id,
+            scheduledDate: task.scheduledDate || undefined,
+          })
+          const pick = rec?.recommended?.userId
+          if (!pick) continue
+          await adminPatch(`/api/tasks/${task.id}`, { assignedUserId: pick })
+          filled += 1
+        } catch {
+          /* skip one failure */
+        }
+      }
+      setToast(`Assigned ${filled} of ${Math.min(12, unassignedToday.length)} jobs`)
+      await loadDashboard()
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Bulk AI assign failed")
+      setToast("")
+    } finally {
+      setBulkAssignBusy(false)
+    }
+  }
+
   const aiAssign = async (task: TaskRow) => {
     setToast(`AI assigning #JOB-${task.id}…`)
     setAssigningId(task.id)
@@ -298,7 +374,9 @@ export default function AdminDashboard() {
       }
       await adminPatch(`/api/tasks/${task.id}`, { assignedUserId: pick })
       setToast(
-        `Assigned #JOB-${task.id} to ${rec?.recommended?.name || `cleaner #${pick}`}`
+        `Assigned #JOB-${task.id} to ${rec?.recommended?.name || `cleaner #${pick}`}${
+          rec?.recommended?.reason ? ` · ${rec.recommended.reason}` : ""
+        }`
       )
       await loadDashboard()
     } catch (err: any) {
@@ -443,6 +521,13 @@ export default function AdminDashboard() {
 
         {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
         {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+
+        <OpsNeedsMeBrief
+          items={needsMeItems}
+          loading={loading && !stats}
+          onAiAssignAll={bulkAiAssignUnassigned}
+          aiAssignBusy={bulkAssignBusy}
+        />
 
         {/* Dispatch command center */}
         <section className="overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-slate-50 shadow-sm dark:border-amber-900/40 dark:from-navy-950 dark:via-control-darkCard dark:to-navy-950">
