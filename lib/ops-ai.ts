@@ -151,3 +151,36 @@ export async function getAiDashboardSummary(): Promise<any | null> {
     return null
   }
 }
+
+export type AiLiveAlert = {
+  id: string
+  severity: "critical" | "high" | "medium"
+  title: string
+  detail: string
+  action: string
+}
+
+export async function getAiLiveAlerts(snapshot: {
+  coveragePct: number
+  offSite: number
+  stale: number
+  noGps: number
+  sosCount: number
+  exceptions: Array<{ kind: string; title: string; detail: string }>
+}): Promise<{ alerts: AiLiveAlert[]; aiGenerated: boolean }> {
+  try {
+    const res = await adminPost("/api/ai/live-alerts", {
+      ...snapshot,
+      locale: typeof navigator !== "undefined" ? navigator.language : "en",
+    })
+    if (res.data?.success) {
+      return {
+        alerts: Array.isArray(res.data.data?.alerts) ? res.data.data.alerts : [],
+        aiGenerated: !!res.data.data?.aiGenerated,
+      }
+    }
+    return { alerts: [], aiGenerated: false }
+  } catch {
+    return { alerts: [], aiGenerated: false }
+  }
+}

@@ -59,6 +59,7 @@ export type ActiveTrackingJob = {
   taskId: number
   title: string
   status: string
+  scheduledDate?: string | null
   propertyAddress: string | null
   propertyLatitude: number | null
   propertyLongitude: number | null

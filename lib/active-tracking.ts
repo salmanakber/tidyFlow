@@ -53,6 +53,7 @@ export type ActiveTrackingJob = {
   taskId: number;
   title: string;
   status: string;
+  scheduledDate?: string | null;
   propertyAddress: string | null;
   propertyLatitude: number | null;
   propertyLongitude: number | null;
@@ -93,6 +94,7 @@ export async function getCompanyActiveTrackingJobs(companyId: number): Promise<{
       id: true,
       title: true,
       status: true,
+      scheduledDate: true,
       property: {
         select: { address: true, latitude: true, longitude: true },
       },
@@ -193,6 +195,7 @@ export async function getCompanyActiveTrackingJobs(companyId: number): Promise<{
       taskId: task.id,
       title: task.title,
       status: task.status,
+      scheduledDate: task.scheduledDate?.toISOString() ?? null,
       propertyAddress: task.property?.address ?? null,
       propertyLatitude:
         task.property?.latitude != null ? Number(task.property.latitude) : null,

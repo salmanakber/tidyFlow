@@ -2,7 +2,7 @@
 
 /**
  * Optional realtime for web managers.
- * Exposes connection status for the sidebar LIVE pill.
+ * Callback receives (eventName, payload) so maps can merge live GPS without full refetch.
  */
 import { useEffect, useRef, useState, useCallback } from "react"
 
@@ -17,8 +17,9 @@ const EVENTS = [
 ] as const
 
 export type OpsRealtimeStatus = "connecting" | "live" | "offline"
+export type OpsRealtimeHandler = (eventName?: string, payload?: any) => void
 
-export function useOpsRealtime(onEvent: () => void, enabled = true) {
+export function useOpsRealtime(onEvent: OpsRealtimeHandler, enabled = true) {
   const cb = useRef(onEvent)
   cb.current = onEvent
   const [status, setStatus] = useState<OpsRealtimeStatus>("offline")
@@ -45,7 +46,10 @@ export function useOpsRealtime(onEvent: () => void, enabled = true) {
           reconnection: true,
           reconnectionAttempts: 8,
         })
-        const fire = () => cb.current()
+        const fire = (ev: string) => (payload: any) => {
+          const data = payload?.payload ?? payload
+          cb.current(ev, data)
+        }
         socket.on("connect", () => {
           if (!cancelled) setStatus("live")
         })
@@ -55,7 +59,7 @@ export function useOpsRealtime(onEvent: () => void, enabled = true) {
         socket.on("connect_error", () => {
           if (!cancelled) setStatus("offline")
         })
-        for (const ev of EVENTS) socket.on(ev, fire)
+        for (const ev of EVENTS) socket.on(ev, fire(ev))
         if (socket.connected) setStatus("live")
       } catch {
         if (!cancelled) setStatus("offline")
