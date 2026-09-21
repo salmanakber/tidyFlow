@@ -47,6 +47,7 @@ import {
   opsFieldCls,
 } from "@/components/ops/OpsForm"
 import { OpsSpinner } from "@/components/ops/OpsLoader"
+import { getAiBillPriority } from "@/lib/ops-ai"
 
 const PAGE_SIZE = 10
 
@@ -145,6 +146,8 @@ function Content() {
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
   const [createStatus, setCreateStatus] = useState("all")
+  const [billReasons, setBillReasons] = useState<Record<string, string>>({})
+  const [billAiGenerated, setBillAiGenerated] = useState(false)
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -201,6 +204,39 @@ function Content() {
     void loadInvoices()
     void loadEligible({})
   }, [loadInvoices, loadEligible])
+
+  // Rank ready-to-bill via company AI config (/api/ai/bill-priority → getAIConfig)
+  useEffect(() => {
+    if (!clientGroups.length) {
+      setBillReasons({})
+      setBillAiGenerated(false)
+      return
+    }
+    let cancelled = false
+    void getAiBillPriority(
+      clientGroups.slice(0, 20).map((g) => ({
+        key: g.key,
+        label: g.label,
+        taskCount: g.taskCount,
+        estimatedTotal: g.estimatedTotal,
+      }))
+    ).then((res) => {
+      if (cancelled) return
+      const map: Record<string, string> = {}
+      for (const r of res.ranked) map[r.key] = r.reason
+      setBillReasons(map)
+      setBillAiGenerated(res.aiGenerated)
+      if (res.ranked.length) {
+        const order = new Map(res.ranked.map((r, i) => [r.key, r.priority || i]))
+        setClientGroups((prev) =>
+          [...prev].sort((a, b) => (order.get(a.key) ?? 99) - (order.get(b.key) ?? 99))
+        )
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [clientGroups.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep link ?create=1 or ?q=
   useEffect(() => {
@@ -556,9 +592,12 @@ function Content() {
             <div>
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
                 <Sparkles size={12} /> Ready to bill
+                {billAiGenerated ? " · AI priority" : ""}
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
-                Completed jobs without an open invoice — draft with one confirm
+                {billAiGenerated
+                  ? "Ranked by your AI config — draft still needs your confirm"
+                  : "Completed jobs without an open invoice — draft with one confirm"}
               </p>
             </div>
             <button
@@ -589,6 +628,11 @@ function Content() {
                         {g.taskCount} job{g.taskCount === 1 ? "" : "s"}
                         {g.estimatedTotal > 0 ? ` · ~${formatMoney(g.estimatedTotal)}` : ""}
                       </p>
+                      {billReasons[g.key] && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-amber-800/90 dark:text-amber-300/80">
+                          {billReasons[g.key]}
+                        </p>
+                      )}
                     </div>
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-950 text-amber-400">
                       <UserIcon size={14} />

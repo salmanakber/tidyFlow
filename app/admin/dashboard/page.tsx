@@ -35,9 +35,9 @@ import {
   Loader2,
 } from "lucide-react"
 import { JobStatusBadge } from "@/components/ops/JobInspectorDrawer"
-import OpsNeedsMeBrief, { buildNeedsMeItems } from "@/components/ops/OpsNeedsMeBrief"
+import OpsNeedsMeBrief, { buildNeedsMeItems, type NeedsMeItem } from "@/components/ops/OpsNeedsMeBrief"
 import { fetchLiveCleaners } from "@/lib/ops-tracking"
-import { getCleanerRecommendations } from "@/lib/ops-ai"
+import { getCleanerRecommendations, getAiDashboardSummary } from "@/lib/ops-ai"
 import { adminGet, adminPatch } from "@/lib/admin-session"
 import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 import {
@@ -196,6 +196,7 @@ export default function AdminDashboard() {
   const [assigningId, setAssigningId] = useState<number | null>(null)
   const [billableGroups, setBillableGroups] = useState(0)
   const [bulkAssignBusy, setBulkAssignBusy] = useState(false)
+  const [aiInsightItems, setAiInsightItems] = useState<NeedsMeItem[]>([])
   const liveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadLiveCounts = useCallback(async () => {
@@ -244,12 +245,13 @@ export default function AdminDashboard() {
         ...(companyId ? { "X-Company-Id": companyId } : {}),
       }
 
-      const [overviewRes, revenueRes, eligibleRes] = await Promise.all([
+      const [overviewRes, revenueRes, eligibleRes, aiDash] = await Promise.all([
         axios.get("/api/dashboard/overview", { headers }),
         axios.get("/api/revenue/overview", { headers }).catch(() => null),
         adminGet("/api/client-invoices/eligible-tasks", {
           params: { groupBy: "client" },
         }).catch(() => null),
+        getAiDashboardSummary().catch(() => null),
         loadLiveCounts(),
       ])
 
@@ -273,6 +275,27 @@ export default function AdminDashboard() {
         setBillableGroups(Array.isArray(groups) ? groups.length : 0)
       } else {
         setBillableGroups(0)
+      }
+
+      // Merge AI insights from /api/ai/dashboard (uses getAIConfig)
+      if (aiDash?.insights && Array.isArray(aiDash.insights)) {
+        setAiInsightItems(
+          aiDash.insights.slice(0, 3).map((ins: any, i: number) => ({
+            id: `ai-insight-${ins.id || i}`,
+            kind: "issue" as const,
+            title: String(ins.title || ins.headline || "AI insight").slice(0, 80),
+            detail: String(ins.summary || ins.body || ins.message || "").slice(0, 140),
+            href: wsHref("dashboard"),
+            urgency:
+              String(ins.severity || "").toLowerCase() === "high" ||
+              String(ins.severity || "").toLowerCase() === "critical"
+                ? ("high" as const)
+                : ("medium" as const),
+            actionLabel: "Review",
+          }))
+        )
+      } else {
+        setAiInsightItems([])
       }
       setLastUpdated(new Date())
     } catch (err: any) {
@@ -306,27 +329,38 @@ export default function AdminDashboard() {
     }).length
   }, [todayTasks])
 
-  const needsMeItems = useMemo(
-    () =>
-      buildNeedsMeItems({
-        unassignedToday: unassignedToday.length,
-        sosCount,
-        offSiteCount,
-        openIssues: stats?.openIssues || 0,
-        billableGroups,
-        overdueJobs: overdueToday,
-        wsHref: (page) => wsHref(page),
-      }),
-    [
-      unassignedToday.length,
+  const needsMeItems = useMemo(() => {
+    const base = buildNeedsMeItems({
+      unassignedToday: unassignedToday.length,
       sosCount,
       offSiteCount,
-      stats?.openIssues,
+      openIssues: stats?.openIssues || 0,
       billableGroups,
-      overdueToday,
-      wsHref,
-    ]
-  )
+      overdueJobs: overdueToday,
+      wsHref: (page) => wsHref(page),
+    }).filter((i) => i.kind !== "ok")
+    const merged = [...base, ...aiInsightItems]
+    if (merged.length === 0) {
+      return buildNeedsMeItems({
+        unassignedToday: 0,
+        sosCount: 0,
+        offSiteCount: 0,
+        openIssues: 0,
+        billableGroups: 0,
+        wsHref: (page) => wsHref(page),
+      })
+    }
+    return merged
+  }, [
+    unassignedToday.length,
+    sosCount,
+    offSiteCount,
+    stats?.openIssues,
+    billableGroups,
+    overdueToday,
+    wsHref,
+    aiInsightItems,
+  ])
 
   const bulkAiAssignUnassigned = async () => {
     if (!unassignedToday.length) return

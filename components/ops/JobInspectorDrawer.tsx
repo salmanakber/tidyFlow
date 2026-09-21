@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { OpsLoader, OpsSpinner } from "@/components/ops/OpsLoader"
 import SmartAssignPanel from "@/components/ops/SmartAssignPanel"
+import TaskSuggestionsPanel from "@/components/ops/TaskSuggestionsPanel"
 import LiveMapPanel from "@/components/ops/LiveMapPanel"
 import AuditTrailDrawer from "@/components/ops/AuditTrailDrawer"
 import {
@@ -648,6 +649,25 @@ export default function JobInspectorDrawer({
                       ...f,
                       assignedUserId: String(userId),
                       status: f.status === "PLANNED" || f.status === "DRAFT" ? "ASSIGNED" : f.status,
+                    }))
+                  }}
+                />
+                <TaskSuggestionsPanel
+                  taskId={task?.id}
+                  propertyId={form.propertyId ? parseInt(form.propertyId, 10) : undefined}
+                  title={form.title}
+                  description={form.description}
+                  scheduledDate={
+                    form.scheduledDate
+                      ? new Date(form.scheduledDate).toISOString()
+                      : undefined
+                  }
+                  onApplyChecklist={(items) => {
+                    setForm((f) => ({
+                      ...f,
+                      description: [f.description?.trim(), "Checklist:", ...items.map((x) => `• ${x}`)]
+                        .filter(Boolean)
+                        .join("\n"),
                     }))
                   }}
                 />

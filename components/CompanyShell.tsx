@@ -50,6 +50,7 @@ import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
 import { OpsLoader } from "@/components/ops/OpsLoader"
 import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 import { parseOpsCommand, type ParsedCommand } from "@/lib/ops-command-parse"
+import { getAiOpsCommands } from "@/lib/ops-ai"
 
 interface User {
   id: number
@@ -200,6 +201,9 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const [darkMode, setDarkMode] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [cmdIndex, setCmdIndex] = useState(0)
+  const [aiAsk, setAiAsk] = useState<ParsedCommand[]>([])
+  const [aiAskLoading, setAiAskLoading] = useState(false)
+  const [aiAskUsed, setAiAskUsed] = useState(false)
   const cmdInputRef = useRef<HTMLInputElement>(null)
   const headerSearchRef = useRef<HTMLInputElement>(null)
   const { status: liveStatus } = useOpsRealtime(() => {}, !loading && !!user)
@@ -208,6 +212,8 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
     setCmdOpen(true)
     setSearch("")
     setCmdIndex(0)
+    setAiAsk([])
+    setAiAskUsed(false)
     setTimeout(() => cmdInputRef.current?.focus(), 30)
   }, [])
 
@@ -215,6 +221,8 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
     setCmdOpen(false)
     setSearch("")
     setCmdIndex(0)
+    setAiAsk([])
+    setAiAskUsed(false)
   }, [])
 
   useEffect(() => {
@@ -366,13 +374,56 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const cmdEntries = useMemo(() => {
     const q = search.trim().toLowerCase()
     const match = (name: string) => !q || name.toLowerCase().includes(q)
-    const nl: ParsedCommand[] = q.length >= 2 ? parseOpsCommand(search, wsHref) : []
+    const rules: ParsedCommand[] = q.length >= 2 ? parseOpsCommand(search, wsHref) : []
+    // Prefer AI config results when available; otherwise rule parser
+    const ask = aiAsk.length > 0 ? aiAsk : rules
     return {
-      ask: nl,
+      ask,
       actions: actionCommands.filter((a) => match(a.name)),
       pages: pageCommands.filter((p) => match(p.name)),
+      aiAskUsed,
+      aiAskLoading,
     }
-  }, [actionCommands, pageCommands, search, wsHref])
+  }, [actionCommands, pageCommands, search, wsHref, aiAsk, aiAskUsed, aiAskLoading])
+
+  // Debounced call into /api/ai/ops-command (getAIConfig → aiChat)
+  useEffect(() => {
+    if (!cmdOpen) return
+    const q = search.trim()
+    if (q.length < 3) {
+      setAiAsk([])
+      setAiAskUsed(false)
+      setAiAskLoading(false)
+      return
+    }
+    let cancelled = false
+    setAiAskLoading(true)
+    const t = setTimeout(() => {
+      void getAiOpsCommands(q).then((res) => {
+        if (cancelled) return
+        setAiAskLoading(false)
+        if (!res.aiGenerated || !res.commands.length) {
+          setAiAsk([])
+          setAiAskUsed(false)
+          return
+        }
+        setAiAskUsed(true)
+        setAiAsk(
+          res.commands.map((c) => ({
+            id: `ai-${c.id}`,
+            label: c.label,
+            href: `${wsHref(c.hrefKey)}${c.query ? `?${c.query}` : ""}`,
+            detail: c.detail,
+            confidence: "high" as const,
+          }))
+        )
+      })
+    }, 380)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [search, cmdOpen, wsHref])
 
   const flatCmd = useMemo(() => {
     const askAs: CmdEntry[] = cmdEntries.ask.map((a) => ({
@@ -748,8 +799,13 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 <>
                   {cmdEntries.ask.length > 0 && (
                     <div className="mb-1">
-                      <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-600">
-                        Ask TidyFlow
+                      <div className="flex items-center justify-between gap-2 px-4 py-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">
+                          {cmdEntries.aiAskUsed ? "Ask TidyFlow · AI config" : "Ask TidyFlow"}
+                        </span>
+                        {cmdEntries.aiAskLoading && (
+                          <span className="font-mono text-[9px] text-slate-400">thinking…</span>
+                        )}
                       </div>
                       {cmdEntries.ask.map((item) => {
                         const idx = flatCmd.findIndex((f) => f.id === item.id)
