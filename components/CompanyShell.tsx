@@ -45,6 +45,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
+import { CurrencyProvider } from "@/contexts/CurrencyContext"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 import HeaderNotifications from "@/components/ops/HeaderNotifications"
 import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
@@ -531,6 +532,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   }
 
   return (
+    <CurrencyProvider>
     <div className="flex h-screen overflow-hidden bg-control-canvas font-sans text-slate-800 antialiased dark:bg-control-darkCanvas dark:text-slate-100">
       {sidebarOpen && (
         <div
@@ -1007,5 +1009,6 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
         </div>
       )}
     </div>
+    </CurrencyProvider>
   )
 }

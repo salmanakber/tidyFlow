@@ -21,7 +21,6 @@ import {
 } from "@/components/ops/OpsChrome"
 import {
   adminGet,
-  formatMoney,
   formatDate,
   getAdminAuthHeaders,
   withCompanyParams,
@@ -30,6 +29,7 @@ import {
   analyzeRevenueReport,
   type RevenueAnalysisReport,
 } from "@/lib/ops-ai"
+import { useCurrency } from "@/contexts/CurrencyContext"
 import axios from "axios"
 import {
   Calendar,
@@ -324,6 +324,7 @@ function KpiSkeleton() {
 /* ─── Page ──────────────────────────────────────────────────────────────── */
 
 export default function ReportingPage() {
+  const { formatMoney, currency } = useCurrency()
   const [tab, setTab] = useState<TabId>("finance")
   const [opsData, setOpsData] = useState<OpsReportData | null>(null)
   const [revenueData, setRevenueData] = useState<RevenueReportData | null>(null)
@@ -666,7 +667,7 @@ export default function ReportingPage() {
           <OpsPageHeader
             eyebrow="Company workspace"
             title="Reporting"
-            subtitle="Ops performance, P&L, team scores, and collections for owners & managers"
+            subtitle={`Ops performance, P&L, team scores & collections · ${currency}`}
             actions={
               <>
                 <OpsRefreshButton onClick={loadReports} loading={loading} />
@@ -1678,6 +1679,7 @@ export default function ReportingPage() {
 }
 
 function MarginTable({ title, rows }: { title: string; rows: MarginRow[] }) {
+  const { formatMoney } = useCurrency()
   return (
     <OpsTableShell title={title} footer={<span>MARGIN RANKING</span>}>
       {rows.length === 0 ? (

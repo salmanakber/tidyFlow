@@ -45,6 +45,7 @@ import {
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
+import { CurrencyProvider } from "@/contexts/CurrencyContext"
 import {
   buildCompanySlug,
   isCompanyWorkspaceRole,
@@ -244,6 +245,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
+    <CurrencyProvider>
     <div className="flex h-screen overflow-hidden bg-control-canvas font-sans text-slate-800 antialiased dark:bg-control-darkCanvas dark:text-slate-100">
       {sidebarOpen && (
         <div
@@ -431,5 +433,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </main>
       </div>
     </div>
+    </CurrencyProvider>
   )
 }

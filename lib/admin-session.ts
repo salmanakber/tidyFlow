@@ -1,4 +1,16 @@
 import axios, { type AxiosRequestConfig } from 'axios'
+import { DEFAULT_CURRENCY, normalizeCurrencyCode } from '@/lib/stripe-currencies'
+
+/** Module-level currency synced by CurrencyProvider (GET /api/company/currency). */
+let activeCurrency = DEFAULT_CURRENCY
+
+export function setActiveCurrency(code: string) {
+  activeCurrency = normalizeCurrencyCode(code)
+}
+
+export function getActiveCurrency() {
+  return activeCurrency
+}
 
 /** Auth + company headers used by admin UI pages (same pattern as tasks/dashboard). */
 export function getAdminAuthHeaders(): Record<string, string> {
@@ -57,16 +69,17 @@ export async function adminDelete<T = any>(url: string, config?: AxiosRequestCon
   })
 }
 
-export function formatMoney(n: number | null | undefined, currency = 'GBP') {
+export function formatMoney(n: number | null | undefined, currency?: string) {
   const value = Number(n) || 0
+  const code = normalizeCurrencyCode(currency || activeCurrency)
   try {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
-      currency,
+      currency: code,
       maximumFractionDigits: 2,
     }).format(value)
   } catch {
-    return `£${value.toFixed(2)}`
+    return `${code} ${value.toFixed(2)}`
   }
 }
 

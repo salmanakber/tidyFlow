@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import AdminLayout from "@/components/AdminLayout"
 import ProtectedPage from "@/components/ProtectedPage"
-import { adminGet, adminPost, adminPatch, formatDate, formatMoney } from "@/lib/admin-session"
+import { adminGet, adminPost, adminPatch, formatDate } from "@/lib/admin-session"
+import { useCurrency } from "@/contexts/CurrencyContext"
 import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   FileText,
@@ -113,6 +114,7 @@ export default function ClientInvoicesPage() {
 
 function Content() {
   const searchParams = useSearchParams()
+  const { formatMoney, currency } = useCurrency()
   const [invoices, setInvoices] = useState<any[]>([])
   const [eligible, setEligible] = useState<EligibleTask[]>([])
   const [clientGroups, setClientGroups] = useState<ClientGroup[]>([])
@@ -558,7 +560,7 @@ function Content() {
       <OpsPageHeader
         eyebrow="Finance"
         title="Client invoices"
-        subtitle="Bill clients for completed jobs — AI drafts ready clients in one tap"
+        subtitle={`Bill clients for completed jobs · company currency ${currency}`}
         actions={
           <div className="flex gap-2">
             <OpsRefreshButton

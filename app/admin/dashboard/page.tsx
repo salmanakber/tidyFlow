@@ -47,6 +47,7 @@ import {
 import { fetchLiveCleaners } from "@/lib/ops-tracking"
 import { getCleanerRecommendations, getAiDashboardSummary } from "@/lib/ops-ai"
 import { adminGet, adminPatch } from "@/lib/admin-session"
+import { useCurrency } from "@/contexts/CurrencyContext"
 import { useOpsRealtime } from "@/hooks/useOpsRealtime"
 import {
   ResponsiveContainer,
@@ -106,18 +107,6 @@ const CHART_NAVY = "#0f2744"
 const CHART_AMBER = "#D97706"
 const CHART_EMERALD = "#059669"
 const CHART_SLATE = "#94a3b8"
-
-function formatMoney(n: number) {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: "GBP",
-      maximumFractionDigits: 0,
-    }).format(n || 0)
-  } catch {
-    return `£${Math.round(n || 0)}`
-  }
-}
 
 function cleanerLabel(task: TaskRow): string {
   if (task.assignedUser) {
@@ -185,6 +174,7 @@ function isUnassigned(task: TaskRow) {
 
 export default function AdminDashboard() {
   const { href: wsHref } = useCompanyWorkspace()
+  const { formatMoney } = useCurrency()
   const createJobHref = wsHref ? wsHref("tasks") : "/admin/tasks"
   const layout = useDashboardLayout()
   const [stats, setStats] = useState<DashboardStats | null>(null)
