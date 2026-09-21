@@ -184,3 +184,51 @@ export async function getAiLiveAlerts(snapshot: {
     return { alerts: [], aiGenerated: false }
   }
 }
+
+export type RevenueAnalysisReport = {
+  title: string
+  periodLabel: string
+  executiveSummary: string
+  profitHealth: {
+    rating: "strong" | "stable" | "weak" | "critical"
+    score: number
+    explanation: string
+  }
+  highlights: string[]
+  risks: string[]
+  marginInsights: Array<{ label: string; insight: string }>
+  cashInsights: string[]
+  costInsights: string[]
+  recommendations: Array<{ priority: "high" | "medium" | "low"; action: string; why: string }>
+  closingNote: string
+  aiGenerated: boolean
+}
+
+/** P&L narrative via company AI config (same contract as mobile). */
+export async function analyzeRevenueReport(input: {
+  from: string
+  to: string
+  focus?: "overall" | "margin" | "cash" | "costs"
+  propertyId?: number | null
+  report: {
+    summary: Record<string, unknown>
+    marginByProperty?: Array<Record<string, unknown>>
+    marginByClient?: Array<Record<string, unknown>>
+    expensesByCategory?: Array<{ category: string; amount: number }>
+    unpaidInvoices?: Array<Record<string, unknown>>
+  }
+  locale?: string
+}): Promise<RevenueAnalysisReport> {
+  const res = await adminPost("/api/ai/revenue-analysis", {
+    from: input.from,
+    to: input.to,
+    focus: input.focus || "overall",
+    ...(input.propertyId != null ? { propertyId: input.propertyId } : {}),
+    report: input.report,
+    locale: input.locale || (typeof navigator !== "undefined" ? navigator.language : "en"),
+  })
+  if (!res.data?.success || !res.data?.data) {
+    throw new Error(res.data?.message || "Revenue analysis failed")
+  }
+  return res.data.data as RevenueAnalysisReport
+}

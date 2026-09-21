@@ -33,9 +33,17 @@ import {
   ShieldAlert,
   UserX,
   Loader2,
+  LayoutGrid,
+  RotateCcw,
 } from "lucide-react"
 import { JobStatusBadge } from "@/components/ops/JobInspectorDrawer"
 import OpsNeedsMeBrief, { buildNeedsMeItems, type NeedsMeItem } from "@/components/ops/OpsNeedsMeBrief"
+import DashboardWidget from "@/components/ops/DashboardWidget"
+import {
+  useDashboardLayout,
+  DASHBOARD_WIDGET_LABELS,
+  type DashboardWidgetId,
+} from "@/hooks/useDashboardLayout"
 import { fetchLiveCleaners } from "@/lib/ops-tracking"
 import { getCleanerRecommendations, getAiDashboardSummary } from "@/lib/ops-ai"
 import { adminGet, adminPatch } from "@/lib/admin-session"
@@ -178,6 +186,7 @@ function isUnassigned(task: TaskRow) {
 export default function AdminDashboard() {
   const { href: wsHref } = useCompanyWorkspace()
   const createJobHref = wsHref ? wsHref("tasks") : "/admin/tasks"
+  const layout = useDashboardLayout()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [todayTasks, setTodayTasks] = useState<TaskRow[]>([])
   const [recentTasks, setRecentTasks] = useState<TaskRow[]>([])
@@ -550,534 +559,599 @@ export default function AdminDashboard() {
             hour: "2-digit",
             minute: "2-digit",
           })}`}
-          actions={<OpsRefreshButton onClick={loadDashboard} loading={loading} />}
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={() => layout.setEditMode(!layout.editMode)}
+                title={Object.values(DASHBOARD_WIDGET_LABELS).join(" · ")}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wide transition ${
+                  layout.editMode
+                    ? "border-amber-600 bg-amber-600 text-white hover:bg-amber-700"
+                    : "border-control-border bg-white text-navy-900 hover:border-amber-600 dark:border-control-darkBorder dark:bg-control-darkCard dark:text-white"
+                }`}
+              >
+                <LayoutGrid size={12} />
+                {layout.editMode ? "Done" : "Customize layout"}
+              </button>
+              {layout.editMode && (
+                <button
+                  type="button"
+                  onClick={() => layout.reset()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-control-border bg-white px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-navy-900 hover:border-amber-600 dark:border-control-darkBorder dark:bg-control-darkCard dark:text-white"
+                >
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              )}
+              <OpsRefreshButton onClick={loadDashboard} loading={loading} />
+            </>
+          }
         />
 
         {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
         {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
 
-        <OpsNeedsMeBrief
-          items={needsMeItems}
-          loading={loading && !stats}
-          onAiAssignAll={bulkAiAssignUnassigned}
-          aiAssignBusy={bulkAssignBusy}
-        />
-
-        {/* Dispatch command center */}
-        <section className="overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-slate-50 shadow-sm dark:border-amber-900/40 dark:from-navy-950 dark:via-control-darkCard dark:to-navy-950">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 px-4 py-2.5 dark:border-navy-800">
-            <div className="flex items-center gap-2">
-              <Radio size={14} className={`text-amber-700 dark:text-amber-400 ${liveBusy ? "animate-pulse" : ""}`} />
-              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400">
-                Dispatch command center
-              </p>
-            </div>
-            <Link
-              href={wsHref("rota")}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-mono text-[10px] font-bold uppercase text-white hover:bg-amber-700"
-            >
-              <Sparkles size={12} /> AI Smart fill → Rota
-            </Link>
+        {layout.editMode && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 font-mono text-[11px] font-medium text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+            Drag sections to reorder · hide what you don&apos;t need · saved in this browser
           </div>
-          <div className="grid grid-cols-2 gap-px bg-amber-100/80 dark:bg-navy-800 sm:grid-cols-4">
-            <CommandStat
-              label="Unassigned today"
-              value={unassignedToday.length}
-              icon={UserX}
-              warn={unassignedToday.length > 0}
-              href={`${wsHref("jobs")}?status=unassigned`}
-            />
-            <CommandStat
-              label="Off-site GPS"
-              value={offSiteCount}
-              icon={MapPin}
-              warn={offSiteCount > 0}
-              href={wsHref("monitor")}
-            />
-            <CommandStat
-              label="Open SOS"
-              value={sosCount}
-              icon={ShieldAlert}
-              warn={sosCount > 0}
-              href={`${wsHref("safety")}?tab=sos`}
-            />
-            <div className="flex flex-col justify-center bg-white px-4 py-3 dark:bg-navy-950">
-              <p className="font-mono text-[9px] font-bold uppercase text-slate-500">
-                Bulk fill
-              </p>
-              <Link
-                href={wsHref("rota")}
-                className="mt-1 text-sm font-bold text-amber-700 hover:text-amber-800 dark:text-amber-400"
-              >
-                Open rota matrix →
-              </Link>
-            </div>
-          </div>
+        )}
 
-          <div className="border-t border-amber-100 px-4 py-3 dark:border-navy-800">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Today&apos;s unassigned · {unassignedToday.length}
-              </p>
-            </div>
-            {unassignedToday.length === 0 ? (
-              <OpsEmpty
-                message="No unassigned jobs today — queue is clear"
-                ctaLabel="Create job"
-                ctaHref={createJobHref}
+        {layout.order.map((id: DashboardWidgetId) => {
+          const hidden = layout.hidden.includes(id)
+          let body: React.ReactNode = null
+
+          if (id === "needsMe") {
+            body = (
+              <OpsNeedsMeBrief
+                items={needsMeItems}
+                loading={loading && !stats}
+                onAiAssignAll={bulkAiAssignUnassigned}
+                aiAssignBusy={bulkAssignBusy}
               />
-            ) : (
-              <ul className="divide-y divide-amber-100 dark:divide-navy-800/80">
-                {unassignedToday.slice(0, 8).map((task) => (
-                  <li
-                    key={task.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-navy-900 dark:text-white">
-                        <span className="mr-2 font-mono text-xs text-amber-700 dark:text-amber-400">
-                          #JOB-{task.id}
-                        </span>
-                        {task.title}
-                      </p>
-                      <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
-                        <MapPin size={10} />
-                        {task.property?.address || "—"}
-                        <span className="text-slate-300">·</span>
-                        {scheduleLabel(task.scheduledDate)}
+            )
+          } else if (id === "command") {
+            body = (
+              <>
+                <section className="overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-slate-50 shadow-sm dark:border-amber-900/40 dark:from-navy-950 dark:via-control-darkCard dark:to-navy-950">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 px-4 py-2.5 dark:border-navy-800">
+                    <div className="flex items-center gap-2">
+                      <Radio size={14} className={`text-amber-700 dark:text-amber-400 ${liveBusy ? "animate-pulse" : ""}`} />
+                      <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400">
+                        Dispatch command center
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={assigningId === task.id}
-                      onClick={() => aiAssign(task)}
-                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-[10px] font-bold uppercase text-white hover:bg-amber-700 disabled:opacity-50"
+                    <Link
+                      href={wsHref("rota")}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-mono text-[10px] font-bold uppercase text-white hover:bg-amber-700"
                     >
-                      {assigningId === task.id ? (
-                        <Loader2 size={12} className="animate-spin" />
-                      ) : (
-                        <Sparkles size={12} />
-                      )}
-                      AI assign
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {unassignedToday.length > 8 && (
-              <p className="mt-2 font-mono text-[10px] text-slate-500">
-                +{unassignedToday.length - 8} more — use Smart fill on rota
-              </p>
-            )}
-          </div>
-        </section>
-
-        {stats && (stats.openIssues > 0 || atRisk > 0) && (
-          <section className="flex flex-col justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-navy-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-white lg:flex-row lg:items-center">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/20 text-amber-700 dark:text-amber-400">
-                <AlertCircle className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-                  <span className="font-bold text-amber-800 dark:text-amber-400">AUTONOMOUS DISPATCH SENTINEL</span>
-                  <span className="text-slate-400">•</span>
-                  <span className="text-slate-700 dark:text-slate-200">
-                    {stats.openIssues > 0
-                      ? `${stats.openIssues} critical issue${stats.openIssues === 1 ? "" : "s"} require attention`
-                      : `${atRisk} shift${atRisk === 1 ? "" : "s"} need assignment`}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Resolve conflicts before they delay today&apos;s cleanings.
-                </p>
-              </div>
-            </div>
-            <Link
-              href={stats.openIssues > 0 ? wsHref("issues") : wsHref("jobs")}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-1.5 font-mono text-xs font-bold text-white shadow-sm transition hover:bg-amber-700"
-            >
-              {stats.openIssues > 0 ? "REVIEW ISSUES" : "AUTO-ASSIGN"} <ArrowRight size={14} />
-            </Link>
-          </section>
-        )}
-
-        {stats && (
-          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <TelemetryKpi
-              label="Scheduled today"
-              value={stats.todayJobs}
-              hint={`${stats.upcomingJobs} upcoming`}
-              pct={100}
-              bar="navy"
-              icon={Calendar}
-            />
-            <TelemetryKpi
-              label="In progress"
-              value={stats.todayInProgress}
-              hint="Live shifts"
-              pct={stats.todayJobs ? (stats.todayInProgress / stats.todayJobs) * 100 : 0}
-              bar="amber"
-              icon={Timer}
-            />
-            <TelemetryKpi
-              label="Shift at-risk"
-              value={atRisk}
-              hint="Action needed"
-              pct={atRisk ? 60 : 0}
-              bar="amber"
-              icon={AlertCircle}
-              emphasize
-            />
-            <TelemetryKpi
-              label="Completed today"
-              value={stats.todayCompleted}
-              hint={`${completion}% rate`}
-              pct={completion}
-              bar="emerald"
-              icon={CheckCircle2}
-            />
-            <TelemetryKpi
-              label="GPS / active"
-              value={stats.activeCleanersToday}
-              hint={`${stats.totalCleaners} on roster`}
-              pct={
-                stats.totalCleaners
-                  ? (stats.activeCleanersToday / stats.totalCleaners) * 100
-                  : 0
-              }
-              bar="emerald"
-              icon={Activity}
-            />
-            <TelemetryKpi
-              label="Invoiced month"
-              value={revenue ? formatMoney(revenue.currentMonthRevenue) : "—"}
-              hint={
-                revenue
-                  ? `${revenue.percentageChange >= 0 ? "+" : ""}${revenue.percentageChange.toFixed(1)}%`
-                  : "Revenue"
-              }
-              pct={70}
-              bar="navy"
-              icon={revenue && revenue.percentageChange >= 0 ? TrendingUp : TrendingDown}
-            />
-          </section>
-        )}
-
-        {/* Charts row */}
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          <OpsCard className="lg:col-span-2">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
-                  Today&apos;s mix
-                </p>
-                <h2 className="text-sm font-bold text-navy-900 dark:text-white">
-                  Status breakdown
-                </h2>
-              </div>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-navy-800/20 bg-navy-950 text-amber-400 dark:border-navy-700">
-                <PieChartIcon size={14} />
-              </div>
-            </div>
-            <div className="h-[240px] w-full">
-              {!statusHasSignal ? (
-                <ChartEmpty label="No jobs scheduled today" />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={statusBreakdown}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="46%"
-                      innerRadius={52}
-                      outerRadius={78}
-                      paddingAngle={3}
-                      strokeWidth={0}
-                    >
-                      {statusBreakdown.map((entry) => (
-                        <Cell
-                          key={entry.name}
-                          fill={STATUS_COLORS[entry.name] || CHART_SLATE}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        fontSize: 12,
-                        fontFamily: "ui-monospace, monospace",
-                      }}
-                    />
-                    <Legend
-                      verticalAlign="bottom"
-                      height={32}
-                      iconType="circle"
-                      wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-            {statusHasSignal && (
-              <div className="mt-1 grid grid-cols-2 gap-2 border-t border-control-border pt-3 dark:border-navy-800 sm:grid-cols-4">
-                {statusBreakdown.map((row) => (
-                  <div key={row.name} className="rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-navy-950">
-                    <p className="font-mono text-[9px] font-bold uppercase text-slate-400">
-                      {row.name}
-                    </p>
-                    <p
-                      className="mt-0.5 font-mono text-lg font-black tabular-nums"
-                      style={{ color: STATUS_COLORS[row.name] || CHART_NAVY }}
-                    >
-                      {row.value}
-                    </p>
+                      <Sparkles size={12} /> AI Smart fill → Rota
+                    </Link>
                   </div>
-                ))}
-              </div>
-            )}
-          </OpsCard>
+                  <div className="grid grid-cols-2 gap-px bg-amber-100/80 dark:bg-navy-800 sm:grid-cols-4">
+                    <CommandStat
+                      label="Unassigned today"
+                      value={unassignedToday.length}
+                      icon={UserX}
+                      warn={unassignedToday.length > 0}
+                      href={`${wsHref("jobs")}?status=unassigned`}
+                    />
+                    <CommandStat
+                      label="Off-site GPS"
+                      value={offSiteCount}
+                      icon={MapPin}
+                      warn={offSiteCount > 0}
+                      href={wsHref("monitor")}
+                    />
+                    <CommandStat
+                      label="Open SOS"
+                      value={sosCount}
+                      icon={ShieldAlert}
+                      warn={sosCount > 0}
+                      href={`${wsHref("safety")}?tab=sos`}
+                    />
+                    <div className="flex flex-col justify-center bg-white px-4 py-3 dark:bg-navy-950">
+                      <p className="font-mono text-[9px] font-bold uppercase text-slate-500">
+                        Bulk fill
+                      </p>
+                      <Link
+                        href={wsHref("rota")}
+                        className="mt-1 text-sm font-bold text-amber-700 hover:text-amber-800 dark:text-amber-400"
+                      >
+                        Open rota matrix →
+                      </Link>
+                    </div>
+                  </div>
 
-          <OpsCard className="lg:col-span-3">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
-                  Last 7 days
-                </p>
-                <h2 className="text-sm font-bold text-navy-900 dark:text-white">
-                  Volume & completion trend
-                </h2>
-              </div>
-              <div className="flex items-center gap-3 font-mono text-[10px] font-bold uppercase text-slate-400">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-navy-900 dark:bg-amber-500" /> Jobs
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-amber-600" /> Done
-                </span>
-              </div>
-            </div>
-            <div className="h-[240px] w-full">
-              {!trendHasSignal ? (
-                <ChartEmpty label="Trend data unavailable" />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={sevenDayTrend} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="jobsFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={CHART_NAVY} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={CHART_NAVY} stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="doneFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={CHART_AMBER} stopOpacity={0.4} />
-                        <stop offset="100%" stopColor={CHART_AMBER} stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 11, fill: "#64748b" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      allowDecimals={false}
-                      tick={{ fontSize: 11, fill: "#64748b" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        fontSize: 12,
-                        fontFamily: "ui-monospace, monospace",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="jobs"
-                      name="Jobs"
-                      stroke={CHART_NAVY}
-                      fill="url(#jobsFill)"
-                      strokeWidth={2}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="completed"
-                      name="Completed"
-                      stroke={CHART_AMBER}
-                      fill="url(#doneFill)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </OpsCard>
-        </section>
-
-        {/* Compact bar companion when we have status + trend */}
-        {statusHasSignal && (
-          <OpsCard padding={false} className="overflow-hidden">
-            <div className="flex flex-col gap-1 border-b border-control-border px-5 py-3.5 dark:border-navy-800 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
-                  Dispatch pulse
-                </p>
-                <h2 className="text-sm font-bold text-navy-900 dark:text-white">
-                  Today by status (bars)
-                </h2>
-              </div>
-            </div>
-            <div className="h-[160px] px-2 pb-2 pt-4 sm:px-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={statusBreakdown} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    tick={{ fontSize: 11, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    allowDecimals={false}
-                    tick={{ fontSize: 11, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: 8,
-                      border: "1px solid #e2e8f0",
-                      fontSize: 12,
-                    }}
-                  />
-                  <Bar dataKey="value" name="Jobs" radius={[6, 6, 0, 0]} maxBarSize={48}>
-                    {statusBreakdown.map((entry) => (
-                      <Cell
-                        key={entry.name}
-                        fill={STATUS_COLORS[entry.name] || CHART_EMERALD}
+                  <div className="border-t border-amber-100 px-4 py-3 dark:border-navy-800">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Today&apos;s unassigned · {unassignedToday.length}
+                      </p>
+                    </div>
+                    {unassignedToday.length === 0 ? (
+                      <OpsEmpty
+                        message="No unassigned jobs today — queue is clear"
+                        ctaLabel="Create job"
+                        ctaHref={createJobHref}
                       />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </OpsCard>
-        )}
-
-        <OpsTableShell
-          title="Active dispatch queue"
-          badge={
-            <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
-              {queue.length}
-            </span>
-          }
-          tabs={[
-            { id: "all", label: "All" },
-            { id: "active", label: "Active" },
-            { id: "exceptions", label: "Exceptions" },
-            { id: "completed", label: "Completed" },
-          ]}
-          activeTab={queueTab}
-          onTabChange={setQueueTab}
-          footer={
-            <>
-              <span>
-                SHOWING {queue.length} JOB{queue.length === 1 ? "" : "S"}
-              </span>
-              <span className="text-emerald-600">QUICKBOOKS · READY</span>
-            </>
-          }
-        >
-          {queue.length === 0 ? (
-            <OpsEmpty
-              message="No jobs in this queue"
-              ctaLabel="Create job"
-              ctaHref={createJobHref}
-            />
-          ) : (
-            <table className="w-full text-left">
-              <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
-                <tr>
-                  <th className={opsTh}>Shift ID</th>
-                  <th className={opsTh}>Job / site</th>
-                  <th className={opsTh}>Assigned crew</th>
-                  <th className={opsTh}>Schedule</th>
-                  <th className={opsTh}>Status</th>
-                  <th className={`${opsTh} text-right`}>Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
-                {queue.map((task) => {
-                  const action = actionForStatus(task.status)
-                  const live = task.taskAssignments?.some((a) => a.trackerActive)
-                  return (
-                    <tr
-                      key={task.id}
-                      className="hover:bg-amber-50/30 dark:hover:bg-amber-950/10"
-                    >
-                      <td className={`${opsTd} font-mono text-xs font-bold text-amber-700`}>
-                        #JOB-{task.id}
-                      </td>
-                      <td className={opsTd}>
-                        <p className="font-bold text-navy-900 dark:text-white">{task.title}</p>
-                        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
-                          <MapPin size={10} />
-                          {task.property?.address || "—"}
-                        </p>
-                      </td>
-                      <td className={opsTd}>
-                        {cleanerLabel(task) === "Unassigned" ? (
-                          <span className="text-xs font-bold text-amber-700">Unassigned shift</span>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 text-[10px] font-bold text-navy-800 dark:bg-navy-800 dark:text-amber-400">
-                              {cleanerLabel(task)[0]}
-                            </span>
-                            <div>
-                              <p className="text-sm font-semibold">{cleanerLabel(task)}</p>
-                              {live && (
-                                <p className="flex items-center gap-1 text-[10px] font-bold text-emerald-600">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                  On-site live
-                                </p>
-                              )}
+                    ) : (
+                      <ul className="divide-y divide-amber-100 dark:divide-navy-800/80">
+                        {unassignedToday.slice(0, 8).map((task) => (
+                          <li
+                            key={task.id}
+                            className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-navy-900 dark:text-white">
+                                <span className="mr-2 font-mono text-xs text-amber-700 dark:text-amber-400">
+                                  #JOB-{task.id}
+                                </span>
+                                {task.title}
+                              </p>
+                              <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
+                                <MapPin size={10} />
+                                {task.property?.address || "—"}
+                                <span className="text-slate-300">·</span>
+                                {scheduleLabel(task.scheduledDate)}
+                              </p>
                             </div>
+                            <button
+                              type="button"
+                              disabled={assigningId === task.id}
+                              onClick={() => aiAssign(task)}
+                              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-[10px] font-bold uppercase text-white hover:bg-amber-700 disabled:opacity-50"
+                            >
+                              {assigningId === task.id ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Sparkles size={12} />
+                              )}
+                              AI assign
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {unassignedToday.length > 8 && (
+                      <p className="mt-2 font-mono text-[10px] text-slate-500">
+                        +{unassignedToday.length - 8} more — use Smart fill on rota
+                      </p>
+                    )}
+                  </div>
+                </section>
+
+                {stats && (stats.openIssues > 0 || atRisk > 0) && (
+                  <section className="mt-5 flex flex-col justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-navy-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-white lg:flex-row lg:items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/20 text-amber-700 dark:text-amber-400">
+                        <AlertCircle className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                          <span className="font-bold text-amber-800 dark:text-amber-400">AUTONOMOUS DISPATCH SENTINEL</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-slate-700 dark:text-slate-200">
+                            {stats.openIssues > 0
+                              ? `${stats.openIssues} critical issue${stats.openIssues === 1 ? "" : "s"} require attention`
+                              : `${atRisk} shift${atRisk === 1 ? "" : "s"} need assignment`}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          Resolve conflicts before they delay today&apos;s cleanings.
+                        </p>
+                      </div>
+                    </div>
+                    <Link
+                      href={stats.openIssues > 0 ? wsHref("issues") : wsHref("jobs")}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-1.5 font-mono text-xs font-bold text-white shadow-sm transition hover:bg-amber-700"
+                    >
+                      {stats.openIssues > 0 ? "REVIEW ISSUES" : "AUTO-ASSIGN"} <ArrowRight size={14} />
+                    </Link>
+                  </section>
+                )}
+              </>
+            )
+          } else if (id === "kpis") {
+            body =
+              stats && (
+                <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                  <TelemetryKpi
+                    label="Scheduled today"
+                    value={stats.todayJobs}
+                    hint={`${stats.upcomingJobs} upcoming`}
+                    pct={100}
+                    bar="navy"
+                    icon={Calendar}
+                  />
+                  <TelemetryKpi
+                    label="In progress"
+                    value={stats.todayInProgress}
+                    hint="Live shifts"
+                    pct={stats.todayJobs ? (stats.todayInProgress / stats.todayJobs) * 100 : 0}
+                    bar="amber"
+                    icon={Timer}
+                  />
+                  <TelemetryKpi
+                    label="Shift at-risk"
+                    value={atRisk}
+                    hint="Action needed"
+                    pct={atRisk ? 60 : 0}
+                    bar="amber"
+                    icon={AlertCircle}
+                    emphasize
+                  />
+                  <TelemetryKpi
+                    label="Completed today"
+                    value={stats.todayCompleted}
+                    hint={`${completion}% rate`}
+                    pct={completion}
+                    bar="emerald"
+                    icon={CheckCircle2}
+                  />
+                  <TelemetryKpi
+                    label="GPS / active"
+                    value={stats.activeCleanersToday}
+                    hint={`${stats.totalCleaners} on roster`}
+                    pct={
+                      stats.totalCleaners
+                        ? (stats.activeCleanersToday / stats.totalCleaners) * 100
+                        : 0
+                    }
+                    bar="emerald"
+                    icon={Activity}
+                  />
+                  <TelemetryKpi
+                    label="Invoiced month"
+                    value={revenue ? formatMoney(revenue.currentMonthRevenue) : "—"}
+                    hint={
+                      revenue
+                        ? `${revenue.percentageChange >= 0 ? "+" : ""}${revenue.percentageChange.toFixed(1)}%`
+                        : "Revenue"
+                    }
+                    pct={70}
+                    bar="navy"
+                    icon={revenue && revenue.percentageChange >= 0 ? TrendingUp : TrendingDown}
+                  />
+                </section>
+              )
+          } else if (id === "charts") {
+            body = (
+              <>
+                <section className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                  <OpsCard className="lg:col-span-2">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                          Today&apos;s mix
+                        </p>
+                        <h2 className="text-sm font-bold text-navy-900 dark:text-white">
+                          Status breakdown
+                        </h2>
+                      </div>
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-navy-800/20 bg-navy-950 text-amber-400 dark:border-navy-700">
+                        <PieChartIcon size={14} />
+                      </div>
+                    </div>
+                    <div className="h-[240px] w-full">
+                      {!statusHasSignal ? (
+                        <ChartEmpty label="No jobs scheduled today" />
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={statusBreakdown}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="46%"
+                              innerRadius={52}
+                              outerRadius={78}
+                              paddingAngle={3}
+                              strokeWidth={0}
+                            >
+                              {statusBreakdown.map((entry) => (
+                                <Cell
+                                  key={entry.name}
+                                  fill={STATUS_COLORS[entry.name] || CHART_SLATE}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              contentStyle={{
+                                borderRadius: 8,
+                                border: "1px solid #e2e8f0",
+                                fontSize: 12,
+                                fontFamily: "ui-monospace, monospace",
+                              }}
+                            />
+                            <Legend
+                              verticalAlign="bottom"
+                              height={32}
+                              iconType="circle"
+                              wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                    {statusHasSignal && (
+                      <div className="mt-1 grid grid-cols-2 gap-2 border-t border-control-border pt-3 dark:border-navy-800 sm:grid-cols-4">
+                        {statusBreakdown.map((row) => (
+                          <div key={row.name} className="rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-navy-950">
+                            <p className="font-mono text-[9px] font-bold uppercase text-slate-400">
+                              {row.name}
+                            </p>
+                            <p
+                              className="mt-0.5 font-mono text-lg font-black tabular-nums"
+                              style={{ color: STATUS_COLORS[row.name] || CHART_NAVY }}
+                            >
+                              {row.value}
+                            </p>
                           </div>
-                        )}
-                      </td>
-                      <td className={`${opsTd} font-mono text-xs text-slate-600`}>
-                        {scheduleLabel(task.scheduledDate)}
-                      </td>
-                      <td className={opsTd}>
-                        <JobStatusBadge status={task.status} />
-                      </td>
-                      <td className={`${opsTd} text-right`}>
-                        <Link
-                          href={`${wsHref("jobs")}?id=${task.id}`}
-                          className={`inline-flex rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
-                            action.solid
-                              ? "bg-amber-600 text-white shadow-amber-glow hover:bg-amber-700"
-                              : action.muted
-                                ? "border border-slate-200 text-slate-400"
-                                : "border border-navy-200 text-navy-800 hover:border-amber-600 hover:text-amber-700 dark:border-navy-700 dark:text-slate-200"
-                          }`}
-                        >
-                          {action.label}
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </OpsTableShell>
+                        ))}
+                      </div>
+                    )}
+                  </OpsCard>
+
+                  <OpsCard className="lg:col-span-3">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                          Last 7 days
+                        </p>
+                        <h2 className="text-sm font-bold text-navy-900 dark:text-white">
+                          Volume & completion trend
+                        </h2>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono text-[10px] font-bold uppercase text-slate-400">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-navy-900 dark:bg-amber-500" /> Jobs
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-amber-600" /> Done
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-[240px] w-full">
+                      {!trendHasSignal ? (
+                        <ChartEmpty label="Trend data unavailable" />
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={sevenDayTrend} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="jobsFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={CHART_NAVY} stopOpacity={0.35} />
+                                <stop offset="100%" stopColor={CHART_NAVY} stopOpacity={0.02} />
+                              </linearGradient>
+                              <linearGradient id="doneFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={CHART_AMBER} stopOpacity={0.4} />
+                                <stop offset="100%" stopColor={CHART_AMBER} stopOpacity={0.02} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                            <XAxis
+                              dataKey="label"
+                              tick={{ fontSize: 11, fill: "#64748b" }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <YAxis
+                              allowDecimals={false}
+                              tick={{ fontSize: 11, fill: "#64748b" }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                borderRadius: 8,
+                                border: "1px solid #e2e8f0",
+                                fontSize: 12,
+                                fontFamily: "ui-monospace, monospace",
+                              }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="jobs"
+                              name="Jobs"
+                              stroke={CHART_NAVY}
+                              fill="url(#jobsFill)"
+                              strokeWidth={2}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="completed"
+                              name="Completed"
+                              stroke={CHART_AMBER}
+                              fill="url(#doneFill)"
+                              strokeWidth={2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </OpsCard>
+                </section>
+
+                {statusHasSignal && (
+                  <OpsCard padding={false} className="mt-4 overflow-hidden">
+                    <div className="flex flex-col gap-1 border-b border-control-border px-5 py-3.5 dark:border-navy-800 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                          Dispatch pulse
+                        </p>
+                        <h2 className="text-sm font-bold text-navy-900 dark:text-white">
+                          Today by status (bars)
+                        </h2>
+                      </div>
+                    </div>
+                    <div className="h-[160px] px-2 pb-2 pt-4 sm:px-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={statusBreakdown} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 11, fill: "#64748b" }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis
+                            allowDecimals={false}
+                            tick={{ fontSize: 11, fill: "#64748b" }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              borderRadius: 8,
+                              border: "1px solid #e2e8f0",
+                              fontSize: 12,
+                            }}
+                          />
+                          <Bar dataKey="value" name="Jobs" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                            {statusBreakdown.map((entry) => (
+                              <Cell
+                                key={entry.name}
+                                fill={STATUS_COLORS[entry.name] || CHART_EMERALD}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </OpsCard>
+                )}
+              </>
+            )
+          } else if (id === "queue") {
+            body = (
+              <OpsTableShell
+                title="Active dispatch queue"
+                badge={
+                  <span className="rounded bg-navy-950 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">
+                    {queue.length}
+                  </span>
+                }
+                tabs={[
+                  { id: "all", label: "All" },
+                  { id: "active", label: "Active" },
+                  { id: "exceptions", label: "Exceptions" },
+                  { id: "completed", label: "Completed" },
+                ]}
+                activeTab={queueTab}
+                onTabChange={setQueueTab}
+                footer={
+                  <>
+                    <span>
+                      SHOWING {queue.length} JOB{queue.length === 1 ? "" : "S"}
+                    </span>
+                    <span className="text-emerald-600">QUICKBOOKS · READY</span>
+                  </>
+                }
+              >
+                {queue.length === 0 ? (
+                  <OpsEmpty
+                    message="No jobs in this queue"
+                    ctaLabel="Create job"
+                    ctaHref={createJobHref}
+                  />
+                ) : (
+                  <table className="w-full text-left">
+                    <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                      <tr>
+                        <th className={opsTh}>Shift ID</th>
+                        <th className={opsTh}>Job / site</th>
+                        <th className={opsTh}>Assigned crew</th>
+                        <th className={opsTh}>Schedule</th>
+                        <th className={opsTh}>Status</th>
+                        <th className={`${opsTh} text-right`}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
+                      {queue.map((task) => {
+                        const action = actionForStatus(task.status)
+                        const live = task.taskAssignments?.some((a) => a.trackerActive)
+                        return (
+                          <tr
+                            key={task.id}
+                            className="hover:bg-amber-50/30 dark:hover:bg-amber-950/10"
+                          >
+                            <td className={`${opsTd} font-mono text-xs font-bold text-amber-700`}>
+                              #JOB-{task.id}
+                            </td>
+                            <td className={opsTd}>
+                              <p className="font-bold text-navy-900 dark:text-white">{task.title}</p>
+                              <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                                <MapPin size={10} />
+                                {task.property?.address || "—"}
+                              </p>
+                            </td>
+                            <td className={opsTd}>
+                              {cleanerLabel(task) === "Unassigned" ? (
+                                <span className="text-xs font-bold text-amber-700">Unassigned shift</span>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 text-[10px] font-bold text-navy-800 dark:bg-navy-800 dark:text-amber-400">
+                                    {cleanerLabel(task)[0]}
+                                  </span>
+                                  <div>
+                                    <p className="text-sm font-semibold">{cleanerLabel(task)}</p>
+                                    {live && (
+                                      <p className="flex items-center gap-1 text-[10px] font-bold text-emerald-600">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                        On-site live
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                            <td className={`${opsTd} font-mono text-xs text-slate-600`}>
+                              {scheduleLabel(task.scheduledDate)}
+                            </td>
+                            <td className={opsTd}>
+                              <JobStatusBadge status={task.status} />
+                            </td>
+                            <td className={`${opsTd} text-right`}>
+                              <Link
+                                href={`${wsHref("jobs")}?id=${task.id}`}
+                                className={`inline-flex rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+                                  action.solid
+                                    ? "bg-amber-600 text-white shadow-amber-glow hover:bg-amber-700"
+                                    : action.muted
+                                      ? "border border-slate-200 text-slate-400"
+                                      : "border border-navy-200 text-navy-800 hover:border-amber-600 hover:text-amber-700 dark:border-navy-700 dark:text-slate-200"
+                                }`}
+                              >
+                                {action.label}
+                              </Link>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </OpsTableShell>
+            )
+          }
+
+          if (!body && !layout.editMode) return null
+
+          return (
+            <DashboardWidget
+              key={id}
+              id={id}
+              editMode={layout.editMode}
+              hidden={hidden}
+              onMove={layout.moveWidget}
+              onToggleHidden={layout.toggleHidden}
+            >
+              {body}
+            </DashboardWidget>
+          )
+        })}
 
         <div className="flex flex-wrap gap-3 text-xs">
           <Link

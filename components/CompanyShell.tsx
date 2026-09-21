@@ -41,6 +41,8 @@ import {
   Sparkles,
   Crosshair,
   Mail,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
@@ -196,6 +198,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const [companyName, setCompanyName] = useState("")
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [userMenu, setUserMenu] = useState(false)
   const [search, setSearch] = useState("")
   const [darkMode, setDarkMode] = useState(false)
@@ -207,6 +210,26 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
   const cmdInputRef = useRef<HTMLInputElement>(null)
   const headerSearchRef = useRef<HTMLInputElement>(null)
   const { status: liveStatus } = useOpsRealtime(() => {}, !loading && !!user)
+
+  useEffect(() => {
+    try {
+      setSidebarCollapsed(localStorage.getItem("tidyflow-sidebar-collapsed") === "1")
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem("tidyflow-sidebar-collapsed", next ? "1" : "0")
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }, [])
 
   const openCommandPalette = useCallback(() => {
     setCmdOpen(true)
@@ -517,12 +540,20 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-amber-900/30 bg-navy-950 text-slate-300 transition-transform lg:static lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-amber-900/30 bg-navy-950 text-slate-300 transition-all duration-200 lg:static lg:translate-x-0 ${
+          sidebarCollapsed ? "lg:w-[72px]" : "lg:w-64"
+        } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className="flex h-16 items-center justify-between border-b border-amber-900/30 px-4">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <div
+          className={`flex h-16 items-center justify-between border-b border-amber-900/30 px-4 ${
+            sidebarCollapsed ? "lg:justify-center lg:px-2" : ""
+          }`}
+        >
+          <div
+            className={`flex min-w-0 items-center gap-2.5 ${
+              sidebarCollapsed ? "lg:justify-center lg:gap-0" : ""
+            }`}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/assets/logot-transparent.png"
@@ -535,7 +566,9 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 }
               }}
             />
-            <div className="min-w-0 leading-tight">
+            <div
+              className={`min-w-0 leading-tight ${sidebarCollapsed ? "lg:hidden" : ""}`}
+            >
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-black tracking-tight text-white">
                   Tidy<span className="text-amber-500">Flow</span>
@@ -554,14 +587,21 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           </button>
         </div>
 
-        <div className="flex items-center justify-between border-b border-amber-900/30 bg-navy-900/80 px-4 py-2 font-mono text-[11px]">
-          <div className="flex items-center gap-1.5" title={
-            liveStatus === "live"
-              ? "Realtime connected"
-              : liveStatus === "connecting"
-                ? "Connecting…"
-                : "Realtime offline — polling"
-          }>
+        <div
+          className={`flex items-center justify-between border-b border-amber-900/30 bg-navy-900/80 px-4 py-2 font-mono text-[11px] ${
+            sidebarCollapsed ? "lg:hidden" : ""
+          }`}
+        >
+          <div
+            className="flex items-center gap-1.5"
+            title={
+              liveStatus === "live"
+                ? "Realtime connected"
+                : liveStatus === "connecting"
+                  ? "Connecting…"
+                  : "Realtime offline — polling"
+            }
+          >
             <span
               className={`h-2 w-2 rounded-full ${
                 liveStatus === "live"
@@ -580,10 +620,18 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           </span>
         </div>
 
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4 text-xs font-medium">
+        <nav
+          className={`flex-1 space-y-5 overflow-y-auto px-3 py-4 text-xs font-medium ${
+            sidebarCollapsed ? "lg:space-y-1 lg:px-2" : ""
+          }`}
+        >
           {grouped.map((group) => (
             <div key={group.id}>
-              <div className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              <div
+                className={`mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 ${
+                  sidebarCollapsed ? "lg:hidden" : ""
+                }`}
+              >
                 {group.label}
               </div>
               <div className="space-y-0.5">
@@ -594,8 +642,11 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                     <Link
                       key={item.page}
                       href={to}
+                      title={item.name}
                       onClick={() => setSidebarOpen(false)}
                       className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition ${
+                        sidebarCollapsed ? "lg:justify-center lg:gap-0 lg:px-2" : ""
+                      } ${
                         active
                           ? "bg-amber-600 font-bold text-white"
                           : "text-slate-300 hover:bg-navy-900 hover:text-white"
@@ -605,7 +656,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                         size={16}
                         className={active ? "text-white" : "text-slate-400"}
                       />
-                      <span>{item.name}</span>
+                      <span className={sidebarCollapsed ? "lg:hidden" : ""}>{item.name}</span>
                     </Link>
                   )
                 })}
@@ -614,8 +665,16 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
           ))}
         </nav>
 
-        <div className="flex items-center justify-between gap-2 border-t border-amber-900/30 p-3">
-          <div className="flex min-w-0 items-center gap-2">
+        <div
+          className={`flex items-center justify-between gap-2 border-t border-amber-900/30 p-3 ${
+            sidebarCollapsed ? "lg:flex-col lg:items-center" : ""
+          }`}
+        >
+          <div
+            className={`flex min-w-0 items-center gap-2 ${
+              sidebarCollapsed ? "lg:justify-center lg:gap-0" : ""
+            }`}
+          >
             <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded border border-navy-700 bg-navy-800 text-xs font-bold text-amber-400">
               {user?.profileImage ? (
                 <img src={user.profileImage} alt="" className="h-full w-full object-cover" />
@@ -623,24 +682,46 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
                 initials
               )}
             </div>
-            <div className="min-w-0">
+            <div className={`min-w-0 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <p className="truncate text-xs font-bold text-white">{displayName}</p>
               <p className="truncate font-mono text-[10px] text-slate-400">{companySlug}</p>
             </div>
           </div>
-          <button
-            onClick={toggleTheme}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-amber-400"
-            title="Toggle theme"
+          <div
+            className={`flex items-center gap-1 ${
+              sidebarCollapsed ? "lg:flex-col" : ""
+            }`}
           >
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              className="hidden rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-amber-400 lg:inline-flex"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+            <button
+              onClick={toggleTheme}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-amber-400"
+              title="Toggle theme"
+            >
+              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+          </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="z-20 flex h-16 flex-shrink-0 items-center justify-between border-b border-control-border bg-white px-4 dark:border-amber-900/30 dark:bg-control-darkCard sm:px-6">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={toggleSidebarCollapsed}
+              className="hidden rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-amber-700 lg:inline-flex dark:hover:bg-navy-900 dark:hover:text-amber-400"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+            </button>
             <button
               className="rounded-md p-2 text-slate-500 lg:hidden"
               onClick={() => setSidebarOpen(true)}
