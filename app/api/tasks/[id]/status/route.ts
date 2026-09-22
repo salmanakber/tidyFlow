@@ -123,6 +123,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
           approvedByUserId: tokenUser.userId,
         }).catch(() => {});
       }
+      // Auto-ask client for feedback (uses SystemSetting email + track/review link)
+      const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
+      ensureAndSendClientFeedbackEmail(id).catch((err) =>
+        console.warn('[Feedback] email failed:', err)
+      );
       invalidateAIActivityCache(task.companyId).catch(() => {});
     }
 

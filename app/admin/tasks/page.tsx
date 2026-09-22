@@ -156,15 +156,29 @@ function TasksContent() {
         setStatusFilter("unassigned")
       }
       router.replace(window.location.pathname + "?status=unassigned", { scroll: false })
-    } else if (id && tasks.length) {
+    } else if (id) {
       const found = tasks.find((t) => String(t.id) === id)
       if (found) {
         setSelected(found)
         setDrawerOpen(true)
         router.replace(window.location.pathname, { scroll: false })
+      } else if (!loading) {
+        // Deep-link from Clients / booking approve — fetch even if not on this page
+        const token = localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+        axios
+          .get(`/api/tasks/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then((res) => {
+            const task = res.data?.data?.task || res.data?.data
+            if (task?.id) {
+              setSelected(task)
+              setDrawerOpen(true)
+              router.replace(window.location.pathname, { scroll: false })
+            }
+          })
+          .catch(() => {})
       }
     }
-  }, [searchParams, tasks, router, setStatusFilter])
+  }, [searchParams, tasks, router, setStatusFilter, loading])
 
   const stats = useMemo(
     () => ({

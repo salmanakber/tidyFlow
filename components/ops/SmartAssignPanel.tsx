@@ -9,6 +9,11 @@ import {
 } from "@/lib/ops-ai"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 
+function formatMetersLabel(meters: number) {
+  if (meters < 1000) return `${Math.round(meters)}m`
+  return `${(meters / 1000).toFixed(1)}km`
+}
+
 export default function SmartAssignPanel({
   taskId,
   propertyId,
@@ -166,7 +171,7 @@ export default function SmartAssignPanel({
             <div className="mt-2 flex flex-wrap gap-2 font-mono text-[10px] text-slate-400">
               {best.distance != null && (
                 <span className="inline-flex items-center gap-0.5">
-                  <MapPin size={9} /> {Number(best.distance).toFixed(1)} km
+                  <MapPin size={9} /> {formatMetersLabel(Number(best.distance))}
                 </span>
               )}
               {best.qualityScore != null && (
@@ -221,7 +226,7 @@ export default function SmartAssignPanel({
                         <span>Score {Math.round(r.score)}</span>
                         {r.distance != null && (
                           <span className="inline-flex items-center gap-0.5">
-                            <MapPin size={9} /> {Number(r.distance).toFixed(1)} km
+                            <MapPin size={9} /> {formatMetersLabel(Number(r.distance))}
                           </span>
                         )}
                       </div>

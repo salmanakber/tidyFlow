@@ -94,7 +94,8 @@ export async function GET(request: NextRequest) {
         where,
         skip,
         take: limit,
-        orderBy: [{ scheduledDate: 'asc' }, { id: 'asc' }],
+        // Newest created first so booking-converted jobs surface at the top
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
         property: {
           select: {

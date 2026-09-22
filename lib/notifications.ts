@@ -30,12 +30,13 @@ export async function createNotification(input: CreateNotificationInput) {
     },
   });
 
-  // Push via Expo — one delivery per user (most recently updated device)
+  // Push via Expo to all active device tokens for this user (company-scope notifs hit manager devices)
   try {
     const tokens = await prisma.deviceToken.findMany({
       where: { userId: input.userId, isActive: true, expoPushToken: { not: null } },
       select: { expoPushToken: true, updatedAt: true },
       orderBy: { updatedAt: 'desc' },
+      take: 8,
     });
     const seen = new Set<string>();
     const pushTokens: string[] = [];
@@ -44,10 +45,14 @@ export async function createNotification(input: CreateNotificationInput) {
       if (!token || seen.has(token)) continue;
       seen.add(token);
       pushTokens.push(token);
-      break; // single active device per user avoids duplicate pushes
     }
     if (pushTokens.length > 0) {
-      await sendExpoPush(pushTokens, input.title, input.message, input.metadata);
+      await sendExpoPush(pushTokens, input.title, input.message, {
+        ...(input.metadata || {}),
+        screenRoute: input.screenRoute,
+        screenParams: input.screenParams,
+        type: input.type,
+      });
     }
   } catch (err) {
     console.warn('Push notification failed:', err);

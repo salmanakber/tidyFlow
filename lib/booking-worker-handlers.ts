@@ -112,10 +112,18 @@ export async function notifyBookingLifecycle(opts: {
   requestedStart: Date
   kind: "confirmation" | "approved"
 }) {
-  await enqueueBookingEmail({
+  const job: BookingEmailJob = {
     bookingRequestId: opts.bookingRequestId,
     kind: opts.kind,
-  })
+  }
+  // Always send confirmation/approved immediately via SystemSetting email providers
+  // (queue alone fails silently when the automation worker is not running)
+  try {
+    await handleBookingClientEmail(job)
+  } catch (err) {
+    console.warn("[Booking] Immediate lifecycle email failed:", err)
+    await enqueueBookingEmail(job).catch(() => {})
+  }
   if (opts.kind === "confirmation" || opts.kind === "approved") {
     await scheduleBookingReminders(opts.bookingRequestId, opts.requestedStart)
   }

@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { Suspense, useEffect, useState } from "react"
+import { useParams, useSearchParams } from "next/navigation"
 import { tidyflowMarketingUrl } from "@/lib/booking-widget"
 
 type TrackData = {
@@ -11,6 +11,11 @@ type TrackData = {
   address?: string | null
   requestedStart: string
   status: string
+  taskStatus?: string | null
+  canLeaveFeedback?: boolean
+  feedbackSubmitted?: boolean
+  feedbackRating?: number | null
+  reviewToken?: string | null
   branding: {
     logoUrl: string | null
     primary: string
@@ -19,8 +24,15 @@ type TrackData = {
   }
 }
 
-function statusCopy(status: string) {
+function statusCopy(status: string, taskStatus?: string | null) {
   const s = status.toLowerCase()
+  const ts = String(taskStatus || "").toUpperCase()
+  if (["COMPLETED", "APPROVED", "ARCHIVED"].includes(ts)) {
+    return { label: "Completed", hint: "Thanks — we'd love your feedback below." }
+  }
+  if (["SUBMITTED", "QA_REVIEW"].includes(ts)) {
+    return { label: "In review", hint: "The team is reviewing the completed clean." }
+  }
   if (s === "converted" || s === "approved")
     return { label: "Confirmed", hint: "Your appointment is on the calendar." }
   if (s === "pending")
@@ -32,12 +44,19 @@ function statusCopy(status: string) {
   return { label: status, hint: "" }
 }
 
-export default function BookingTrackPage() {
+function TrackContent() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const token = typeof params?.token === "string" ? params.token : ""
+  const wantFeedback = searchParams?.get("feedback") === "1"
   const [data, setData] = useState<TrackData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [rating, setRating] = useState(0)
+  const [comment, setComment] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [feedbackDone, setFeedbackDone] = useState(false)
+  const [feedbackMsg, setFeedbackMsg] = useState("")
 
   useEffect(() => {
     if (!token) return
@@ -52,7 +71,10 @@ export default function BookingTrackPage() {
           setError(json?.message || "Booking not found")
           return
         }
-        if (!cancelled) setData(json.data)
+        if (!cancelled) {
+          setData(json.data)
+          if (json.data?.feedbackSubmitted) setFeedbackDone(true)
+        }
       } catch {
         if (!cancelled) setError("Could not load booking")
       } finally {
@@ -63,6 +85,39 @@ export default function BookingTrackPage() {
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => {
+    if (!wantFeedback || !data?.canLeaveFeedback) return
+    const el = document.getElementById("feedback-panel")
+    el?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }, [wantFeedback, data?.canLeaveFeedback])
+
+  const submitFeedback = async () => {
+    if (!data?.reviewToken || rating < 1 || submitting) return
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/reviews/${data.reviewToken}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating,
+          comment,
+          clientName: data.guestName,
+        }),
+      })
+      const json = await res.json()
+      if (json?.success) {
+        setFeedbackDone(true)
+        setFeedbackMsg(json.data?.message || "Thank you for your feedback!")
+      } else {
+        setError(json?.message || "Could not submit feedback")
+      }
+    } catch {
+      setError("Could not submit feedback")
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -84,7 +139,7 @@ export default function BookingTrackPage() {
   }
 
   const b = data.branding
-  const st = statusCopy(data.status)
+  const st = statusCopy(data.status, data.taskStatus)
   const when = new Date(data.requestedStart).toLocaleString(undefined, {
     weekday: "long",
     month: "long",
@@ -92,6 +147,7 @@ export default function BookingTrackPage() {
     hour: "numeric",
     minute: "2-digit",
   })
+  const showFeedback = data.canLeaveFeedback && !feedbackDone
 
   return (
     <div
@@ -174,6 +230,83 @@ export default function BookingTrackPage() {
               </div>
             </dl>
           </div>
+
+          {(showFeedback || feedbackDone) && (
+            <div
+              id="feedback-panel"
+              className="border-t border-slate-100 bg-white px-7 py-7"
+            >
+              {feedbackDone ? (
+                <div className="text-center">
+                  <p
+                    className="text-2xl"
+                    style={{
+                      fontFamily: "Cormorant Garamond, Georgia, serif",
+                      color: b.primary,
+                    }}
+                  >
+                    Thank you
+                  </p>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {feedbackMsg ||
+                      (data.feedbackRating
+                        ? `You rated this ${data.feedbackRating}/5.`
+                        : "Your feedback was received.")}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-[10px] font-bold tracking-[0.16em] text-slate-400 uppercase">
+                    Your feedback
+                  </p>
+                  <h2
+                    className="mt-1 text-2xl"
+                    style={{
+                      fontFamily: "Cormorant Garamond, Georgia, serif",
+                      color: b.primary,
+                    }}
+                  >
+                    How was your cleaning?
+                  </h2>
+                  <div className="mt-4 flex justify-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setRating(star)}
+                        className="text-3xl transition-transform hover:scale-110"
+                        style={{
+                          color: star <= rating ? b.accent : "#d4d4d8",
+                        }}
+                        aria-label={`${star} star`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    className="mt-4 w-full rounded-xl border border-slate-200 p-3 text-sm focus:outline-none focus:ring-2"
+                    placeholder="Tell us about your experience (optional)"
+                    rows={3}
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={submitFeedback}
+                    disabled={rating < 1 || submitting}
+                    className="mt-4 w-full rounded-full py-3 text-sm font-bold text-white disabled:opacity-50"
+                    style={{ background: b.accent }}
+                  >
+                    {submitting ? "Submitting…" : "Submit feedback"}
+                  </button>
+                  <p className="mt-3 text-center text-[11px] text-slate-400">
+                    4–5 stars may be invited to leave a public review.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mt-8 flex flex-col items-center gap-2">
@@ -192,5 +325,19 @@ export default function BookingTrackPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function BookingTrackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0a1520]">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-[#c4a574]" />
+        </div>
+      }
+    >
+      <TrackContent />
+    </Suspense>
   )
 }

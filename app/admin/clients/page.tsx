@@ -1,9 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, Suspense, type ReactNode } from "react"
+import { useRouter } from "next/navigation"
 import AdminLayout from "@/components/AdminLayout"
 import { adminGet, adminPost, adminPatch, formatDate } from "@/lib/admin-session"
 import { useCurrency } from "@/contexts/CurrencyContext"
+import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { useUrlQueryState } from "@/hooks/useUrlQueryState"
 import {
   OpsPageHeader,
@@ -27,6 +29,7 @@ import {
 } from "@/components/ops/OpsForm"
 import {
   Check,
+  ExternalLink,
   Loader2,
   Plus,
   Search,
@@ -88,6 +91,8 @@ export default function ClientsPage() {
 }
 
 function Content() {
+  const router = useRouter()
+  const { href: wsHref } = useCompanyWorkspace()
   const { formatMoney } = useCurrency()
   const [tab, setTab] = useUrlQueryState("tab", "clients")
   const [clients, setClients] = useState<ClientRow[]>([])
@@ -97,6 +102,7 @@ function Content() {
   const [bookingsLoading, setBookingsLoading] = useState(false)
   const [error, setError] = useState("")
   const [toast, setToast] = useState("")
+  const [approvedTaskId, setApprovedTaskId] = useState<number | null>(null)
   const [query, setQuery] = useState("")
   const [queryDebounced, setQueryDebounced] = useState("")
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -111,6 +117,10 @@ function Content() {
     phone: "",
     notes: "",
   })
+
+  const openPlannedTask = (taskId: number) => {
+    router.push(`${wsHref("jobs")}?task=${taskId}`)
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setQueryDebounced(query.trim()), 280)
@@ -142,12 +152,22 @@ function Content() {
   const loadBookings = useCallback(async () => {
     try {
       setBookingsLoading(true)
-      const res = await adminGet("/api/booking-requests?status=pending")
-      if (res.data?.success) {
-        setBookings(Array.isArray(res.data.data) ? res.data.data : [])
-      } else {
-        setBookings([])
+      const [pendingRes, convertedRes] = await Promise.all([
+        adminGet("/api/booking-requests?status=pending"),
+        adminGet("/api/booking-requests?status=converted"),
+      ])
+      const pending = Array.isArray(pendingRes.data?.data) ? pendingRes.data.data : []
+      const converted = Array.isArray(convertedRes.data?.data)
+        ? convertedRes.data.data.slice(0, 40)
+        : []
+      const seen = new Set<number>()
+      const merged: BookingRequest[] = []
+      for (const b of [...pending, ...converted]) {
+        if (seen.has(b.id)) continue
+        seen.add(b.id)
+        merged.push(b)
       }
+      setBookings(merged)
     } catch {
       setBookings([])
     } finally {
@@ -209,7 +229,13 @@ function Content() {
       setError("")
       const res = await adminPatch("/api/booking-requests", { id, action })
       if (res.data?.success) {
-        setToast(action === "approve" ? "Booking approved" : "Booking rejected")
+        const taskId = Number(res.data?.data?.taskId) || null
+        if (action === "approve" && taskId) {
+          setApprovedTaskId(taskId)
+          setToast(`Booking approved · planned task #${taskId} created`)
+        } else {
+          setToast(action === "approve" ? "Booking approved" : "Booking rejected")
+        }
         await Promise.all([loadBookings(), loadClients()])
       } else setError(res.data?.message || "Action failed")
     } catch (e: any) {
@@ -225,7 +251,9 @@ function Content() {
     if (selectedId) await openDetail(selectedId)
   }
 
-  const pendingCount = summary?.pendingBookings ?? bookings.length
+  const pendingCount =
+    summary?.pendingBookings ??
+    bookings.filter((b) => String(b.status).toLowerCase() === "pending").length
 
   const filteredClients = useMemo(() => clients, [clients])
 
@@ -245,7 +273,18 @@ function Content() {
         }
       />
 
-      {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+      {toast && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <OpsFlash ok text={toast} onClose={() => setToast("")} />
+          </div>
+          {approvedTaskId ? (
+            <OpsPrimaryButton onClick={() => openPlannedTask(approvedTaskId)}>
+              <ExternalLink size={14} /> Open planned task
+            </OpsPrimaryButton>
+          ) : null}
+        </div>
+      )}
       {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
@@ -348,7 +387,7 @@ function Content() {
         ) : bookingsLoading ? (
           <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
         ) : bookings.length === 0 ? (
-          <OpsEmpty message="No pending booking requests" />
+          <OpsEmpty message="No booking requests yet" />
         ) : (
           <table className="w-full text-left">
             <thead className="border-b border-control-border bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
@@ -386,26 +425,41 @@ function Content() {
                     <OpsBadge status={b.status} />
                   </td>
                   <td className={`${opsTd} text-right`}>
-                    <div className="inline-flex gap-1">
-                      <OpsRowAction
-                        tone="emerald"
-                        disabled={busyId === b.id}
-                        onClick={() => bookingAction(b.id, "approve")}
-                      >
-                        {busyId === b.id ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <Check size={12} />
-                        )}
-                        Approve
-                      </OpsRowAction>
-                      <OpsRowAction
-                        tone="danger"
-                        disabled={busyId === b.id}
-                        onClick={() => bookingAction(b.id, "reject")}
-                      >
-                        <X size={12} /> Reject
-                      </OpsRowAction>
+                    <div className="inline-flex flex-wrap justify-end gap-1">
+                      {(b.task?.id ||
+                        String(b.status).toLowerCase() === "converted") &&
+                      (b.task?.id || (b as any).taskId) ? (
+                        <OpsRowAction
+                          onClick={() =>
+                            openPlannedTask(Number(b.task?.id || (b as any).taskId))
+                          }
+                        >
+                          <ExternalLink size={12} /> Open task
+                        </OpsRowAction>
+                      ) : null}
+                      {String(b.status).toLowerCase() === "pending" ? (
+                        <>
+                          <OpsRowAction
+                            tone="emerald"
+                            disabled={busyId === b.id}
+                            onClick={() => bookingAction(b.id, "approve")}
+                          >
+                            {busyId === b.id ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <Check size={12} />
+                            )}
+                            Approve
+                          </OpsRowAction>
+                          <OpsRowAction
+                            tone="danger"
+                            disabled={busyId === b.id}
+                            onClick={() => bookingAction(b.id, "reject")}
+                          >
+                            <X size={12} /> Reject
+                          </OpsRowAction>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -551,6 +605,7 @@ function Content() {
                       <th className="pb-2 font-bold">Status</th>
                       <th className="pb-2 font-bold">Date</th>
                       <th className="pb-2 text-right font-bold">Amount</th>
+                      <th className="pb-2 text-right font-bold"> </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-navy-900">
@@ -567,6 +622,11 @@ function Content() {
                           {t.budget != null && t.budget !== ""
                             ? formatMoney(Number(t.budget))
                             : "—"}
+                        </td>
+                        <td className="py-2 text-right">
+                          <OpsRowAction onClick={() => openPlannedTask(Number(t.id))}>
+                            <ExternalLink size={12} /> Open
+                          </OpsRowAction>
                         </td>
                       </tr>
                     ))}

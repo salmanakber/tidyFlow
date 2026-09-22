@@ -143,6 +143,8 @@ export async function POST(request: NextRequest) {
 
   if (existing) {
     const reviewLink = buildReviewLink(existing.token);
+    const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
+    await ensureAndSendClientFeedbackEmail(task.id).catch(() => {});
     if (clientPhone) {
       await sendSMS({
         to: clientPhone,
@@ -169,6 +171,10 @@ export async function POST(request: NextRequest) {
   });
 
   const reviewLink = buildReviewLink(token);
+
+  // Prefer email via SystemSetting providers; SMS remains optional
+  const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
+  await ensureAndSendClientFeedbackEmail(task.id).catch(() => {});
 
   if (clientPhone) {
     await sendSMS({

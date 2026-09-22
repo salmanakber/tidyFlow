@@ -123,6 +123,22 @@ async function scoreCleanersForContext(ctx: {
   dayEnd.setHours(23, 59, 59, 999);
 
   const cleanerIds = cleaners.map((c) => c.id);
+
+  // Same leave gate as mobile CreateTask / TaskDetail — skip approved leave covering the day
+  const onLeaveRows =
+    cleanerIds.length > 0
+      ? await prisma.leaveRequest.findMany({
+          where: {
+            userId: { in: cleanerIds },
+            status: 'approved',
+            startDate: { lte: dayEnd },
+            endDate: { gte: dayStart },
+          },
+          select: { userId: true },
+        })
+      : [];
+  const onLeaveSet = new Set(onLeaveRows.map((r) => r.userId));
+
   const recentLocationLogs =
     cleanerIds.length > 0
       ? await prisma.locationLog.findMany({
@@ -182,6 +198,8 @@ async function scoreCleanersForContext(ctx: {
   const scored: CleanerRecommendation[] = [];
 
   for (const cleaner of cleaners) {
+    if (onLeaveSet.has(cleaner.id)) continue;
+
     const profile = cleaner.cleanerAIProfile;
     const cleanerSkillIds = cleaner.cleanerSkills.map((cs) => cs.skillId);
     const hasRequiredSkills =
@@ -192,6 +210,19 @@ async function scoreCleanersForContext(ctx: {
 
     const dayAvailability = cleaner.availability.find((a) => a.dayOfWeek === dayOfWeek);
     if (dayAvailability && !dayAvailability.isAvailable) continue;
+
+    // If weekly hours are set, scheduled time must fall inside the window (mobile parity)
+    if (dayAvailability?.isAvailable && dayAvailability.startTime && dayAvailability.endTime) {
+      const scheduledMins =
+        scheduledDate.getHours() * 60 + scheduledDate.getMinutes();
+      const [sh, sm] = dayAvailability.startTime.split(':').map(Number);
+      const [eh, em] = dayAvailability.endTime.split(':').map(Number);
+      const startMins = (sh || 0) * 60 + (sm || 0);
+      const endMins = (eh || 0) * 60 + (em || 0);
+      if (Number.isFinite(startMins) && Number.isFinite(endMins) && endMins > startMins) {
+        if (scheduledMins < startMins || scheduledMins > endMins) continue;
+      }
+    }
 
     const existingAssignments = await prisma.taskAssignment.count({
       where: {
@@ -214,6 +245,9 @@ async function scoreCleanersForContext(ctx: {
         locationKnown = true;
       }
     }
+
+    // Soft distance gate: still rank far cleaners lower; skip only when absurdly far with known GPS
+    if (distance != null && distance > 80000) continue;
 
     const qualityScore = profile?.qualityScore ?? 70;
     const punctuality = profile?.punctualityScore ?? 75;

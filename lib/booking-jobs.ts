@@ -28,7 +28,23 @@ export async function enqueueBookingEmail(job: BookingEmailJob, delayMs = 0) {
     return true
   } catch (error) {
     if (isRedisUnavailable(error)) {
-      console.warn("[Booking] Redis unavailable — email job skipped")
+      // Immediate send via SystemSetting email (SMTP/Brevo/SES/SendGrid) when Redis is down
+      if (delayMs <= 0) {
+        try {
+          const { handleBookingClientEmail } = await import(
+            "@/lib/booking-worker-handlers"
+          )
+          await handleBookingClientEmail(job)
+          console.warn(
+            "[Booking] Redis unavailable — sent booking email immediately via sendEmail"
+          )
+          return true
+        } catch (sendErr) {
+          console.warn("[Booking] Immediate email fallback failed:", sendErr)
+          return false
+        }
+      }
+      console.warn("[Booking] Redis unavailable — delayed email job skipped")
       return false
     }
     throw error

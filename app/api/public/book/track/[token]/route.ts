@@ -3,6 +3,14 @@ import prisma from "@/lib/prisma"
 
 type Ctx = { params: Promise<{ token: string }> }
 
+const FEEDBACK_OK = new Set([
+  "SUBMITTED",
+  "QA_REVIEW",
+  "APPROVED",
+  "COMPLETED",
+  "ARCHIVED",
+])
+
 export async function GET(_request: NextRequest, context: Ctx) {
   const { token } = await context.params
   if (!token || token.length < 16) {
@@ -26,7 +34,17 @@ export async function GET(_request: NextRequest, context: Ctx) {
         },
       },
       property: { select: { address: true } },
-      task: { select: { id: true, status: true, title: true } },
+      task: {
+        select: {
+          id: true,
+          status: true,
+          title: true,
+          reviewRequests: {
+            orderBy: { createdAt: "desc" },
+            take: 5,
+          },
+        },
+      },
     },
   })
 
@@ -35,6 +53,43 @@ export async function GET(_request: NextRequest, context: Ctx) {
       { success: false, message: "Booking not found" },
       { status: 404 }
     )
+  }
+
+  const taskStatus = booking.task?.status || null
+  const canLeaveFeedback = !!(
+    taskStatus && FEEDBACK_OK.has(String(taskStatus).toUpperCase())
+  )
+
+  let reviewToken: string | null = null
+  let feedbackSubmitted = false
+  let feedbackRating: number | null = null
+
+  if (booking.task) {
+    const active = booking.task.reviewRequests.find(
+      (r) => !r.submittedAt && (!r.expiresAt || r.expiresAt > new Date())
+    )
+    const submitted = booking.task.reviewRequests.find((r) => r.submittedAt)
+    if (submitted) {
+      feedbackSubmitted = true
+      feedbackRating = submitted.rating
+    }
+    if (active) {
+      reviewToken = active.token
+    } else if (canLeaveFeedback && !feedbackSubmitted) {
+      // Lazily create so track page can collect feedback even if email was missed
+      const crypto = await import("crypto")
+      const newToken = crypto.randomBytes(24).toString("hex")
+      const expiresAt = new Date()
+      expiresAt.setDate(expiresAt.getDate() + 14)
+      const created = await prisma.reviewRequest.create({
+        data: {
+          taskId: booking.task.id,
+          token: newToken,
+          expiresAt,
+        },
+      })
+      reviewToken = created.token
+    }
   }
 
   return NextResponse.json({
@@ -48,7 +103,11 @@ export async function GET(_request: NextRequest, context: Ctx) {
       requestedEnd: booking.requestedEnd,
       status: booking.status,
       source: booking.source,
-      taskStatus: booking.task?.status || null,
+      taskStatus,
+      canLeaveFeedback: canLeaveFeedback && !feedbackSubmitted && !!reviewToken,
+      feedbackSubmitted,
+      feedbackRating,
+      reviewToken,
       branding: {
         logoUrl: booking.widgetConfig?.logoUrl || null,
         primary: booking.widgetConfig?.primaryColor || "#0B1F33",

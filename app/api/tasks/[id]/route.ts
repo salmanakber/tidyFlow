@@ -447,6 +447,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
           approvedByUserId: tokenUser.userId,
         }).catch(() => {});
       }
+      const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
+      ensureAndSendClientFeedbackEmail(id).catch((err) =>
+        console.warn('[Feedback] email failed:', err)
+      );
       invalidateAIActivityCache(task.companyId).catch(() => {});
     }
 
