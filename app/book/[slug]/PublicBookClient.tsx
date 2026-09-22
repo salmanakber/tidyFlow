@@ -1,12 +1,15 @@
 "use client"
 
+/**
+ * Public booking — link + embed share this surface.
+ * High-class editorial layout: brand plane + booking atelier.
+ */
 import {
   useCallback,
   useEffect,
   useMemo,
   useState,
   type CSSProperties,
-  type FormEvent,
 } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import {
@@ -14,19 +17,11 @@ import {
   type BookingFormField,
 } from "@/lib/booking-widget"
 
-/* ─── Types ─────────────────────────────────────────────────────────────── */
-
 type Theme = {
   primary: string
   accent: string
   background: string
   text: string
-}
-
-type ServiceOption = {
-  id: string
-  label: string
-  durationMinutes: number
 }
 
 type PublicConfig = {
@@ -38,72 +33,25 @@ type PublicConfig = {
   logoUrl: string | null
   theme: Theme
   formFields: BookingFormField[]
-  serviceOptions: ServiceOption[]
+  serviceOptions: Array<{ id: string; label: string; durationMinutes: number }>
   showCalendar: boolean
 }
 
-type MonthDay = { date: string; available: boolean; slotCount: number }
+type DayInfo = { date: string; available: boolean; slotCount: number }
 type Slot = { start: string; end: string; label: string }
-
-type Step = "schedule" | "details" | "success"
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-]
-
-/* ─── Helpers ───────────────────────────────────────────────────────────── */
 
 function pad(n: number) {
   return String(n).padStart(2, "0")
 }
 
-function dateKey(y: number, m: number, d: number) {
-  return `${y}-${pad(m)}-${pad(d)}`
-}
-
-function parseDateKey(key: string) {
-  const [y, m, d] = key.split("-").map(Number)
-  return { y, m, d }
-}
-
-function formatLongDate(key: string) {
-  const { y, m, d } = parseDateKey(key)
-  const dt = new Date(y, m - 1, d)
-  return dt.toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  })
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() || "")
-    .join("")
-}
-
 function hexToRgb(hex: string): [number, number, number] | null {
   const h = hex.replace("#", "").trim()
   if (h.length === 3) {
-    const r = parseInt(h[0] + h[0], 16)
-    const g = parseInt(h[1] + h[1], 16)
-    const b = parseInt(h[2] + h[2], 16)
-    return [r, g, b]
+    return [
+      parseInt(h[0] + h[0], 16),
+      parseInt(h[1] + h[1], 16),
+      parseInt(h[2] + h[2], 16),
+    ]
   }
   if (h.length === 6) {
     return [
@@ -115,198 +63,99 @@ function hexToRgb(hex: string): [number, number, number] | null {
   return null
 }
 
-function withAlpha(hex: string, alpha: number) {
+function rgba(hex: string, a: number) {
   const rgb = hexToRgb(hex)
   if (!rgb) return hex
-  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`
 }
 
-function fieldInputType(t: BookingFormField["type"]) {
-  if (t === "email") return "email"
-  if (t === "tel") return "tel"
-  if (t === "number") return "number"
-  return "text"
-}
-
-/* ─── Subcomponents ─────────────────────────────────────────────────────── */
-
-function TidyFlowMark({ size = 18 }: { size?: number }) {
+function TidyFlowWordmark({ ink }: { ink: string }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden
+    <a
+      href={tidyflowMarketingUrl()}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group inline-flex items-center gap-2.5 rounded-full border px-3.5 py-2 transition hover:-translate-y-0.5"
+      style={{
+        borderColor: rgba(ink, 0.12),
+        background: rgba("#ffffff", 0.78),
+        boxShadow: `0 8px 30px ${rgba(ink, 0.06)}`,
+      }}
     >
-      <rect width="32" height="32" rx="8" fill="currentColor" opacity="0.12" />
-      <path
-        d="M8 11.5h16M16 11.5v13"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/assets/logot-transparent.png"
+        alt="TidyFlow"
+        width={28}
+        height={28}
+        className="h-7 w-7 object-contain"
       />
-      <circle cx="16" cy="8.5" r="1.6" fill="currentColor" />
-      <path
-        d="M11 22c1.2 2 2.8 3 5 3s3.8-1 5-3"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
+      <span className="text-[11px] tracking-[0.04em]" style={{ color: rgba(ink, 0.55) }}>
+        Powered by{" "}
+        <strong className="font-semibold" style={{ color: ink }}>
+          TidyFlow
+        </strong>
+      </span>
+    </a>
   )
 }
-
-function Spinner({ className = "" }: { className?: string }) {
-  return (
-    <div
-      className={`h-9 w-9 animate-spin rounded-full border-2 border-[var(--bk-primary)]/20 border-t-[var(--bk-primary)] ${className}`}
-      role="status"
-      aria-label="Loading"
-    />
-  )
-}
-
-function StepDots({
-  step,
-  showCalendar,
-  accent,
-}: {
-  step: Step
-  showCalendar: boolean
-  accent: string
-}) {
-  const items = showCalendar
-    ? [
-        { id: "schedule" as const, label: "Time" },
-        { id: "details" as const, label: "Details" },
-        { id: "success" as const, label: "Done" },
-      ]
-    : [
-        { id: "details" as const, label: "Details" },
-        { id: "success" as const, label: "Done" },
-      ]
-
-  const order = items.map((i) => i.id)
-  const activeIdx = Math.max(0, order.indexOf(step === "schedule" ? "schedule" : step))
-
-  return (
-    <ol className="flex items-center gap-2" aria-label="Booking progress">
-      {items.map((item, i) => {
-        const done = i < activeIdx
-        const active = i === activeIdx
-        return (
-          <li key={item.id} className="flex items-center gap-2">
-            {i > 0 ? (
-              <span
-                className="hidden h-px w-6 sm:block"
-                style={{
-                  background: done || active
-                    ? accent
-                    : withAlpha("#0F172A", 0.12),
-                }}
-              />
-            ) : null}
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide transition-all duration-300 ${
-                active
-                  ? "text-[var(--bk-primary)]"
-                  : done
-                    ? "text-[var(--bk-accent)]"
-                    : "text-[var(--bk-text)]/40"
-              }`}
-              style={{
-                background: active
-                  ? withAlpha(accent, 0.14)
-                  : done
-                    ? withAlpha(accent, 0.08)
-                    : "transparent",
-              }}
-            >
-              <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
-                  active || done
-                    ? "bg-[var(--bk-primary)] text-white"
-                    : "bg-[var(--bk-text)]/10 text-[var(--bk-text)]/50"
-                }`}
-              >
-                {done ? "✓" : i + 1}
-              </span>
-              {item.label}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
-
-/* ─── Main page ─────────────────────────────────────────────────────────── */
 
 export default function PublicBookPage() {
   const params = useParams()
-  const searchParams = useSearchParams()
-  const slug = String(params?.slug || "")
-  const isEmbed = searchParams.get("embed") === "1"
+  const search = useSearchParams()
+  const slug = typeof params?.slug === "string" ? params.slug : ""
+  const isEmbed = search.get("embed") === "1"
 
   const [config, setConfig] = useState<PublicConfig | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-
-  const now = useMemo(() => new Date(), [])
-  const [viewYear, setViewYear] = useState(now.getFullYear())
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1)
-  const [monthDays, setMonthDays] = useState<MonthDay[]>([])
-  const [monthLoading, setMonthLoading] = useState(false)
-
+  const [error, setError] = useState<string | null>(null)
+  const [month, setMonth] = useState(() => {
+    const n = new Date()
+    return { year: n.getFullYear(), month: n.getMonth() + 1 }
+  })
+  const [days, setDays] = useState<DayInfo[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [slots, setSlots] = useState<Slot[]>([])
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null)
-
-  const [duration, setDuration] = useState(120)
   const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [step, setStep] = useState<Step>("schedule")
   const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState("")
-  const [mounted, setMounted] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [phase, setPhase] = useState<"when" | "details">("when")
+  const [ready, setReady] = useState(false)
+
+  const duration = useMemo(() => {
+    const svc = answers.serviceType
+    const match = config?.serviceOptions.find(
+      (s) => s.label === svc || s.id === svc
+    )
+    return match?.durationMinutes || 120
+  }, [answers.serviceType, config?.serviceOptions])
 
   useEffect(() => {
-    setMounted(true)
+    const t = requestAnimationFrame(() => setReady(true))
+    return () => cancelAnimationFrame(t)
   }, [])
 
-  /* Config fetch */
   useEffect(() => {
     if (!slug) return
     let cancelled = false
     ;(async () => {
       setLoading(true)
-      setLoadError(null)
       try {
         const res = await fetch(`/api/public/book/${encodeURIComponent(slug)}`)
         const json = await res.json()
-        if (!res.ok || !json.success) {
-          throw new Error(json.message || "Booking page not found")
+        if (!res.ok || !json?.success) {
+          setError(json?.message || "Booking unavailable")
+          return
         }
         if (cancelled) return
-        const data = json.data as PublicConfig
-        setConfig(data)
-        const defaultDur =
-          data.serviceOptions?.[0]?.durationMinutes || 120
-        setDuration(defaultDur)
-
-        const initial: Record<string, string> = {}
-        for (const f of data.formFields || []) {
-          initial[f.id] = ""
-        }
-        setAnswers(initial)
-
-        if (!data.showCalendar) {
-          setStep("details")
-        }
-      } catch (e: any) {
-        if (!cancelled) setLoadError(e?.message || "Unable to load booking page")
+        setConfig(json.data)
+        const svc = json.data.serviceOptions?.[0]?.label
+        if (svc) setAnswers((a) => ({ ...a, serviceType: a.serviceType || svc }))
+        if (!json.data.showCalendar) setPhase("details")
+      } catch {
+        if (!cancelled) setError("Could not load booking page")
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -316,65 +165,40 @@ export default function PublicBookPage() {
     }
   }, [slug])
 
-  /* Month availability */
-  const fetchMonth = useCallback(
-    async (year: number, month: number, dur: number) => {
-      if (!slug) return
-      setMonthLoading(true)
+  useEffect(() => {
+    if (!slug || !config?.showCalendar) return
+    let cancelled = false
+    ;(async () => {
       try {
-        const q = new URLSearchParams({
-          mode: "month",
-          year: String(year),
-          month: String(month),
-          duration: String(dur),
-        })
         const res = await fetch(
-          `/api/public/book/${encodeURIComponent(slug)}?${q}`
+          `/api/public/book/${encodeURIComponent(slug)}?mode=month&year=${month.year}&month=${month.month}&duration=${duration}`
         )
         const json = await res.json()
-        if (res.ok && json.success) {
-          setMonthDays(json.data?.days || [])
-        } else {
-          setMonthDays([])
-        }
+        if (!cancelled && json?.success) setDays(json.data.days || [])
       } catch {
-        setMonthDays([])
-      } finally {
-        setMonthLoading(false)
+        /* ignore */
       }
-    },
-    [slug]
-  )
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [slug, config?.showCalendar, month, duration])
 
   useEffect(() => {
-    if (!config?.showCalendar) return
-    fetchMonth(viewYear, viewMonth, duration)
-  }, [config, viewYear, viewMonth, duration, fetchMonth])
-
-  /* Day slots */
-  useEffect(() => {
-    if (!slug || !selectedDate || !config?.showCalendar) return
+    if (!selectedDate || !slug) {
+      setSlots([])
+      return
+    }
     let cancelled = false
     ;(async () => {
       setSlotsLoading(true)
       setSelectedSlot(null)
       try {
-        const q = new URLSearchParams({
-          mode: "slots",
-          date: selectedDate,
-          duration: String(duration),
-        })
         const res = await fetch(
-          `/api/public/book/${encodeURIComponent(slug)}?${q}`
+          `/api/public/book/${encodeURIComponent(slug)}?mode=slots&date=${selectedDate}&duration=${duration}`
         )
         const json = await res.json()
-        if (!cancelled && res.ok && json.success) {
-          setSlots(json.data?.slots || [])
-        } else if (!cancelled) {
-          setSlots([])
-        }
-      } catch {
-        if (!cancelled) setSlots([])
+        if (!cancelled && json?.success) setSlots(json.data.slots || [])
       } finally {
         if (!cancelled) setSlotsLoading(false)
       }
@@ -382,905 +206,650 @@ export default function PublicBookPage() {
     return () => {
       cancelled = true
     }
-  }, [slug, selectedDate, duration, config?.showCalendar])
+  }, [selectedDate, slug, duration])
 
-  /* Calendar grid cells */
+  const theme = config?.theme
+  const monthLabel = useMemo(
+    () =>
+      new Date(month.year, month.month - 1, 1).toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      }),
+    [month]
+  )
+
   const calendarCells = useMemo(() => {
-    const first = new Date(viewYear, viewMonth - 1, 1)
-    const startPad = first.getDay()
-    const daysInMonth = new Date(viewYear, viewMonth, 0).getDate()
-    const byDate = new Map(monthDays.map((d) => [d.date, d]))
-    const cells: Array<{
-      key: string
-      day: number | null
-      available: boolean
-      slotCount: number
-      isToday: boolean
-    }> = []
-
-    for (let i = 0; i < startPad; i++) {
-      cells.push({
-        key: `pad-${i}`,
-        day: null,
-        available: false,
-        slotCount: 0,
-        isToday: false,
-      })
-    }
-
-    const todayKey = dateKey(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      now.getDate()
-    )
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const key = dateKey(viewYear, viewMonth, d)
-      const info = byDate.get(key)
-      cells.push({
-        key,
-        day: d,
-        available: !!info?.available,
-        slotCount: info?.slotCount || 0,
-        isToday: key === todayKey,
-      })
+    const firstDow = new Date(month.year, month.month - 1, 1).getDay()
+    const dim = new Date(month.year, month.month, 0).getDate()
+    const cells: Array<DayInfo | null> = []
+    for (let i = 0; i < firstDow; i++) cells.push(null)
+    for (let d = 1; d <= dim; d++) {
+      const key = `${month.year}-${pad(month.month)}-${pad(d)}`
+      cells.push(
+        days.find((x) => x.date === key) || {
+          date: key,
+          available: false,
+          slotCount: 0,
+        }
+      )
     }
     return cells
-  }, [viewYear, viewMonth, monthDays, now])
+  }, [month, days])
 
-  const canPrevMonth = useMemo(() => {
-    const cur = new Date(now.getFullYear(), now.getMonth(), 1)
-    const view = new Date(viewYear, viewMonth - 1, 1)
-    return view > cur
-  }, [now, viewYear, viewMonth])
-
-  const shiftMonth = (delta: number) => {
-    let m = viewMonth + delta
-    let y = viewYear
-    if (m < 1) {
-      m = 12
-      y -= 1
-    } else if (m > 12) {
-      m = 1
-      y += 1
-    }
-    setViewYear(y)
-    setViewMonth(m)
-    setSelectedDate(null)
-    setSlots([])
-    setSelectedSlot(null)
-  }
-
-  const setAnswer = (id: string, value: string) => {
-    setAnswers((prev) => ({ ...prev, [id]: value }))
-    // Sync duration when service select changes
-    if (id === "serviceType" && config?.serviceOptions?.length) {
-      const match = config.serviceOptions.find(
-        (s) => s.label === value || s.id === value
-      )
-      if (match?.durationMinutes) {
-        setDuration(match.durationMinutes)
-        setSelectedSlot(null)
-      }
-    }
-  }
-
-  const validateForm = (): string | null => {
-    if (!config) return "Not ready"
-    if (config.showCalendar && !selectedSlot) {
-      return "Please choose a date and time"
-    }
-    for (const f of config.formFields) {
-      const v = (answers[f.id] || "").trim()
-      if (f.required && !v) return `${f.label} is required`
-      if (f.type === "email" && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
-        return "Please enter a valid email"
-      }
-    }
-    return null
-  }
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!config || submitting) return
-    const err = validateForm()
-    if (err) {
-      setSubmitError(err)
-      return
-    }
+  async function submit() {
+    if (!config || (!selectedSlot && config.showCalendar)) return
     setSubmitting(true)
-    setSubmitError(null)
+    setError(null)
     try {
-      const payload: Record<string, unknown> = {
-        ...answers,
-        answers,
-        name: answers.name || answers.guestName || "",
-        email: answers.email || "",
-        phone: answers.phone || "",
-        address: answers.address || "",
-        serviceType: answers.serviceType || "",
-        notes: answers.notes || "",
-        requestedStart: selectedSlot?.start || null,
-        source: isEmbed ? "embed" : "link",
-      }
       const res = await fetch(`/api/public/book/${encodeURIComponent(slug)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...answers,
+          requestedStart:
+            selectedSlot?.start || new Date().toISOString(),
+          source: isEmbed ? "embed" : "link",
+          answers,
+        }),
       })
       const json = await res.json()
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || "Could not submit booking")
+      if (!res.ok || !json?.success) {
+        setError(json?.message || "Could not submit booking")
+        return
       }
-      setSuccessMsg(
-        json.data?.message || config.successMessage || "Thanks! We’ll be in touch."
-      )
-      setStep("success")
-    } catch (err: any) {
-      setSubmitError(err?.message || "Something went wrong")
+      setDone(json.data?.message || config.successMessage)
+    } catch {
+      setError("Network error — please try again")
     } finally {
       setSubmitting(false)
     }
   }
 
-  /* Loading / error shells */
   if (loading) {
     return (
-      <div
-        className="bk-root flex min-h-screen items-center justify-center"
-        style={{ background: "#F7F4EF" }}
-      >
-        <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
-          <Spinner />
-          <p className="text-sm text-[#0F172A]/60">Loading booking…</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a1520]">
+        <div className="h-11 w-11 animate-spin rounded-full border-2 border-white/15 border-t-[#c4a574]" />
       </div>
     )
   }
 
-  if (loadError || !config) {
+  if ((error && !config) || !config || !theme) {
     return (
-      <div
-        className="bk-root flex min-h-screen items-center justify-center px-4"
-        style={{ background: "#F7F4EF" }}
-      >
-        <div className="max-w-md rounded-2xl border border-[#0B1F33]/10 bg-white/80 p-8 text-center shadow-sm backdrop-blur">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0B1F33]/5 text-[#0B1F33]">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M12 8v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-            </svg>
-          </div>
-          <h1 className="font-serif text-2xl font-semibold text-[#0B1F33]">
-            Page unavailable
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-[#0F172A]/65">
-            {loadError || "This booking link is offline or doesn’t exist."}
-          </p>
-        </div>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0a1520] px-6 text-center">
+        <p className="font-[family-name:var(--bk-display)] text-2xl text-white">
+          {error || "Booking unavailable"}
+        </p>
+        <TidyFlowWordmark ink="#c4a574" />
       </div>
     )
   }
 
-  const theme = config.theme
-  const cssVars: CSSProperties = {
+  const cssVars = {
     ["--bk-primary" as string]: theme.primary,
     ["--bk-accent" as string]: theme.accent,
     ["--bk-bg" as string]: theme.background,
     ["--bk-text" as string]: theme.text,
-  }
+    ["--bk-display" as string]: '"Cormorant Garamond", Georgia, serif',
+    ["--bk-body" as string]: '"Outfit", system-ui, sans-serif',
+  } as CSSProperties
 
-  const showHero = !isEmbed
-  const continueToDetails = () => {
-    if (!selectedSlot) {
-      setSubmitError("Please select a time slot")
-      return
-    }
-    setSubmitError(null)
-    setStep("details")
-  }
+  const selectionLabel = selectedSlot
+    ? new Date(selectedSlot.start).toLocaleString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : selectedDate
+      ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        })
+      : null
 
   return (
-    <div
-      className={`bk-root relative min-h-screen overflow-x-hidden text-[var(--bk-text)] transition-opacity duration-500 ${
-        mounted ? "opacity-100" : "opacity-0"
-      }`}
-      style={{
-        ...cssVars,
-        background: "var(--bk-bg)",
-        color: "var(--bk-text)",
-      }}
-    >
-      {/* Atmospheric background */}
-      <div
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-        aria-hidden
-      >
-        <div
-          className="absolute -left-24 -top-24 h-72 w-72 rounded-full blur-3xl"
-          style={{ background: withAlpha(theme.primary, 0.08) }}
-        />
-        <div
-          className="absolute -right-16 top-40 h-80 w-80 rounded-full blur-3xl"
-          style={{ background: withAlpha(theme.accent, 0.12) }}
-        />
-        <div
-          className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full blur-3xl"
-          style={{ background: withAlpha(theme.primary, 0.05) }}
-        />
-        <div
-          className="absolute inset-0 opacity-[0.035]"
-          style={{
-            backgroundImage:
-              "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
-          }}
-        />
-      </div>
+    <div style={cssVars} className={`bk-atelier ${ready ? "bk-ready" : ""}`}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Outfit:wght@300;400;500;600;700&display=swap');
+        .bk-atelier {
+          min-height: 100vh;
+          font-family: var(--bk-body);
+          color: var(--bk-text);
+          background:
+            radial-gradient(1200px 600px at 10% -10%, ${rgba(theme.accent, 0.18)}, transparent 55%),
+            radial-gradient(900px 500px at 100% 0%, ${rgba(theme.primary, 0.35)}, transparent 50%),
+            linear-gradient(165deg, ${theme.background} 0%, #ffffff 48%, ${rgba(theme.primary, 0.04)} 100%);
+        }
+        .bk-atelier.bk-ready .bk-rise {
+          animation: bkRise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .bk-atelier.bk-ready .bk-rise-2 { animation-delay: 0.1s; }
+        .bk-atelier.bk-ready .bk-rise-3 { animation-delay: 0.18s; }
+        .bk-atelier.bk-ready .bk-rise-4 { animation-delay: 0.26s; }
+        @keyframes bkRise {
+          from { opacity: 0; transform: translateY(18px); }
+          to { opacity: 1; transform: none; }
+        }
+        .bk-display { font-family: var(--bk-display); font-weight: 600; letter-spacing: -0.02em; }
+        .bk-panel {
+          background: rgba(255,255,255,0.78);
+          backdrop-filter: blur(18px);
+          border: 1px solid ${rgba(theme.primary, 0.08)};
+          box-shadow:
+            0 1px 0 ${rgba("#fff", 0.7)} inset,
+            0 24px 60px ${rgba(theme.primary, 0.08)};
+        }
+        .bk-input {
+          width: 100%;
+          border-radius: 14px;
+          border: 1px solid ${rgba(theme.primary, 0.1)};
+          background: rgba(255,255,255,0.92);
+          padding: 0.85rem 1rem;
+          font-size: 0.9375rem;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .bk-input:focus {
+          outline: none;
+          border-color: ${theme.accent};
+          box-shadow: 0 0 0 3px ${rgba(theme.accent, 0.18)};
+        }
+        .bk-cta {
+          background: linear-gradient(135deg, ${theme.primary}, ${rgba(theme.primary, 0.85)});
+          color: #fff;
+          border-radius: 14px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          transition: transform 0.2s, box-shadow 0.2s;
+          box-shadow: 0 12px 28px ${rgba(theme.primary, 0.28)};
+        }
+        .bk-cta:hover:not(:disabled) { transform: translateY(-1px); }
+        .bk-cta:disabled { opacity: 0.5; }
+        .bk-day {
+          aspect-ratio: 1;
+          border-radius: 14px;
+          font-size: 0.875rem;
+          font-weight: 500;
+          transition: transform 0.15s, background 0.15s;
+        }
+        .bk-day-avail {
+          background: ${rgba(theme.accent, 0.12)};
+          color: var(--bk-text);
+        }
+        .bk-day-avail:hover { transform: scale(1.05); background: ${rgba(theme.accent, 0.22)}; }
+        .bk-day-sel {
+          background: ${theme.primary};
+          color: #fff;
+          box-shadow: 0 8px 20px ${rgba(theme.primary, 0.35)};
+        }
+        .bk-slot {
+          border-radius: 999px;
+          border: 1px solid ${rgba(theme.primary, 0.12)};
+          padding: 0.55rem 1rem;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          background: #fff;
+          transition: all 0.15s;
+        }
+        .bk-slot-sel {
+          background: ${theme.accent};
+          border-color: transparent;
+          color: #fff;
+          box-shadow: 0 8px 18px ${rgba(theme.accent, 0.35)};
+        }
+        .bk-brand-plane {
+          background:
+            linear-gradient(145deg, ${theme.primary} 0%, ${rgba(theme.primary, 0.88)} 55%, ${rgba(theme.accent, 0.55)} 140%);
+        }
+        .bk-grain {
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+        }
+      `}</style>
 
       <div
-        className={`relative mx-auto w-full ${
-          isEmbed ? "max-w-xl px-3 py-3 sm:px-4 sm:py-4" : "max-w-3xl px-4 py-6 sm:px-6 sm:py-10 lg:py-14"
+        className={`mx-auto grid min-h-screen max-w-[1360px] ${
+          isEmbed
+            ? "grid-cols-1 px-3 py-4 sm:px-6"
+            : "lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.25fr)]"
         }`}
       >
-        {/* ── Hero / compact header ── */}
-        {showHero ? (
-          <header className="mb-8 animate-in fade-in slide-in-from-bottom-3 duration-700">
-            <div className="overflow-hidden rounded-[1.75rem] border border-[var(--bk-primary)]/10 shadow-[0_20px_60px_-24px_rgba(11,31,51,0.35)]">
-              <div
-                className="relative px-6 pb-8 pt-8 sm:px-10 sm:pb-10 sm:pt-10"
-                style={{
-                  background: `linear-gradient(145deg, ${theme.primary} 0%, ${withAlpha(theme.primary, 0.88)} 55%, ${withAlpha(theme.accent, 0.85)} 140%)`,
-                  color: "#fff",
-                }}
-              >
-                <div
-                  className="pointer-events-none absolute inset-0 opacity-30"
-                  style={{
-                    background:
-                      "radial-gradient(ellipse at 80% 20%, rgba(255,255,255,0.35), transparent 55%)",
-                  }}
-                />
-                <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="flex items-start gap-4">
-                    {config.logoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={config.logoUrl}
-                        alt=""
-                        className="h-14 w-14 rounded-2xl object-cover shadow-lg ring-2 ring-white/25 sm:h-16 sm:w-16"
-                      />
-                    ) : (
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-lg font-bold tracking-wide shadow-lg ring-2 ring-white/20 sm:h-16 sm:w-16 sm:text-xl">
-                        {initials(config.companyName)}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
-                        {config.companyName}
-                      </p>
-                      <h1 className="font-serif mt-1.5 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
-                        {config.headline}
-                      </h1>
-                      <p className="mt-2 max-w-md text-sm leading-relaxed text-white/80 sm:text-[15px]">
-                        {config.description}
-                      </p>
-                    </div>
+        {/* Brand plane */}
+        {!isEmbed && (
+          <aside className="bk-brand-plane bk-rise relative hidden overflow-hidden lg:flex lg:min-h-screen lg:flex-col lg:justify-between lg:p-12 xl:p-14">
+            <div className="bk-grain pointer-events-none absolute inset-0 opacity-40 mix-blend-overlay" />
+            <div
+              className="pointer-events-none absolute -right-20 top-24 h-72 w-72 rounded-full blur-3xl"
+              style={{ background: rgba("#fff", 0.12) }}
+            />
+            <div className="relative z-10">
+              <div className="flex items-center gap-3">
+                {config.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={config.logoUrl}
+                    alt=""
+                    className="h-14 w-14 rounded-2xl object-cover ring-2 ring-white/25"
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-xl font-semibold text-white ring-1 ring-white/20">
+                    {config.companyName.slice(0, 1).toUpperCase()}
                   </div>
-                  {step !== "success" ? (
-                    <div className="shrink-0 self-start sm:self-end">
-                      <StepDots
-                        step={step}
-                        showCalendar={config.showCalendar}
-                        accent={theme.accent}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </header>
-        ) : (
-          <header className="mb-4 flex items-center justify-between gap-3 animate-in fade-in duration-400">
-            <div className="flex min-w-0 items-center gap-2.5">
-              {config.logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={config.logoUrl}
-                  alt=""
-                  className="h-9 w-9 rounded-xl object-cover ring-1 ring-[var(--bk-primary)]/15"
-                />
-              ) : (
-                <div
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold text-white"
-                  style={{ background: "var(--bk-primary)" }}
-                >
-                  {initials(config.companyName)}
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--bk-text)]/45">
+                )}
+                <p className="text-sm font-medium tracking-[0.18em] text-white/70 uppercase">
                   {config.companyName}
                 </p>
-                <h1 className="font-serif truncate text-lg font-semibold leading-tight">
-                  {config.headline}
-                </h1>
+              </div>
+              <h1 className="bk-display mt-14 max-w-md text-5xl leading-[1.05] text-white xl:text-6xl">
+                {config.headline}
+              </h1>
+              <p className="mt-6 max-w-sm text-base leading-relaxed text-white/70">
+                {config.description}
+              </p>
+            </div>
+            <div className="relative z-10 space-y-4">
+              <div className="flex gap-6 text-white/55">
+                {["Secure request", "Confirmed by team", "On your schedule"].map(
+                  (t) => (
+                    <p key={t} className="text-[11px] tracking-wide uppercase">
+                      {t}
+                    </p>
+                  )
+                )}
+              </div>
+              <div className="pt-2">
+                <a
+                  href={tidyflowMarketingUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-xs text-white/50 transition hover:text-white/80"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/assets/logot-transparent.png"
+                    alt=""
+                    className="h-5 w-5 rounded object-contain"
+                  />
+                  tidyflowapp.com
+                </a>
               </div>
             </div>
-            {step !== "success" ? (
-              <StepDots
-                step={step}
-                showCalendar={config.showCalendar}
-                accent={theme.accent}
-              />
-            ) : null}
-          </header>
+          </aside>
         )}
 
-        {/* ── Main card ── */}
+        {/* Booking atelier */}
         <main
-          className={`relative overflow-hidden border border-[var(--bk-primary)]/8 bg-white/75 shadow-[0_12px_40px_-18px_rgba(11,31,51,0.28)] backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-600 ${
-            isEmbed ? "rounded-2xl p-4 sm:p-5" : "rounded-[1.5rem] p-5 sm:p-8"
+          className={`relative flex flex-col ${
+            isEmbed ? "py-2" : "px-4 py-8 sm:px-8 lg:px-12 lg:py-12 xl:px-14"
           }`}
         >
-          {step === "success" ? (
-            <SuccessPanel
-              message={successMsg}
-              companyName={config.companyName}
-              isEmbed={isEmbed}
-            />
-          ) : null}
-
-          {step === "schedule" && config.showCalendar ? (
-            <section className="space-y-6">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          {isEmbed && (
+            <header className="bk-rise mb-6">
+              <div className="flex items-center gap-3">
+                {config.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={config.logoUrl}
+                    alt=""
+                    className="h-11 w-11 rounded-xl object-cover"
+                  />
+                ) : null}
                 <div>
-                  <h2 className="font-serif text-xl font-semibold tracking-tight sm:text-2xl">
-                    Pick a day
-                  </h2>
-                  <p className="mt-1 text-sm text-[var(--bk-text)]/55">
-                    Available times update as you choose a date.
+                  <p
+                    className="text-[10px] font-semibold tracking-[0.2em] uppercase"
+                    style={{ color: rgba(theme.text, 0.45) }}
+                  >
+                    {config.companyName}
                   </p>
+                  <h1 className="bk-display text-3xl leading-tight sm:text-4xl">
+                    {config.headline}
+                  </h1>
                 </div>
-                {config.serviceOptions?.length > 1 ? (
-                  <label className="mt-2 flex flex-col gap-1 sm:mt-0 sm:min-w-[200px]">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--bk-text)]/45">
-                      Service length
-                    </span>
-                    <select
-                      className="bk-input rounded-xl border border-[var(--bk-primary)]/12 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[var(--bk-accent)] focus:ring-2 focus:ring-[var(--bk-accent)]/25"
-                      value={
-                        config.serviceOptions.find(
-                          (s) => s.durationMinutes === duration
-                        )?.label || config.serviceOptions[0]?.label
-                      }
-                      onChange={(e) => {
-                        const match = config.serviceOptions.find(
-                          (s) => s.label === e.target.value
-                        )
-                        if (match) {
-                          setDuration(match.durationMinutes)
-                          setAnswer("serviceType", match.label)
-                        }
-                      }}
-                    >
-                      {config.serviceOptions.map((s) => (
-                        <option key={s.id} value={s.label}>
-                          {s.label} · {s.durationMinutes} min
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
               </div>
+              <p className="mt-2 max-w-lg text-sm" style={{ color: rgba(theme.text, 0.6) }}>
+                {config.description}
+              </p>
+            </header>
+          )}
 
-              {/* Month nav */}
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  disabled={!canPrevMonth}
-                  onClick={() => shiftMonth(-1)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--bk-primary)]/10 bg-white text-[var(--bk-primary)] transition hover:bg-[var(--bk-primary)]/5 disabled:cursor-not-allowed disabled:opacity-30"
-                  aria-label="Previous month"
-                >
-                  <ChevronLeft />
-                </button>
-                <h3 className="font-serif text-base font-semibold sm:text-lg">
-                  {MONTHS[viewMonth - 1]} {viewYear}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => shiftMonth(1)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--bk-primary)]/10 bg-white text-[var(--bk-primary)] transition hover:bg-[var(--bk-primary)]/5"
-                  aria-label="Next month"
-                >
-                  <ChevronRight />
-                </button>
+          {!isEmbed && (
+            <div className="bk-rise mb-6 lg:hidden">
+              <p
+                className="text-[10px] font-semibold tracking-[0.2em] uppercase"
+                style={{ color: rgba(theme.text, 0.45) }}
+              >
+                {config.companyName}
+              </p>
+              <h1 className="bk-display mt-1 text-4xl leading-tight">
+                {config.headline}
+              </h1>
+            </div>
+          )}
+
+          {done ? (
+            <section className="bk-panel bk-rise-2 rounded-[28px] px-8 py-14 text-center sm:px-12">
+              <div
+                className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full"
+                style={{ background: rgba(theme.accent, 0.15) }}
+              >
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M5 13l4 4L19 7"
+                    stroke={theme.accent}
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </div>
-
-              <div className="relative">
-                {monthLoading ? (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/60 backdrop-blur-[2px]">
-                    <Spinner className="h-8 w-8" />
-                  </div>
-                ) : null}
-
-                <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-                  {WEEKDAYS.map((d) => (
-                    <div
-                      key={d}
-                      className="pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--bk-text)]/40 sm:text-[11px]"
-                    >
-                      {d}
-                    </div>
-                  ))}
-                  {calendarCells.map((cell) => {
-                    if (cell.day === null) {
-                      return <div key={cell.key} className="aspect-square" />
-                    }
-                    const selected = selectedDate === cell.key
-                    const disabled = !cell.available
+              <h2 className="bk-display text-3xl sm:text-4xl">You're on the list</h2>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed opacity-65">
+                {done}
+              </p>
+            </section>
+          ) : (
+            <section className="bk-panel bk-rise-2 rounded-[28px] p-5 sm:p-8">
+              {/* Progress */}
+              {config.showCalendar && (
+                <div className="mb-7 flex items-center gap-2">
+                  {(
+                    [
+                      ["when", "Schedule"],
+                      ["details", "Your details"],
+                    ] as const
+                  ).map(([id, label], i) => {
+                    const active = phase === id
+                    const doneStep = phase === "details" && id === "when"
                     return (
                       <button
-                        key={cell.key}
+                        key={id}
                         type="button"
-                        disabled={disabled}
                         onClick={() => {
-                          setSelectedDate(cell.key)
-                          setSubmitError(null)
+                          if (id === "details" && !selectedSlot) return
+                          setPhase(id)
                         }}
-                        className={`group relative aspect-square rounded-xl text-sm font-semibold transition-all duration-200 sm:rounded-2xl sm:text-[15px] ${
-                          selected
-                            ? "scale-[1.04] text-white shadow-md"
-                            : disabled
-                              ? "cursor-not-allowed text-[var(--bk-text)]/25"
-                              : "hover:-translate-y-0.5 hover:shadow-sm"
-                        }`}
-                        style={
-                          selected
-                            ? { background: "var(--bk-primary)" }
-                            : disabled
-                              ? { background: withAlpha(theme.text, 0.03) }
-                              : {
-                                  background: withAlpha(theme.accent, 0.12),
-                                  color: "var(--bk-primary)",
-                                }
-                        }
-                        aria-pressed={selected}
-                        aria-label={`${cell.key}${cell.available ? `, ${cell.slotCount} slots` : ", unavailable"}`}
+                        className="flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold transition"
+                        style={{
+                          background: active
+                            ? theme.primary
+                            : doneStep
+                              ? rgba(theme.accent, 0.15)
+                              : rgba(theme.primary, 0.05),
+                          color: active
+                            ? "#fff"
+                            : doneStep
+                              ? theme.accent
+                              : rgba(theme.text, 0.45),
+                        }}
                       >
-                        <span className="relative z-10">{cell.day}</span>
-                        {cell.isToday && !selected ? (
-                          <span
-                            className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full sm:bottom-1.5"
-                            style={{ background: "var(--bk-accent)" }}
-                          />
-                        ) : null}
-                        {cell.available && !selected ? (
-                          <span
-                            className="absolute right-1 top-1 hidden h-1.5 w-1.5 rounded-full opacity-70 sm:block"
-                            style={{ background: "var(--bk-accent)" }}
-                          />
-                        ) : null}
+                        <span
+                          className="flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+                          style={{
+                            background: active
+                              ? rgba("#fff", 0.2)
+                              : rgba(theme.primary, 0.08),
+                          }}
+                        >
+                          {doneStep ? "✓" : i + 1}
+                        </span>
+                        {label}
                       </button>
                     )
                   })}
                 </div>
-              </div>
+              )}
 
-              {/* Slots */}
-              <div className="pt-1">
-                <div className="mb-3 flex items-baseline justify-between gap-2">
-                  <h2 className="font-serif text-lg font-semibold sm:text-xl">
-                    {selectedDate
-                      ? formatLongDate(selectedDate)
-                      : "Choose a time"}
-                  </h2>
-                  {selectedDate && !slotsLoading ? (
-                    <span className="text-xs text-[var(--bk-text)]/45">
-                      {slots.length} open
-                    </span>
-                  ) : null}
+              {error && (
+                <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
                 </div>
+              )}
 
-                {!selectedDate ? (
-                  <p className="rounded-2xl border border-dashed border-[var(--bk-primary)]/15 bg-[var(--bk-primary)]/[0.02] px-4 py-8 text-center text-sm text-[var(--bk-text)]/50">
-                    Select an available day on the calendar.
-                  </p>
-                ) : slotsLoading ? (
-                  <div className="flex justify-center py-10">
-                    <Spinner />
+              {phase === "when" && config.showCalendar && (
+                <div className="space-y-7">
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <p
+                        className="text-[10px] font-semibold tracking-[0.18em] uppercase"
+                        style={{ color: rgba(theme.text, 0.4) }}
+                      >
+                        Select a day
+                      </p>
+                      <h2 className="bk-display mt-1 text-2xl sm:text-3xl">
+                        {monthLabel}
+                      </h2>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        className="rounded-xl px-3 py-2 text-lg opacity-60 hover:bg-black/5 hover:opacity-100"
+                        onClick={() =>
+                          setMonth((m) => {
+                            const d = new Date(m.year, m.month - 2, 1)
+                            return {
+                              year: d.getFullYear(),
+                              month: d.getMonth() + 1,
+                            }
+                          })
+                        }
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl px-3 py-2 text-lg opacity-60 hover:bg-black/5 hover:opacity-100"
+                        onClick={() =>
+                          setMonth((m) => {
+                            const d = new Date(m.year, m.month, 1)
+                            return {
+                              year: d.getFullYear(),
+                              month: d.getMonth() + 1,
+                            }
+                          })
+                        }
+                      >
+                        ›
+                      </button>
+                    </div>
                   </div>
-                ) : slots.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-[var(--bk-primary)]/15 bg-[var(--bk-primary)]/[0.02] px-4 py-8 text-center text-sm text-[var(--bk-text)]/50">
-                    No open times this day — try another date.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                    {slots.map((slot) => {
-                      const on = selectedSlot?.start === slot.start
-                      return (
+
+                  <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-semibold tracking-wider uppercase opacity-35">
+                    {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                      <div key={`${d}-${i}`}>{d}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                    {calendarCells.map((cell, i) =>
+                      !cell ? (
+                        <div key={`e-${i}`} />
+                      ) : (
                         <button
-                          key={slot.start}
+                          key={cell.date}
                           type="button"
-                          onClick={() => {
-                            setSelectedSlot(slot)
-                            setSubmitError(null)
-                          }}
-                          className={`rounded-xl px-3 py-3 text-sm font-semibold transition-all duration-200 ${
-                            on
-                              ? "scale-[1.02] text-white shadow-md"
-                              : "border border-[var(--bk-primary)]/10 bg-white hover:border-[var(--bk-accent)]/50 hover:bg-[var(--bk-accent)]/5"
+                          disabled={!cell.available}
+                          onClick={() => setSelectedDate(cell.date)}
+                          className={`bk-day ${
+                            selectedDate === cell.date
+                              ? "bk-day-sel"
+                              : cell.available
+                                ? "bk-day-avail"
+                                : "opacity-20"
                           }`}
-                          style={on ? { background: "var(--bk-accent)" } : undefined}
-                          aria-pressed={on}
                         >
-                          {slot.label}
+                          {Number(cell.date.slice(-2))}
                         </button>
                       )
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {submitError ? (
-                <p className="text-sm font-medium text-red-600" role="alert">
-                  {submitError}
-                </p>
-              ) : null}
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={continueToDetails}
-                  disabled={!selectedSlot}
-                  className="inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-bold text-white shadow-lg transition enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{
-                    background: "var(--bk-primary)",
-                    boxShadow: `0 12px 28px -10px ${withAlpha(theme.primary, 0.55)}`,
-                  }}
-                >
-                  Continue
-                  <ArrowRight />
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {step === "details" ? (
-            <section className="animate-in fade-in slide-in-from-right-2 duration-400">
-              {config.showCalendar && selectedSlot && selectedDate ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep("schedule")
-                    setSubmitError(null)
-                  }}
-                  className="mb-5 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--bk-primary)]/70 transition hover:text-[var(--bk-primary)]"
-                >
-                  <ChevronLeft />
-                  Change time
-                  <span className="ml-1 font-normal text-[var(--bk-text)]/45">
-                    · {formatLongDate(selectedDate)} at {selectedSlot.label}
-                  </span>
-                </button>
-              ) : null}
-
-              <div className="mb-6">
-                <h2 className="font-serif text-xl font-semibold tracking-tight sm:text-2xl">
-                  Your details
-                </h2>
-                <p className="mt-1 text-sm text-[var(--bk-text)]/55">
-                  We’ll use this to confirm your booking.
-                </p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                {config.formFields.map((field) => (
-                  <FieldControl
-                    key={field.id}
-                    field={field}
-                    value={answers[field.id] || ""}
-                    onChange={(v) => setAnswer(field.id, v)}
-                    serviceOptions={
-                      field.id === "serviceType" ? config.serviceOptions : undefined
-                    }
-                  />
-                ))}
-
-                {submitError ? (
-                  <p className="text-sm font-medium text-red-600" role="alert">
-                    {submitError}
-                  </p>
-                ) : null}
-
-                <div className="flex flex-col-reverse gap-3 pt-3 sm:flex-row sm:justify-between">
-                  {config.showCalendar ? (
-                    <button
-                      type="button"
-                      onClick={() => setStep("schedule")}
-                      className="rounded-2xl border border-[var(--bk-primary)]/12 px-5 py-3 text-sm font-semibold text-[var(--bk-primary)] transition hover:bg-[var(--bk-primary)]/5"
-                    >
-                      Back
-                    </button>
-                  ) : (
-                    <span />
-                  )}
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl px-7 py-3.5 text-sm font-bold text-white shadow-lg transition enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:opacity-60"
-                    style={{
-                      background: "var(--bk-primary)",
-                      boxShadow: `0 12px 28px -10px ${withAlpha(theme.primary, 0.55)}`,
-                    }}
-                  >
-                    {submitting ? (
-                      <>
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                        Sending…
-                      </>
-                    ) : (
-                      <>
-                        Request booking
-                        <ArrowRight />
-                      </>
                     )}
+                  </div>
+
+                  {selectedDate && (
+                    <div className="bk-rise-3 border-t pt-6" style={{ borderColor: rgba(theme.primary, 0.08) }}>
+                      <p
+                        className="mb-3 text-[10px] font-semibold tracking-[0.18em] uppercase"
+                        style={{ color: rgba(theme.text, 0.4) }}
+                      >
+                        Available times
+                      </p>
+                      {slotsLoading ? (
+                        <p className="text-sm opacity-40">Finding openings…</p>
+                      ) : slots.length === 0 ? (
+                        <p className="text-sm opacity-40">
+                          No openings this day — try another.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {slots.map((s) => (
+                            <button
+                              key={s.start}
+                              type="button"
+                              onClick={() => setSelectedSlot(s)}
+                              className={`bk-slot ${
+                                selectedSlot?.start === s.start ? "bk-slot-sel" : ""
+                              }`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {selectedSlot && (
+                        <button
+                          type="button"
+                          className="bk-cta mt-7 w-full py-3.5 text-sm sm:w-auto sm:px-10"
+                          onClick={() => setPhase("details")}
+                        >
+                          Continue with {selectionLabel}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {phase === "details" && (
+                <div className="space-y-5">
+                  {selectionLabel && (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3"
+                      style={{ background: rgba(theme.primary, 0.04) }}
+                    >
+                      <p className="text-sm">
+                        <span className="opacity-45">Appointment · </span>
+                        <strong>{selectionLabel}</strong>
+                      </p>
+                      {config.showCalendar && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold underline-offset-2 hover:underline"
+                          style={{ color: theme.accent }}
+                          onClick={() => setPhase("when")}
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {config.formFields.map((field, idx) => (
+                    <label
+                      key={field.id}
+                      className={`bk-rise-${Math.min(idx + 2, 4)} block`}
+                    >
+                      <span
+                        className="mb-1.5 block text-[10px] font-semibold tracking-[0.16em] uppercase"
+                        style={{ color: rgba(theme.text, 0.42) }}
+                      >
+                        {field.label}
+                        {field.required ? " *" : ""}
+                      </span>
+                      {field.type === "textarea" ? (
+                        <textarea
+                          className="bk-input"
+                          rows={3}
+                          placeholder={field.placeholder}
+                          required={field.required}
+                          value={answers[field.id] || ""}
+                          onChange={(e) =>
+                            setAnswers((a) => ({
+                              ...a,
+                              [field.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      ) : field.type === "select" ? (
+                        <select
+                          className="bk-input"
+                          required={field.required}
+                          value={answers[field.id] || ""}
+                          onChange={(e) =>
+                            setAnswers((a) => ({
+                              ...a,
+                              [field.id]: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select…</option>
+                          {(
+                            field.options ||
+                            config.serviceOptions.map((s) => s.label)
+                          ).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type={
+                            field.type === "email"
+                              ? "email"
+                              : field.type === "tel"
+                                ? "tel"
+                                : field.type === "number"
+                                  ? "number"
+                                  : "text"
+                          }
+                          className="bk-input"
+                          placeholder={field.placeholder}
+                          required={field.required}
+                          value={answers[field.id] || ""}
+                          onChange={(e) =>
+                            setAnswers((a) => ({
+                              ...a,
+                              [field.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      )}
+                    </label>
+                  ))}
+
+                  <button
+                    type="button"
+                    disabled={submitting || (config.showCalendar && !selectedSlot)}
+                    onClick={() => void submit()}
+                    className="bk-cta mt-2 w-full py-3.5 text-sm"
+                  >
+                    {submitting ? "Sending request…" : "Request booking"}
                   </button>
                 </div>
-              </form>
+              )}
             </section>
-          ) : null}
+          )}
+
+          <footer className="bk-rise-4 mt-10 flex flex-col items-center gap-2 pb-4">
+            <TidyFlowWordmark ink={theme.primary} />
+            <a
+              href={tidyflowMarketingUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] opacity-35 transition hover:opacity-70"
+            >
+              tidyflowapp.com — cleaning company operations
+            </a>
+          </footer>
         </main>
-
-        {/* Footer */}
-        <footer
-          className={`flex items-center justify-center gap-2 text-[var(--bk-text)]/45 ${
-            isEmbed ? "mt-4 pb-1" : "mt-8 pb-2"
-          }`}
-        >
-          <a
-            href={tidyflowMarketingUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition hover:bg-[var(--bk-primary)]/5 hover:text-[var(--bk-primary)]"
-          >
-            <span className="text-[var(--bk-primary)]/70 transition group-hover:text-[var(--bk-primary)]">
-              <TidyFlowMark size={isEmbed ? 16 : 18} />
-            </span>
-            Powered by TidyFlow
-          </a>
-        </footer>
       </div>
-
-      <style jsx global>{`
-        @keyframes bk-fade-up {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-in {
-          animation: bk-fade-up 0.55s ease both;
-        }
-        .fade-in {
-          animation-name: bk-fade-up;
-        }
-        .slide-in-from-bottom-2 {
-          --tw-enter-translate-y: 0.5rem;
-        }
-        .slide-in-from-bottom-3 {
-          --tw-enter-translate-y: 0.75rem;
-        }
-        .slide-in-from-right-2 {
-          animation-name: bk-slide-right;
-        }
-        @keyframes bk-slide-right {
-          from {
-            opacity: 0;
-            transform: translateX(12px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-        .duration-400 {
-          animation-duration: 0.4s;
-        }
-        .duration-500 {
-          animation-duration: 0.5s;
-        }
-        .duration-600 {
-          animation-duration: 0.6s;
-        }
-        .duration-700 {
-          animation-duration: 0.7s;
-        }
-        .bk-root .bk-input:focus {
-          outline: none;
-        }
-      `}</style>
     </div>
-  )
-}
-
-/* ─── Field control ─────────────────────────────────────────────────────── */
-
-function FieldControl({
-  field,
-  value,
-  onChange,
-  serviceOptions,
-}: {
-  field: BookingFormField
-  value: string
-  onChange: (v: string) => void
-  serviceOptions?: ServiceOption[]
-}) {
-  const baseCls =
-    "w-full rounded-xl border border-[var(--bk-primary)]/12 bg-white px-3.5 py-3 text-sm text-[var(--bk-text)] outline-none transition placeholder:text-[var(--bk-text)]/35 focus:border-[var(--bk-accent)] focus:ring-2 focus:ring-[var(--bk-accent)]/25"
-
-  const options =
-    field.type === "select"
-      ? field.options?.length
-        ? field.options
-        : serviceOptions?.map((s) => s.label) || []
-      : []
-
-  return (
-    <label className="block">
-      <span className="mb-1.5 flex items-baseline gap-1 text-[13px] font-semibold text-[var(--bk-text)]/80">
-        {field.label}
-        {field.required ? (
-          <span className="text-[var(--bk-accent)]" aria-hidden>
-            *
-          </span>
-        ) : (
-          <span className="text-[11px] font-normal text-[var(--bk-text)]/35">
-            optional
-          </span>
-        )}
-      </span>
-      {field.type === "textarea" ? (
-        <textarea
-          className={`${baseCls} min-h-[96px] resize-y`}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder}
-          required={field.required}
-          rows={3}
-        />
-      ) : field.type === "select" ? (
-        <select
-          className={baseCls}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          required={field.required}
-        >
-          <option value="">Select…</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <input
-          type={fieldInputType(field.type)}
-          className={baseCls}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder}
-          required={field.required}
-          autoComplete={
-            field.id === "email"
-              ? "email"
-              : field.id === "name"
-                ? "name"
-                : field.id === "phone"
-                  ? "tel"
-                  : field.id === "address"
-                    ? "street-address"
-                    : undefined
-          }
-        />
-      )}
-    </label>
-  )
-}
-
-/* ─── Success ───────────────────────────────────────────────────────────── */
-
-function SuccessPanel({
-  message,
-  companyName,
-  isEmbed,
-}: {
-  message: string
-  companyName: string
-  isEmbed: boolean
-}) {
-  return (
-    <div
-      className={`flex flex-col items-center text-center animate-in fade-in duration-600 ${
-        isEmbed ? "py-6" : "py-10 sm:py-14"
-      }`}
-    >
-      <div
-        className="mb-5 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg"
-        style={{
-          background: "var(--bk-accent)",
-          boxShadow: "0 14px 30px -12px var(--bk-accent)",
-        }}
-      >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M5 13l4 4L19 7"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </div>
-      <h2 className="font-serif text-2xl font-semibold tracking-tight sm:text-3xl">
-        You’re booked in
-      </h2>
-      <p className="mt-3 max-w-md text-sm leading-relaxed text-[var(--bk-text)]/65 sm:text-[15px]">
-        {message}
-      </p>
-      <p className="mt-6 text-xs font-medium uppercase tracking-[0.16em] text-[var(--bk-text)]/40">
-        {companyName}
-      </p>
-    </div>
-  )
-}
-
-/* ─── Icons ─────────────────────────────────────────────────────────────── */
-
-function ChevronLeft() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M15 18l-6-6 6-6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function ChevronRight() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M9 18l6-6-6-6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function ArrowRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M5 12h14M13 6l6 6-6 6"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   )
 }

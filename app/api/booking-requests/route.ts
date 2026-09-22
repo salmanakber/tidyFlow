@@ -77,69 +77,40 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (action === "approve" || action === "approved" || action === "convert") {
-    let propertyId = booking.propertyId
-    let clientId = booking.clientId
+    const duration = booking.requestedEnd
+      ? Math.round(
+          (booking.requestedEnd.getTime() - booking.requestedStart.getTime()) /
+            60000
+        )
+      : 120
 
-    if (!clientId) {
-      const client = await prisma.client.create({
-        data: {
-          companyId,
-          name: booking.guestName,
-          email: booking.guestEmail,
-          phone: booking.guestPhone,
-          source: "booking",
-        },
-      })
-      clientId = client.id
-    }
+    const { resolveBookingEntities } = await import("@/lib/booking-entities")
+    const { clientId, propertyId, taskId } = await resolveBookingEntities({
+      companyId,
+      guestName: booking.guestName,
+      guestEmail: booking.guestEmail,
+      guestPhone: booking.guestPhone,
+      address: booking.address,
+      notes: booking.notes,
+      serviceType: booking.serviceType,
+      requestedStart: booking.requestedStart,
+      durationMinutes: duration > 0 ? duration : 120,
+      autoCreateProperty: true,
+      autoCreateTask: true,
+      existingClientId: booking.clientId,
+      existingPropertyId: booking.propertyId,
+      existingTaskId: booking.taskId,
+    })
 
-    if (!propertyId && booking.address) {
-      const prop = await prisma.property.create({
-        data: {
-          companyId,
-          address: booking.address,
-          propertyType: "apartment",
-          clientName: booking.guestName,
-          clientEmail: booking.guestEmail,
-          clientPhone: booking.guestPhone,
-          clientId,
-        },
-      })
-      propertyId = prop.id
-    }
-
-    if (!propertyId) {
+    if (!propertyId || !taskId) {
       return NextResponse.json(
         {
           success: false,
-          message: "Add a property address before converting to a task",
+          message:
+            "Need a property address to convert this booking into a linked job",
         },
         { status: 400 }
       )
-    }
-
-    let taskId = booking.taskId
-    if (!taskId) {
-      const duration = booking.requestedEnd
-        ? Math.round(
-            (booking.requestedEnd.getTime() - booking.requestedStart.getTime()) /
-              60000
-          )
-        : 120
-      const task = await prisma.task.create({
-        data: {
-          companyId,
-          propertyId,
-          title: booking.serviceType
-            ? `${booking.serviceType} — ${booking.guestName}`
-            : `Booking — ${booking.guestName}`,
-          description: booking.notes,
-          status: "PLANNED",
-          scheduledDate: booking.requestedStart,
-          estimatedDurationMinutes: duration > 0 ? duration : 120,
-        },
-      })
-      taskId = task.id
     }
 
     const updated = await prisma.bookingRequest.update({
@@ -152,7 +123,6 @@ export async function PATCH(request: NextRequest) {
       },
     })
 
-    // Notify managers that booking was converted
     const managers = await prisma.user.findMany({
       where: {
         companyId,
@@ -167,7 +137,7 @@ export async function PATCH(request: NextRequest) {
         title: "Booking converted to job",
         message: `${booking.guestName} → task #${taskId}`,
         type: "booking_converted",
-        metadata: { bookingRequestId: id, taskId },
+        metadata: { bookingRequestId: id, taskId, clientId, propertyId },
         screenRoute: "TaskDetail",
         screenParams: { taskId },
       }).catch(() => {})

@@ -144,82 +144,20 @@ export async function POST(request: NextRequest, context: Ctx) {
 
   const requestedEnd = new Date(requestedStart.getTime() + duration * 60 * 1000)
 
-  // Upsert Client
-  let clientId: number | null = null
-  if (guestEmail) {
-    const existing = await prisma.client.findFirst({
-      where: {
-        companyId: config.companyId,
-        email: { equals: guestEmail, mode: "insensitive" },
-      },
-    })
-    if (existing) {
-      clientId = existing.id
-      await prisma.client.update({
-        where: { id: existing.id },
-        data: {
-          name: guestName,
-          phone: guestPhone || existing.phone,
-        },
-      })
-    } else {
-      const created = await prisma.client.create({
-        data: {
-          companyId: config.companyId,
-          name: guestName,
-          email: guestEmail,
-          phone: guestPhone,
-          source: "booking",
-        },
-      })
-      clientId = created.id
-    }
-  } else {
-    const created = await prisma.client.create({
-      data: {
-        companyId: config.companyId,
-        name: guestName,
-        phone: guestPhone,
-        source: "booking",
-      },
-    })
-    clientId = created.id
-  }
-
-  let propertyId: number | null = null
-  if (config.autoCreateProperty && address) {
-    const prop = await prisma.property.create({
-      data: {
-        companyId: config.companyId,
-        address,
-        propertyType: "apartment",
-        clientName: guestName,
-        clientEmail: guestEmail,
-        clientPhone: guestPhone,
-        clientId,
-        notes: notes ? `Booking notes: ${notes}` : null,
-      },
-    })
-    propertyId = prop.id
-  }
-
-  let taskId: number | null = null
-  if (config.autoCreateTask && propertyId) {
-    const task = await prisma.task.create({
-      data: {
-        companyId: config.companyId,
-        propertyId,
-        title: serviceType
-          ? `${serviceType} — ${guestName}`
-          : `Booking — ${guestName}`,
-        description: notes,
-        status: "PLANNED",
-        scheduledDate: requestedStart,
-        estimatedDurationMinutes: duration,
-      },
-    })
-    taskId = task.id
-  }
+  const { resolveBookingEntities } = await import("@/lib/booking-entities")
+  const { clientId, propertyId, taskId } = await resolveBookingEntities({
+    companyId: config.companyId,
+    guestName,
+    guestEmail,
+    guestPhone,
+    address,
+    notes,
+    serviceType,
+    requestedStart,
+    durationMinutes: duration,
+    autoCreateProperty: config.autoCreateProperty,
+    autoCreateTask: config.autoCreateTask,
+  })
 
   const booking = await prisma.bookingRequest.create({
     data: {
@@ -257,6 +195,9 @@ export async function POST(request: NextRequest, context: Ctx) {
     data: {
       id: booking.id,
       status: booking.status,
+      clientId,
+      propertyId,
+      taskId,
       message:
         config.successMessage ||
         "Thanks! Your booking request is in. We’ll be in touch soon.",

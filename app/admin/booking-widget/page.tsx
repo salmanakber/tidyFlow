@@ -1,6 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+/**
+ * Booking studio — dense, low-scroll personalization with live preview.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
 import { adminGet, adminPatch } from "@/lib/admin-session"
 import {
@@ -11,35 +14,28 @@ import {
   type DayHours,
   type WeeklyHours,
 } from "@/lib/booking-widget"
+import { OpsFlash, OpsSkeleton } from "@/components/ops/OpsChrome"
 import {
-  OpsPageHeader,
-  OpsRefreshButton,
-  OpsPrimaryButton,
-  OpsFlash,
-  OpsCard,
-  OpsEmpty,
-  OpsSkeleton,
-} from "@/components/ops/OpsChrome"
-import { OpsField, OpsSecondaryButton, opsFieldCls } from "@/components/ops/OpsForm"
-import {
-  CalendarHeart,
   Check,
   Copy,
   ExternalLink,
   Loader2,
   Plus,
+  Sparkles,
   Trash2,
 } from "lucide-react"
 
 const DAY_LABELS: { key: string; label: string }[] = [
-  { key: "1", label: "Monday" },
-  { key: "2", label: "Tuesday" },
-  { key: "3", label: "Wednesday" },
-  { key: "4", label: "Thursday" },
-  { key: "5", label: "Friday" },
-  { key: "6", label: "Saturday" },
-  { key: "0", label: "Sunday" },
+  { key: "1", label: "Mon" },
+  { key: "2", label: "Tue" },
+  { key: "3", label: "Wed" },
+  { key: "4", label: "Thu" },
+  { key: "5", label: "Fri" },
+  { key: "6", label: "Sat" },
+  { key: "0", label: "Sun" },
 ]
+
+type StudioTab = "brand" | "fields" | "calendar" | "share"
 
 type WidgetConfig = {
   enabled: boolean
@@ -70,7 +66,7 @@ type WidgetConfig = {
 
 function emptyConfig(): WidgetConfig {
   return {
-    enabled: false,
+    enabled: true,
     publicSlug: "",
     headline: "",
     description: "",
@@ -87,10 +83,10 @@ function emptyConfig(): WidgetConfig {
     slotIntervalMinutes: 60,
     minLeadHours: 24,
     maxDaysAhead: 60,
-    bufferMinutes: 0,
-    useCleanerAvailability: false,
+    bufferMinutes: 30,
+    useCleanerAvailability: true,
     defaultDurationMin: 120,
-    autoCreateTask: true,
+    autoCreateTask: false,
     autoCreateProperty: true,
   }
 }
@@ -100,91 +96,38 @@ function originBase() {
   return process.env.NEXT_PUBLIC_APP_URL || "https://app.tidyflowapp.com"
 }
 
-function ColorField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <OpsField label={label}>
-      <div className="flex items-center gap-2">
-        <input
-          type="color"
-          value={value || "#000000"}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-10 w-12 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 dark:border-navy-800"
-        />
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={`${opsFieldCls} font-mono text-xs uppercase`}
-          placeholder="#0B1F33"
-        />
-      </div>
-    </OpsField>
-  )
-}
+const inp =
+  "w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-[13px] text-navy-900 outline-none transition placeholder:text-slate-300 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/15 dark:border-navy-800 dark:bg-navy-950 dark:text-white"
 
-function Section({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string
-  subtitle?: string
-  children: ReactNode
-}) {
+function L({ children }: { children: React.ReactNode }) {
   return (
-    <OpsCard>
-      <div className="mb-4 border-b border-control-border pb-3 dark:border-navy-800">
-        <h2 className="text-sm font-extrabold text-navy-900 dark:text-white">{title}</h2>
-        {subtitle ? (
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
-        ) : null}
-      </div>
+    <span className="mb-1 block text-[9px] font-bold tracking-[0.14em] text-slate-400 uppercase">
       {children}
-    </OpsCard>
+    </span>
   )
 }
 
-function ToggleRow({
+function Pill({
+  on,
   label,
-  hint,
-  checked,
-  onChange,
+  onClick,
 }: {
+  on: boolean
   label: string
-  hint?: string
-  checked: boolean
-  onChange: (v: boolean) => void
+  onClick: () => void
 }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5 dark:border-navy-800 dark:bg-navy-950/40">
-      <div>
-        <p className="text-sm font-semibold text-navy-900 dark:text-white">{label}</p>
-        {hint ? <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p> : null}
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition ${
-          checked ? "bg-amber-600" : "bg-slate-300 dark:bg-navy-700"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
-            checked ? "translate-x-5" : ""
-          }`}
-        />
-      </button>
-    </label>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+        on
+          ? "bg-navy-900 text-amber-300 dark:bg-amber-600 dark:text-white"
+          : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-navy-900 dark:text-slate-400"
+      }`}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -204,6 +147,8 @@ function Content() {
   const [toast, setToast] = useState("")
   const [copied, setCopied] = useState<string | null>(null)
   const [newClosedDate, setNewClosedDate] = useState("")
+  const [tab, setTab] = useState<StudioTab>("brand")
+  const [previewKey, setPreviewKey] = useState(0)
 
   const load = useCallback(async () => {
     try {
@@ -211,7 +156,7 @@ function Content() {
       setError("")
       const res = await adminGet("/api/company/booking-widget")
       if (!res.data?.success) {
-        setError(res.data?.message || "Failed to load booking page")
+        setError(res.data?.message || "Failed to load")
         return
       }
       const d = res.data.data
@@ -237,44 +182,48 @@ function Content() {
         slotIntervalMinutes: Number(d.slotIntervalMinutes) || 60,
         minLeadHours: Number(d.minLeadHours) || 24,
         maxDaysAhead: Number(d.maxDaysAhead) || 60,
-        bufferMinutes: Number(d.bufferMinutes) || 0,
+        bufferMinutes: Number(d.bufferMinutes) || 30,
         useCleanerAvailability: !!d.useCleanerAvailability,
         defaultDurationMin: Number(d.defaultDurationMin) || 120,
-        autoCreateTask: d.autoCreateTask !== false,
+        autoCreateTask: !!d.autoCreateTask,
         autoCreateProperty: d.autoCreateProperty !== false,
       })
+      setPreviewKey((k) => k + 1)
     } catch (e: any) {
-      setError(e.response?.data?.message || "Failed to load booking page")
+      setError(e.response?.data?.message || "Failed to load")
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
-  const publicPath = cfg.publicUrl || (cfg.publicSlug ? `/book/${cfg.publicSlug}` : "")
+  const publicPath =
+    cfg.publicUrl || (cfg.publicSlug ? `/book/${cfg.publicSlug}` : "")
   const publicAbsolute = publicPath ? `${originBase()}${publicPath}` : ""
+  const previewSrc = cfg.publicSlug
+    ? `${publicPath}?embed=1&v=${previewKey}`
+    : ""
 
   const iframeSnippet = useMemo(() => {
-    if (cfg.embedSnippet) return cfg.embedSnippet
     if (!cfg.publicSlug) return ""
-    return `<iframe src="${originBase()}/book/${cfg.publicSlug}?embed=1" title="Book online" style="width:100%;min-height:720px;border:0;border-radius:16px;" loading="lazy"></iframe>`
-  }, [cfg.embedSnippet, cfg.publicSlug])
+    return `<iframe src="${originBase()}/book/${cfg.publicSlug}?embed=1" title="Book online" style="width:100%;min-height:780px;border:0;border-radius:20px;" loading="lazy"></iframe>`
+  }, [cfg.publicSlug])
 
   const scriptSnippet = useMemo(() => {
     if (!cfg.publicSlug) return ""
-    return `<div data-tidyflow-book="${cfg.publicSlug}"></div>\n<script src="${originBase()}/embed/book.js" async></script>`
+    return `<div data-tidyflow-book="${cfg.publicSlug}" data-height="820px"></div>\n<script src="${originBase()}/embed/book.js" async></script>`
   }, [cfg.publicSlug])
 
   const copyText = async (key: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text)
       setCopied(key)
-      setTimeout(() => setCopied(null), 1600)
+      setTimeout(() => setCopied(null), 1400)
     } catch {
-      setError("Could not copy to clipboard")
+      setError("Could not copy")
     }
   }
 
@@ -290,20 +239,6 @@ function Content() {
       ...c,
       formFields: c.formFields.map((f) => (f.id === id ? { ...f, ...patch } : f)),
     }))
-  }
-
-  const addClosedDate = () => {
-    const iso = newClosedDate.trim()
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-      setError("Use an ISO date (YYYY-MM-DD)")
-      return
-    }
-    if (cfg.closedDates.includes(iso)) return
-    setCfg((c) => ({
-      ...c,
-      closedDates: [...c.closedDates, iso].sort(),
-    }))
-    setNewClosedDate("")
   }
 
   const save = async () => {
@@ -334,14 +269,14 @@ function Content() {
         autoCreateProperty: cfg.autoCreateProperty,
       })
       if (res.data?.success) {
-        setToast(res.data.message || "Booking page saved")
+        setToast("Saved — preview refreshed")
+        setPreviewKey((k) => k + 1)
         const d = res.data.data
         if (d) {
           setCfg((c) => ({
             ...c,
             publicSlug: d.publicSlug || c.publicSlug,
             publicUrl: d.publicUrl || c.publicUrl,
-            embedSnippet: d.embedSnippet || c.embedSnippet,
           }))
         }
       } else setError(res.data?.message || "Save failed")
@@ -355,435 +290,513 @@ function Content() {
   if (loading) {
     return (
       <div className="p-1">
-        <OpsSkeleton rows={5} cols={3} message="Loading booking page…" />
+        <OpsSkeleton rows={4} cols={3} message="Opening booking studio…" />
       </div>
     )
   }
 
+  const tabs: { id: StudioTab; label: string }[] = [
+    { id: "brand", label: "Brand" },
+    { id: "fields", label: "Fields" },
+    { id: "calendar", label: "Calendar" },
+    { id: "share", label: "Share" },
+  ]
+
   return (
-    <div className="space-y-5">
-      <OpsPageHeader
-        eyebrow="Manage"
-        title="Booking page"
-        subtitle="Personalize your public booking link and website embed"
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <OpsRefreshButton onClick={load} loading={loading} />
-            {publicPath ? (
-              <OpsSecondaryButton
-                onClick={() => window.open(publicPath, "_blank", "noopener,noreferrer")}
-              >
-                <ExternalLink size={14} /> Live preview
-              </OpsSecondaryButton>
-            ) : null}
-            <OpsPrimaryButton onClick={save} disabled={saving}>
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <CalendarHeart size={14} />}
-              Save changes
-            </OpsPrimaryButton>
-          </div>
-        }
-      />
-
-      {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
-      {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
-
-      {/* Enable + share */}
-      <Section
-        title="Public link & embed"
-        subtitle="Turn on online booking and share the page on your site"
-      >
-        <div className="space-y-4">
-          <ToggleRow
-            label="Enable public booking"
-            hint="When off, the public /book page returns unavailable"
-            checked={cfg.enabled}
-            onChange={(v) => setCfg((c) => ({ ...c, enabled: v }))}
+    <div className="flex h-[calc(100vh-5.5rem)] min-h-[560px] flex-col gap-3 overflow-hidden">
+      {/* Compact toolbar */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-navy-900/8 bg-gradient-to-r from-navy-950 via-navy-900 to-navy-950 px-4 py-2.5 text-white shadow-lg shadow-navy-950/15">
+        <div className="flex min-w-0 items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/assets/logot-transparent.png"
+            alt=""
+            className="h-8 w-8 rounded-lg object-contain"
           />
-
-          <OpsField label="Public booking URL">
-            <div className="flex flex-wrap gap-2">
-              <input
-                readOnly
-                value={publicAbsolute || "—"}
-                className={`${opsFieldCls} flex-1 font-mono text-xs`}
-              />
-              <OpsSecondaryButton
-                disabled={!publicAbsolute}
-                onClick={() => copyText("link", publicAbsolute)}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-bold tracking-tight">Booking studio</h1>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wide uppercase ${
+                  cfg.enabled
+                    ? "bg-emerald-500/20 text-emerald-300"
+                    : "bg-white/10 text-white/50"
+                }`}
               >
-                {copied === "link" ? <Check size={14} /> : <Copy size={14} />}
-                {copied === "link" ? "Copied" : "Copy link"}
-              </OpsSecondaryButton>
+                {cfg.enabled ? "Live" : "Paused"}
+              </span>
             </div>
-          </OpsField>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <OpsField label="Iframe embed">
-              <textarea
-                readOnly
-                rows={5}
-                value={iframeSnippet}
-                className={`${opsFieldCls} font-mono text-[11px] leading-relaxed`}
-              />
-              <div className="mt-2">
-                <OpsSecondaryButton
-                  disabled={!iframeSnippet}
-                  onClick={() => copyText("iframe", iframeSnippet)}
-                >
-                  {copied === "iframe" ? <Check size={14} /> : <Copy size={14} />}
-                  Copy iframe
-                </OpsSecondaryButton>
-              </div>
-            </OpsField>
-            <OpsField
-              label="Script embed"
-              hint='Uses /embed/book.js with data-tidyflow-book="{slug}"'
-            >
-              <textarea
-                readOnly
-                rows={5}
-                value={scriptSnippet}
-                className={`${opsFieldCls} font-mono text-[11px] leading-relaxed`}
-              />
-              <div className="mt-2">
-                <OpsSecondaryButton
-                  disabled={!scriptSnippet}
-                  onClick={() => copyText("script", scriptSnippet)}
-                >
-                  {copied === "script" ? <Check size={14} /> : <Copy size={14} />}
-                  Copy script
-                </OpsSecondaryButton>
-              </div>
-            </OpsField>
+            <p className="truncate font-mono text-[10px] text-white/40">
+              {publicAbsolute || "Save to generate your public link"}
+            </p>
           </div>
         </div>
-      </Section>
 
-      {/* Brand */}
-      <Section title="Brand colors" subtitle="Navy/amber defaults match TidyFlow; override to match your brand">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <ColorField
-            label="Primary"
-            value={cfg.primaryColor}
-            onChange={(v) => setCfg((c) => ({ ...c, primaryColor: v }))}
-          />
-          <ColorField
-            label="Accent"
-            value={cfg.accentColor}
-            onChange={(v) => setCfg((c) => ({ ...c, accentColor: v }))}
-          />
-          <ColorField
-            label="Background"
-            value={cfg.backgroundColor}
-            onChange={(v) => setCfg((c) => ({ ...c, backgroundColor: v }))}
-          />
-          <ColorField
-            label="Text"
-            value={cfg.textColor}
-            onChange={(v) => setCfg((c) => ({ ...c, textColor: v }))}
-          />
-        </div>
-        <div
-          className="mt-4 overflow-hidden rounded-xl border border-control-border"
-          style={{ background: cfg.backgroundColor, color: cfg.textColor }}
-        >
-          <div className="px-4 py-3" style={{ background: cfg.primaryColor, color: "#fff" }}>
-            <p className="text-xs font-bold uppercase tracking-wider opacity-80">Preview</p>
-            <p className="text-lg font-extrabold">{cfg.headline || "Book a cleaning"}</p>
-          </div>
-          <div className="px-4 py-3 text-sm">
-            <p className="opacity-80">{cfg.description || "Choose a time that works for you."}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={cfg.enabled}
+            onClick={() => setCfg((c) => ({ ...c, enabled: !c.enabled }))}
+            className={`relative h-6 w-10 rounded-full transition ${
+              cfg.enabled ? "bg-amber-500" : "bg-white/20"
+            }`}
+            title="Enable public booking"
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                cfg.enabled ? "translate-x-4" : ""
+              }`}
+            />
+          </button>
+          {publicPath ? (
             <button
               type="button"
-              className="mt-3 rounded-lg px-3 py-1.5 text-xs font-bold text-white"
-              style={{ background: cfg.accentColor }}
+              onClick={() =>
+                window.open(publicPath, "_blank", "noopener,noreferrer")
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white/80 hover:bg-white/10"
             >
-              Request booking
+              <ExternalLink size={12} /> Open
             </button>
-          </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold text-navy-950 hover:bg-amber-400 disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            Save
+          </button>
         </div>
-      </Section>
+      </div>
 
-      {/* Copy */}
-      <Section title="Page copy" subtitle="Headline, description, success message, and logo">
-        <div className="grid gap-4 md:grid-cols-2">
-          <OpsField label="Headline" required>
-            <input
-              className={opsFieldCls}
-              value={cfg.headline}
-              onChange={(e) => setCfg((c) => ({ ...c, headline: e.target.value }))}
-              maxLength={120}
-            />
-          </OpsField>
-          <OpsField label="Logo URL">
-            <input
-              className={opsFieldCls}
-              value={cfg.logoUrl}
-              onChange={(e) => setCfg((c) => ({ ...c, logoUrl: e.target.value }))}
-              placeholder="https://…"
-            />
-          </OpsField>
-          <OpsField label="Description">
-            <textarea
-              rows={3}
-              className={opsFieldCls}
-              value={cfg.description}
-              onChange={(e) => setCfg((c) => ({ ...c, description: e.target.value }))}
-            />
-          </OpsField>
-          <OpsField label="Success message">
-            <textarea
-              rows={3}
-              className={opsFieldCls}
-              value={cfg.successMessage}
-              onChange={(e) => setCfg((c) => ({ ...c, successMessage: e.target.value }))}
-            />
-          </OpsField>
+      {(toast || error) && (
+        <div className="shrink-0">
+          {toast && <OpsFlash ok text={toast} onClose={() => setToast("")} />}
+          {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
         </div>
-      </Section>
+      )}
 
-      {/* Form fields */}
-      <Section title="Form fields" subtitle="Enable or require each default field on the public form">
-        {cfg.formFields.length === 0 ? (
-          <OpsEmpty message="No form fields configured" />
-        ) : (
-          <div className="divide-y divide-slate-100 dark:divide-navy-900">
-            {cfg.formFields.map((f) => (
-              <div
-                key={f.id}
-                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+      {/* Workspace: editor | preview — both fill remaining height */}
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* Editor column */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-navy-800 dark:bg-control-darkCard">
+          <div className="flex shrink-0 gap-1 border-b border-slate-100 px-3 py-2 dark:border-navy-800">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${
+                  tab === t.id
+                    ? "bg-navy-900 text-amber-300 dark:bg-amber-600 dark:text-white"
+                    : "text-slate-500 hover:bg-slate-50 dark:hover:bg-navy-900"
+                }`}
               >
-                <div>
-                  <p className="text-sm font-bold text-navy-900 dark:text-white">{f.label}</p>
-                  <p className="font-mono text-[10px] uppercase text-slate-400">
-                    {f.id} · {f.type}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-4">
-                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={f.enabled}
-                      onChange={(e) => updateField(f.id, { enabled: e.target.checked })}
-                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                    />
-                    Enabled
-                  </label>
-                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={f.required}
-                      disabled={!f.enabled}
-                      onChange={(e) => updateField(f.id, { required: e.target.checked })}
-                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 disabled:opacity-40"
-                    />
-                    Required
-                  </label>
-                </div>
-              </div>
+                {t.label}
+              </button>
             ))}
           </div>
-        )}
-      </Section>
 
-      {/* Calendar */}
-      <Section title="Calendar & availability" subtitle="Hours, closed dates, lead times, and automation">
-        <div className="mb-4 space-y-2">
-          <ToggleRow
-            label="Show calendar on booking page"
-            checked={cfg.showCalendar}
-            onChange={(v) => setCfg((c) => ({ ...c, showCalendar: v }))}
-          />
-          <ToggleRow
-            label="Respect cleaner availability"
-            hint="Only offer slots when a cleaner is free"
-            checked={cfg.useCleanerAvailability}
-            onChange={(v) => setCfg((c) => ({ ...c, useCleanerAvailability: v }))}
-          />
-          <ToggleRow
-            label="Auto-create task on approve"
-            checked={cfg.autoCreateTask}
-            onChange={(v) => setCfg((c) => ({ ...c, autoCreateTask: v }))}
-          />
-          <ToggleRow
-            label="Auto-create property from address"
-            checked={cfg.autoCreateProperty}
-            onChange={(v) => setCfg((c) => ({ ...c, autoCreateProperty: v }))}
-          />
-        </div>
-
-        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Weekly hours
-        </p>
-        <div className="mb-5 space-y-2">
-          {DAY_LABELS.map(({ key, label }) => {
-            const hours = cfg.weeklyHours?.[key] ?? null
-            const closed = hours == null
-            return (
-              <div
-                key={key}
-                className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 dark:border-navy-800 sm:grid-cols-[140px_1fr_auto]"
-              >
-                <p className="text-sm font-semibold text-navy-900 dark:text-white">{label}</p>
-                {closed ? (
-                  <p className="text-xs font-medium text-slate-400">Closed</p>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {tab === "brand" && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-3 md:col-span-2">
+                  <div>
+                    <L>Headline</L>
                     <input
-                      type="time"
-                      value={hours.start}
+                      className={inp}
+                      value={cfg.headline}
                       onChange={(e) =>
-                        setDayHours(key, { start: e.target.value, end: hours.end })
+                        setCfg((c) => ({ ...c, headline: e.target.value }))
                       }
-                      className={`${opsFieldCls} w-auto`}
-                    />
-                    <span className="text-xs text-slate-400">to</span>
-                    <input
-                      type="time"
-                      value={hours.end}
-                      onChange={(e) =>
-                        setDayHours(key, { start: hours.start, end: e.target.value })
-                      }
-                      className={`${opsFieldCls} w-auto`}
                     />
                   </div>
-                )}
-                <label className="inline-flex items-center gap-2 text-xs font-semibold">
-                  <input
-                    type="checkbox"
-                    checked={closed}
-                    onChange={(e) =>
-                      setDayHours(
-                        key,
-                        e.target.checked ? null : { start: "09:00", end: "17:00" }
-                      )
-                    }
-                    className="rounded border-slate-300 text-amber-600"
-                  />
-                  Closed
-                </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <L>Supporting line</L>
+                      <textarea
+                        rows={2}
+                        className={inp}
+                        value={cfg.description}
+                        onChange={(e) =>
+                          setCfg((c) => ({ ...c, description: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <L>Success message</L>
+                      <textarea
+                        rows={2}
+                        className={inp}
+                        value={cfg.successMessage}
+                        onChange={(e) =>
+                          setCfg((c) => ({
+                            ...c,
+                            successMessage: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <L>Logo URL</L>
+                    <input
+                      className={inp}
+                      value={cfg.logoUrl}
+                      onChange={(e) =>
+                        setCfg((c) => ({ ...c, logoUrl: e.target.value }))
+                      }
+                      placeholder="https://…"
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <L>Palette</L>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {(
+                      [
+                        ["primaryColor", "Primary"],
+                        ["accentColor", "Accent"],
+                        ["backgroundColor", "Background"],
+                        ["textColor", "Text"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <div
+                        key={key}
+                        className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2 dark:border-navy-800 dark:bg-navy-950"
+                      >
+                        <input
+                          type="color"
+                          value={cfg[key] || "#000000"}
+                          onChange={(e) =>
+                            setCfg((c) => ({ ...c, [key]: e.target.value }))
+                          }
+                          className="h-9 w-9 cursor-pointer rounded-lg border-0 bg-transparent p-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-slate-400">
+                            {label}
+                          </p>
+                          <input
+                            className="w-full truncate bg-transparent font-mono text-[10px] uppercase outline-none"
+                            value={cfg[key]}
+                            onChange={(e) =>
+                              setCfg((c) => ({ ...c, [key]: e.target.value }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )
-          })}
+            )}
+
+            {tab === "fields" && (
+              <div className="space-y-2">
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Answers create linked <strong>Client → Property → Task</strong>
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {cfg.formFields.map((f) => (
+                    <div
+                      key={f.id}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${
+                        f.enabled
+                          ? "border-amber-200/80 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-950/20"
+                          : "border-slate-100 bg-slate-50/60 opacity-55 dark:border-navy-800"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-bold text-navy-900 dark:text-white">
+                          {f.label}
+                        </p>
+                        <p className="font-mono text-[9px] text-slate-400 uppercase">
+                          {f.id}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Pill
+                          on={f.enabled}
+                          label="Show"
+                          onClick={() =>
+                            updateField(f.id, { enabled: !f.enabled })
+                          }
+                        />
+                        <Pill
+                          on={f.required && f.enabled}
+                          label="Req"
+                          onClick={() => {
+                            if (!f.enabled) return
+                            updateField(f.id, { required: !f.required })
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab === "calendar" && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ["showCalendar", "Calendar"],
+                      ["useCleanerAvailability", "Cleaner hours"],
+                      ["autoCreateProperty", "Auto property"],
+                      ["autoCreateTask", "Auto task"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Pill
+                      key={key}
+                      on={!!cfg[key]}
+                      label={label}
+                      onClick={() =>
+                        setCfg((c) => ({ ...c, [key]: !c[key] }))
+                      }
+                    />
+                  ))}
+                </div>
+
+                <div>
+                  <L>Weekly hours</L>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {DAY_LABELS.map(({ key, label }) => {
+                      const hours = cfg.weeklyHours?.[key] ?? null
+                      const closed = hours == null
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-center gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 dark:border-navy-800"
+                        >
+                          <span className="w-8 text-[11px] font-bold text-navy-900 dark:text-white">
+                            {label}
+                          </span>
+                          {closed ? (
+                            <span className="flex-1 text-[11px] text-slate-400">
+                              Closed
+                            </span>
+                          ) : (
+                            <div className="flex flex-1 items-center gap-1">
+                              <input
+                                type="time"
+                                value={hours.start}
+                                onChange={(e) =>
+                                  setDayHours(key, {
+                                    start: e.target.value,
+                                    end: hours.end,
+                                  })
+                                }
+                                className={`${inp} py-1 text-[11px]`}
+                              />
+                              <input
+                                type="time"
+                                value={hours.end}
+                                onChange={(e) =>
+                                  setDayHours(key, {
+                                    start: hours.start,
+                                    end: e.target.value,
+                                  })
+                                }
+                                className={`${inp} py-1 text-[11px]`}
+                              />
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDayHours(
+                                key,
+                                closed
+                                  ? { start: "09:00", end: "17:00" }
+                                  : null
+                              )
+                            }
+                            className="text-[10px] font-bold text-slate-400 hover:text-navy-900"
+                          >
+                            {closed ? "Open" : "Off"}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <L>Closed dates</L>
+                    <div className="mb-2 flex gap-1.5">
+                      <input
+                        type="date"
+                        value={newClosedDate}
+                        onChange={(e) => setNewClosedDate(e.target.value)}
+                        className={inp}
+                      />
+                      <button
+                        type="button"
+                        className="inline-flex items-center rounded-lg bg-slate-100 px-2.5 text-slate-600 hover:bg-slate-200 dark:bg-navy-900 dark:text-slate-300"
+                        onClick={() => {
+                          const iso = newClosedDate.trim()
+                          if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return
+                          if (cfg.closedDates.includes(iso)) return
+                          setCfg((c) => ({
+                            ...c,
+                            closedDates: [...c.closedDates, iso].sort(),
+                          }))
+                          setNewClosedDate("")
+                        }}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <div className="flex max-h-20 flex-wrap gap-1 overflow-y-auto">
+                      {cfg.closedDates.map((d) => (
+                        <span
+                          key={d}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] dark:border-navy-800 dark:bg-navy-950"
+                        >
+                          {d}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCfg((c) => ({
+                                ...c,
+                                closedDates: c.closedDates.filter((x) => x !== d),
+                              }))
+                            }
+                          >
+                            <Trash2 size={10} className="text-red-500" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["slotIntervalMinutes", "Slot min"],
+                        ["minLeadHours", "Lead hrs"],
+                        ["maxDaysAhead", "Days ahead"],
+                        ["bufferMinutes", "Buffer"],
+                        ["defaultDurationMin", "Duration"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <div key={key}>
+                        <L>{label}</L>
+                        <input
+                          type="number"
+                          className={inp}
+                          value={cfg[key]}
+                          onChange={(e) =>
+                            setCfg((c) => ({
+                              ...c,
+                              [key]: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "share" && (
+              <div className="space-y-3">
+                <div>
+                  <L>Public link</L>
+                  <div className="flex gap-1.5">
+                    <input
+                      readOnly
+                      value={publicAbsolute || "—"}
+                      className={`${inp} font-mono text-[11px]`}
+                    />
+                    <button
+                      type="button"
+                      disabled={!publicAbsolute}
+                      onClick={() => copyText("link", publicAbsolute)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold dark:border-navy-800"
+                    >
+                      {copied === "link" ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <L>Iframe</L>
+                    <textarea
+                      readOnly
+                      rows={4}
+                      value={iframeSnippet}
+                      className={`${inp} font-mono text-[10px] leading-relaxed`}
+                    />
+                    <button
+                      type="button"
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700"
+                      onClick={() => copyText("iframe", iframeSnippet)}
+                    >
+                      {copied === "iframe" ? <Check size={12} /> : <Copy size={12} />}{" "}
+                      Copy iframe
+                    </button>
+                  </div>
+                  <div>
+                    <L>Script</L>
+                    <textarea
+                      readOnly
+                      rows={4}
+                      value={scriptSnippet}
+                      className={`${inp} font-mono text-[10px] leading-relaxed`}
+                    />
+                    <button
+                      type="button"
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700"
+                      onClick={() => copyText("script", scriptSnippet)}
+                    >
+                      {copied === "script" ? <Check size={12} /> : <Copy size={12} />}{" "}
+                      Copy script
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Closed dates
-        </p>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <input
-            type="date"
-            value={newClosedDate}
-            onChange={(e) => setNewClosedDate(e.target.value)}
-            className={`${opsFieldCls} w-auto`}
-          />
-          <OpsSecondaryButton onClick={addClosedDate}>
-            <Plus size={14} /> Add date
-          </OpsSecondaryButton>
-        </div>
-        {cfg.closedDates.length === 0 ? (
-          <p className="mb-5 text-xs text-slate-400">No closed dates</p>
-        ) : (
-          <ul className="mb-5 flex flex-wrap gap-2">
-            {cfg.closedDates.map((d) => (
-              <li
-                key={d}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-xs dark:border-navy-800 dark:bg-navy-950"
-              >
-                {d}
-                <button
-                  type="button"
-                  className="text-red-500 hover:text-red-700"
-                  onClick={() =>
-                    setCfg((c) => ({
-                      ...c,
-                      closedDates: c.closedDates.filter((x) => x !== d),
-                    }))
-                  }
-                  title="Remove"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <OpsField label="Slot interval (minutes)">
-            <input
-              type="number"
-              min={15}
-              max={240}
-              className={opsFieldCls}
-              value={cfg.slotIntervalMinutes}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, slotIntervalMinutes: Number(e.target.value) }))
-              }
-            />
-          </OpsField>
-          <OpsField label="Min lead hours">
-            <input
-              type="number"
-              min={0}
-              max={168}
-              className={opsFieldCls}
-              value={cfg.minLeadHours}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, minLeadHours: Number(e.target.value) }))
-              }
-            />
-          </OpsField>
-          <OpsField label="Max days ahead">
-            <input
-              type="number"
-              min={7}
-              max={365}
-              className={opsFieldCls}
-              value={cfg.maxDaysAhead}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, maxDaysAhead: Number(e.target.value) }))
-              }
-            />
-          </OpsField>
-          <OpsField label="Buffer (minutes)">
-            <input
-              type="number"
-              min={0}
-              max={240}
-              className={opsFieldCls}
-              value={cfg.bufferMinutes}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, bufferMinutes: Number(e.target.value) }))
-              }
-            />
-          </OpsField>
-          <OpsField label="Default duration (minutes)">
-            <input
-              type="number"
-              min={30}
-              max={480}
-              className={opsFieldCls}
-              value={cfg.defaultDurationMin}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, defaultDurationMin: Number(e.target.value) }))
-              }
-            />
-          </OpsField>
-        </div>
-      </Section>
-
-      <div className="flex justify-end gap-2 pb-6">
-        <OpsSecondaryButton
-          disabled={!publicPath}
-          onClick={() => window.open(publicPath, "_blank", "noopener,noreferrer")}
-        >
-          <ExternalLink size={14} /> Live preview
-        </OpsSecondaryButton>
-        <OpsPrimaryButton onClick={save} disabled={saving}>
-          {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-          Save changes
-        </OpsPrimaryButton>
+        {/* Preview column — fills height, no page scroll */}
+        <aside className="hidden min-h-0 flex-col overflow-hidden rounded-2xl border border-navy-900/10 bg-navy-950 p-2.5 shadow-xl shadow-navy-950/20 lg:flex">
+          <div className="mb-2 flex shrink-0 items-center justify-between px-1.5">
+            <p className="text-[9px] font-bold tracking-[0.16em] text-white/35 uppercase">
+              Live preview
+            </p>
+            <p className="font-mono text-[9px] text-amber-400/70">
+              {cfg.publicSlug || "…"}
+            </p>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white">
+            {previewSrc ? (
+              <iframe
+                key={previewKey}
+                src={previewSrc}
+                title="Booking preview"
+                className="h-full w-full border-0"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-slate-400">
+                Save to preview
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )
