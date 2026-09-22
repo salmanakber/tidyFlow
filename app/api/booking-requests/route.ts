@@ -113,6 +113,7 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
+    const { newBookingTrackToken } = await import("@/lib/booking-jobs")
     const updated = await prisma.bookingRequest.update({
       where: { id },
       data: {
@@ -120,6 +121,7 @@ export async function PATCH(request: NextRequest) {
         clientId,
         propertyId,
         taskId,
+        trackToken: booking.trackToken || newBookingTrackToken(),
       },
     })
 
@@ -141,6 +143,17 @@ export async function PATCH(request: NextRequest) {
         screenRoute: "TaskDetail",
         screenParams: { taskId },
       }).catch(() => {})
+    }
+
+    if (booking.guestEmail) {
+      const { notifyBookingLifecycle } = await import(
+        "@/lib/booking-worker-handlers"
+      )
+      await notifyBookingLifecycle({
+        bookingRequestId: id,
+        requestedStart: booking.requestedStart,
+        kind: "approved",
+      }).catch((err) => console.warn("[Booking] approve email failed:", err))
     }
 
     return NextResponse.json({ success: true, data: updated })

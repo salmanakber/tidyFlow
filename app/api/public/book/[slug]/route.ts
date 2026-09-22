@@ -177,6 +177,7 @@ export async function POST(request: NextRequest, context: Ctx) {
       requestedEnd,
       status: taskId ? "converted" : "pending",
       source,
+      trackToken: (await import("@/lib/booking-jobs")).newBookingTrackToken(),
     },
   })
 
@@ -190,6 +191,17 @@ export async function POST(request: NextRequest, context: Ctx) {
     source,
   })
 
+  if (guestEmail && booking.trackToken) {
+    const { notifyBookingLifecycle } = await import(
+      "@/lib/booking-worker-handlers"
+    )
+    await notifyBookingLifecycle({
+      bookingRequestId: booking.id,
+      requestedStart,
+      kind: taskId ? "approved" : "confirmation",
+    }).catch((err) => console.warn("[Booking] email enqueue failed:", err))
+  }
+
   return NextResponse.json({
     success: true,
     data: {
@@ -198,6 +210,10 @@ export async function POST(request: NextRequest, context: Ctx) {
       clientId,
       propertyId,
       taskId,
+      trackToken: booking.trackToken,
+      trackUrl: booking.trackToken
+        ? `/book/track/${booking.trackToken}`
+        : null,
       message:
         config.successMessage ||
         "Thanks! Your booking request is in. We’ll be in touch soon.",

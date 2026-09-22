@@ -2354,6 +2354,7 @@ model BookingRequest {
   requestedEnd   DateTime? @map("requested_end")
   status         String    @default("pending") // pending, approved, rejected, converted, cancelled
   source         String    @default("link") // link, embed
+  trackToken     String?   @unique @map("track_token")
   metadata       String?   @db.Text
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -2367,5 +2368,6 @@ model BookingRequest {
   @@index([companyId, status])
   @@index([requestedStart])
   @@index([clientId])
+  @@index([trackToken])
   @@map("booking_requests")
 }

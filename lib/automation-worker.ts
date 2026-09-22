@@ -17,6 +17,7 @@ import {
   ensureRebookAlertsScanScheduler,
 } from './automation-queue';
 import { getRedisConnectionOptions } from './redis-connection';
+import { ensureBookingReminderScanScheduler } from './booking-jobs';
 
 async function getBillingContacts(companyId: number) {
   return prisma.user.findMany({
@@ -239,6 +240,16 @@ async function processAutomationJob(job: Job) {
       return result;
     }
 
+    case 'booking-client-email': {
+      const { handleBookingClientEmail } = await import('./booking-worker-handlers');
+      return handleBookingClientEmail(job.data as import('./booking-jobs').BookingEmailJob);
+    }
+
+    case 'scan-booking-reminders': {
+      const { scanBookingReminders } = await import('./booking-worker-handlers');
+      return scanBookingReminders();
+    }
+
     // AI Sales Agent jobs (isolated handlers — do not alter billing/cron behaviour)
     case 'sa-discover-places':
     case 'sa-discover-search':
@@ -294,6 +305,10 @@ export function initializeAutomationWorker() {
     console.warn('[Automation Worker] rebook alerts scan scheduler failed:', err);
   });
 
+  ensureBookingReminderScanScheduler().catch((err) => {
+    console.warn('[Automation Worker] booking reminder scan scheduler failed:', err);
+  });
+
   import('./sales-agent/queue')
     .then(({ ensureReplySyncScheduler, ensureCampaignEmailSweeper }) =>
       Promise.all([ensureReplySyncScheduler(), ensureCampaignEmailSweeper()])
@@ -303,7 +318,7 @@ export function initializeAutomationWorker() {
     });
 
   console.log(
-    '[Automation Worker] initialized (billing, trial reminders, plan limits, compliance, rebook alerts, sales agent)'
+    '[Automation Worker] initialized (billing, trial reminders, plan limits, compliance, rebook alerts, booking emails, sales agent)'
   );
   return automationWorkerInstance;
 }

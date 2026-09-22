@@ -121,6 +121,7 @@ export default function PublicBookPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<string | null>(null)
+  const [trackUrl, setTrackUrl] = useState<string | null>(null)
   const [phase, setPhase] = useState<"when" | "details">("when")
   const [ready, setReady] = useState(false)
   const [previewOverride, setPreviewOverride] = useState<{
@@ -244,7 +245,6 @@ export default function PublicBookPage() {
     }
   }, [selectedDate, slug, duration])
 
-  const theme = config?.theme
   const monthLabel = useMemo(
     () =>
       new Date(month.year, month.month - 1, 1).toLocaleDateString(undefined, {
@@ -294,6 +294,9 @@ export default function PublicBookPage() {
         return
       }
       setDone(json.data?.message || config.successMessage)
+      if (json.data?.trackUrl) setTrackUrl(json.data.trackUrl)
+      else if (json.data?.trackToken)
+        setTrackUrl(`/book/track/${json.data.trackToken}`)
     } catch {
       setError("Network error — please try again")
     } finally {
@@ -624,6 +627,14 @@ export default function PublicBookPage() {
               <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed opacity-65">
                 {done}
               </p>
+              {trackUrl && (
+                <a
+                  href={trackUrl}
+                  className="bk-cta mt-6 inline-block px-8 py-3 text-sm"
+                >
+                  Track your booking
+                </a>
+              )}
             </section>
           ) : (
             <section className="bk-panel bk-rise-2 rounded-[28px] p-5 sm:p-8">
