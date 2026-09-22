@@ -10,6 +10,9 @@ export const PAGE_PERMISSIONS: Record<string, string | string[] | null> = {
   
   // Properties
   '/admin/properties': PERMISSIONS.PROPERTIES_VIEW,
+  '/admin/clients': PERMISSIONS.PROPERTIES_VIEW,
+  // Booking widget — manager gated in layout/API
+  '/admin/booking-widget': null,
   
   // Tasks
   '/admin/tasks': PERMISSIONS.TASKS_VIEW,

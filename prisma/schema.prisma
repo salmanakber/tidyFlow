@@ -133,6 +133,9 @@ model Company {
   partnerReferrals           PartnerReferral[]
   partnerCommissions         PartnerCommission[]
   partnerClientClaims        PartnerClientClaim[]
+  clients                    Client[]
+  bookingWidgetConfig        BookingWidgetConfig?
+  bookingRequests            BookingRequest[]
 
   @@index([referredByPartnerId])
   @@map("companies")
@@ -154,6 +157,7 @@ model Property {
   clientName         String?   @map("client_name")
   clientEmail        String?   @map("client_email")
   clientPhone        String?   @map("client_phone")
+  clientId           Int?      @map("client_id")
   defaultServiceRate Decimal?  @map("default_service_rate") @db.Decimal(10, 2)
   isActive           Boolean   @default(true) @map("is_active")
   googleSheetUrl     String?   @map("google_sheet_url") @db.Text
@@ -167,14 +171,17 @@ model Property {
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  company        Company                 @relation(fields: [companyId], references: [id])
-  tasks          Task[]
-  noteRecords    Note[]                  @relation("PropertyNotes")
-  requiredSkills PropertyRequiredSkill[]
-  recurringJobs  RecurringJob[]
-  clientInvoices ClientInvoice[]
+  company         Company                 @relation(fields: [companyId], references: [id])
+  client          Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  tasks           Task[]
+  noteRecords     Note[]                  @relation("PropertyNotes")
+  requiredSkills  PropertyRequiredSkill[]
+  recurringJobs   RecurringJob[]
+  clientInvoices  ClientInvoice[]
+  bookingRequests BookingRequest[]
 
   @@index([companyId])
+  @@index([clientId])
   @@index([sheetSyncEnabled])
   @@index([sheetLastSyncedAt])
   @@map("properties")
@@ -227,6 +234,7 @@ model Task {
   reviewRequests          ReviewRequest[]
   workingHoursSubmissions WorkingHoursSubmissionTask[]
   supplyUsages            SupplyUsage[]
+  bookingRequests         BookingRequest[]
 
   @@unique([propertyId, uniqueIdentifier]) // Ensure unique identifier is unique per property (NULL values are allowed)
   @@index([companyId])
@@ -2261,4 +2269,103 @@ model PartnerClientClaim {
   @@index([customerEmail])
   @@index([status])
   @@map("partner_client_claims")
+}
+
+/// First-class cleaning client for company CRM / booking.
+model Client {
+  id        Int      @id @default(autoincrement())
+  companyId Int      @map("company_id")
+  name      String
+  email     String?
+  phone     String?
+  notes     String?  @db.Text
+  source    String   @default("manual") // manual, booking, import
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  properties      Property[]
+  bookingRequests BookingRequest[]
+
+  @@index([companyId])
+  @@index([companyId, email])
+  @@index([companyId, name])
+  @@map("clients")
+}
+
+/// Public booking page + embed personalization (one per company).
+model BookingWidgetConfig {
+  id                   Int      @id @default(autoincrement())
+  companyId            Int      @unique @map("company_id")
+  enabled              Boolean  @default(true)
+  publicSlug           String   @unique @map("public_slug")
+  headline             String?
+  description          String?  @db.Text
+  successMessage       String?  @map("success_message") @db.Text
+  logoUrl              String?  @map("logo_url") @db.Text
+  primaryColor         String   @default("#0B1F33") @map("primary_color")
+  accentColor          String   @default("#D97706") @map("accent_color")
+  backgroundColor      String   @default("#F7F4EF") @map("background_color")
+  textColor            String   @default("#0F172A") @map("text_color")
+  /// JSON BookingFormField[]
+  formFields           String   @default("[]") @map("form_fields") @db.Text
+  /// JSON service options [{id,label,durationMinutes}]
+  serviceOptions       String   @default("[]") @map("service_options") @db.Text
+  /// JSON weekly hours: {"0":null,"1":{"start":"09:00","end":"17:00"},...}
+  weeklyHours          String   @default("{}") @map("weekly_hours") @db.Text
+  /// JSON ISO date strings closed: ["2026-12-25"]
+  closedDates          String   @default("[]") @map("closed_dates") @db.Text
+  slotIntervalMinutes  Int      @default(60) @map("slot_interval_minutes")
+  defaultDurationMin   Int      @default(120) @map("default_duration_min")
+  minLeadHours         Int      @default(24) @map("min_lead_hours")
+  maxDaysAhead         Int      @default(60) @map("max_days_ahead")
+  bufferMinutes        Int      @default(30) @map("buffer_minutes")
+  useCleanerAvailability Boolean @default(true) @map("use_cleaner_availability")
+  showCalendar         Boolean  @default(true) @map("show_calendar")
+  autoCreateTask       Boolean  @default(false) @map("auto_create_task")
+  autoCreateProperty   Boolean  @default(true) @map("auto_create_property")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bookingRequests BookingRequest[]
+
+  @@index([publicSlug])
+  @@map("booking_widget_configs")
+}
+
+model BookingRequest {
+  id             Int       @id @default(autoincrement())
+  companyId      Int       @map("company_id")
+  widgetConfigId Int?      @map("widget_config_id")
+  clientId       Int?      @map("client_id")
+  propertyId     Int?      @map("property_id")
+  taskId         Int?      @map("task_id")
+  guestName      String    @map("guest_name")
+  guestEmail     String?   @map("guest_email")
+  guestPhone     String?   @map("guest_phone")
+  address        String?   @db.Text
+  serviceType    String?   @map("service_type")
+  notes          String?   @db.Text
+  /// Extra field answers JSON
+  fieldAnswers   String?   @map("field_answers") @db.Text
+  requestedStart DateTime  @map("requested_start")
+  requestedEnd   DateTime? @map("requested_end")
+  status         String    @default("pending") // pending, approved, rejected, converted, cancelled
+  source         String    @default("link") // link, embed
+  metadata       String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  widgetConfig BookingWidgetConfig? @relation(fields: [widgetConfigId], references: [id], onDelete: SetNull)
+  client       Client?              @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  property     Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  task         Task?                @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@index([requestedStart])
+  @@index([clientId])
+  @@map("booking_requests")
 }

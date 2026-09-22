@@ -24,6 +24,8 @@ export const RESERVED_PATH_SEGMENTS = new Set([
   'manifest.json',
   'icon.png',
   'c', // optional short prefix if needed later
+  'book',
+  'embed',
 ])
 
 /** Map pretty company paths → existing /admin page folders */
@@ -66,6 +68,9 @@ export const COMPANY_ROUTE_MAP: Record<string, string> = {
   digests: 'digests',
   monitor: 'live-monitor',
   'live-monitor': 'live-monitor',
+  clients: 'clients',
+  'booking-widget': 'booking-widget',
+  booking: 'booking-widget',
   // Platform admin only: company-config, ai
 }
 

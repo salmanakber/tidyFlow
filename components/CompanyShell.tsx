@@ -43,6 +43,8 @@ import {
   Mail,
   PanelLeftClose,
   PanelLeftOpen,
+  CalendarHeart,
+  Contact,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { CurrencyProvider } from "@/contexts/CurrencyContext"
@@ -101,6 +103,8 @@ const OWNER_NAV: NavItem[] = [
   },
   // Manage — Safety near top (managers)
   { name: "Properties", page: "properties", icon: Building2, group: "manage" },
+  { name: "Clients", page: "clients", icon: Contact, group: "manage" },
+  { name: "Booking page", page: "booking-widget", icon: CalendarHeart, group: "manage" },
   { name: "Safety & GPS", page: "safety", icon: MapPin, group: "manage" },
   { name: "Rota Builder", page: "rota", icon: CalendarDays, group: "manage" },
   {

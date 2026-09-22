@@ -322,3 +322,49 @@ export async function notifyTaskActivity(input: {
     }).catch(() => {});
   }
 }
+
+/** Notify owners/managers of a new public booking request (push + in-app + realtime). */
+export async function notifyNewBookingRequest(input: {
+  companyId: number
+  bookingRequestId: number
+  guestName: string
+  requestedStart: Date
+  serviceType?: string | null
+  source?: string
+}) {
+  const managers = await prisma.user.findMany({
+    where: {
+      companyId: input.companyId,
+      role: { in: ['MANAGER', 'COMPANY_ADMIN', 'OWNER', 'DEVELOPER'] },
+      isActive: true,
+    },
+    select: { id: true },
+  })
+
+  const when = input.requestedStart.toLocaleString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  const service = input.serviceType ? ` · ${input.serviceType}` : ''
+  const title = 'New booking request'
+  const message = `${input.guestName} requested ${when}${service}`
+
+  for (const m of managers) {
+    await createNotification({
+      userId: m.id,
+      title,
+      message,
+      type: 'booking_request',
+      metadata: {
+        bookingRequestId: input.bookingRequestId,
+        source: input.source || 'link',
+      },
+      screenRoute: 'Clients',
+      screenParams: { bookingId: input.bookingRequestId, tab: 'bookings' },
+    }).catch(() => {})
+  }
+}
+

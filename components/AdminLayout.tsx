@@ -42,6 +42,8 @@ import {
   Handshake,
   Sun,
   Moon,
+  Contact,
+  CalendarHeart,
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
@@ -84,6 +86,8 @@ const ADMIN_NAV: NavItem[] = [
   { name: "Control Center", href: "/admin/control-center", icon: Command, permission: "system.admin", roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "platform" },
   { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard, permission: null, roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },
   { name: "Properties", href: "/admin/properties", icon: Building2, permission: "properties.view", roles: null, group: "ops" },
+  { name: "Clients", href: "/admin/clients", icon: Contact, permission: "properties.view", roles: null, group: "ops" },
+  { name: "Booking page", href: "/admin/booking-widget", icon: CalendarHeart, permission: null, roles: null, group: "ops" },
   { name: "Tasks", href: "/admin/tasks", icon: ClipboardList, permission: "tasks.view", roles: null, group: "ops" },
   { name: "Rota Builder", href: "/admin/rota", icon: CalendarDays, permission: "tasks.view", roles: null, group: "ops" },
   { name: "Recurring Jobs", href: "/admin/recurring-jobs", icon: RefreshCcw, permission: "tasks.view", roles: null, group: "ops" },

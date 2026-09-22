@@ -63,6 +63,8 @@ export function resolveNotificationHref(
       return href("compliance")
     case "ClientFeedback":
       return taskId ? `${href("jobs")}?task=${taskId}&tab=review` : href("jobs")
+    case "Clients":
+      return `${href("clients")}?tab=bookings`
     default:
       break
   }
@@ -75,6 +77,9 @@ export function resolveNotificationHref(
   if (type.includes("geofence")) return href("monitor")
   if (type.includes("billing") || type.includes("subscription")) return "/account/billing"
   if (type.includes("announcement")) return href("announcements")
+  if (type.includes("booking_request") || type === "booking_request") {
+    return `${href("clients")}?tab=bookings`
+  }
 
   return null
 }

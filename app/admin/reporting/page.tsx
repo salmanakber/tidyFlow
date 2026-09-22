@@ -63,7 +63,7 @@ import {
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
-type TabId = "finance" | "operations" | "team" | "collections"
+type TabId = "finance" | "operations" | "team" | "collections" | "clients"
 
 interface OpsReportData {
   taskCompletion: {
@@ -212,6 +212,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "operations", label: "Operations" },
   { id: "team", label: "Team" },
   { id: "collections", label: "Collections" },
+  { id: "clients", label: "Clients" },
 ]
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
@@ -332,6 +333,11 @@ export default function ReportingPage() {
   const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState("")
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
+  const [clientCrm, setClientCrm] = useState<{
+    totalClients: number
+    pendingBookings: number
+    bookingsThisMonth: number
+  } | null>(null)
   const [dateRange, setDateRange] = useState(() => ({
     start: toISODate(daysAgo(30)),
     end: toISODate(new Date()),
@@ -349,13 +355,14 @@ export default function ReportingPage() {
       setLoading(true)
       setError("")
 
-      const [opsRes, revRes] = await Promise.all([
+      const [opsRes, revRes, clientsRes] = await Promise.all([
         adminGet("/api/admin/reporting", {
           params: { startDate: dateRange.start, endDate: dateRange.end },
         }),
         adminGet("/api/revenue/report", {
           params: { from: dateRange.start, to: dateRange.end },
         }),
+        adminGet("/api/clients").catch(() => null),
       ])
 
       if (opsRes.data?.success) {
@@ -372,6 +379,12 @@ export default function ReportingPage() {
         }
       } else {
         setRevenueData(null)
+      }
+
+      if (clientsRes?.data?.success) {
+        setClientCrm(clientsRes.data.data?.summary || null)
+      } else {
+        setClientCrm(null)
       }
 
       if (!opsRes.data?.success && !revRes.data?.success) {
@@ -1668,6 +1681,59 @@ export default function ReportingPage() {
                       </table>
                     )}
                   </OpsTableShell>
+                </div>
+              )}
+
+              {/* ═══════════════ CLIENTS CRM ═══════════════ */}
+              {tab === "clients" && (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <OpsKpi
+                      label="Clients"
+                      value={String(clientCrm?.totalClients ?? "—")}
+                      hint="CRM records"
+                    />
+                    <OpsKpi
+                      label="Pending bookings"
+                      value={String(clientCrm?.pendingBookings ?? "—")}
+                      hint="Awaiting approval"
+                    />
+                    <OpsKpi
+                      label="Bookings this month"
+                      value={String(clientCrm?.bookingsThisMonth ?? "—")}
+                    />
+                    <OpsKpi
+                      label="Client margin rows"
+                      value={String((revenueData?.marginByClient || []).length)}
+                      hint="Selected period"
+                    />
+                  </div>
+
+                  <MarginTable
+                    title="Margin by client"
+                    rows={(revenueData?.marginByClient || []).slice(0, 20)}
+                  />
+
+                  <OpsCard>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Open the{" "}
+                      <button
+                        type="button"
+                        className="font-semibold text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
+                        onClick={() => {
+                          const path = window.location.pathname
+                          window.location.href = path.includes("/admin/")
+                            ? "/admin/clients"
+                            : path.replace(/\/reporting.*/, "/clients")
+                        }}
+                      >
+                        Clients
+                      </button>{" "}
+                      workspace to manage properties, tasks, and booking requests.
+                      Public booking link &amp; embed live under{" "}
+                      <strong>Booking page</strong>.
+                    </p>
+                  </OpsCard>
                 </div>
               )}
             </>
