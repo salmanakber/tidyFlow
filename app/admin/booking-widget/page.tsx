@@ -3,9 +3,9 @@
 /**
  * Booking studio — dense, low-scroll personalization with live preview.
  */
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import AdminLayout from "@/components/AdminLayout"
-import { adminGet, adminPatch } from "@/lib/admin-session"
+import { adminGet, adminPatch, getAdminAuthHeaders } from "@/lib/admin-session"
 import {
   DEFAULT_FORM_FIELDS,
   DEFAULT_THEME,
@@ -19,6 +19,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  ImagePlus,
   Loader2,
   Plus,
   Sparkles,
@@ -149,6 +150,9 @@ function Content() {
   const [newClosedDate, setNewClosedDate] = useState("")
   const [tab, setTab] = useState<StudioTab>("brand")
   const [previewKey, setPreviewKey] = useState(0)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -199,6 +203,68 @@ function Content() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Push live colors/copy into iframe preview (no save required)
+  const pushPreview = useCallback(() => {
+    const win = iframeRef.current?.contentWindow
+    if (!win) return
+    try {
+      win.postMessage(
+        {
+          type: "tidyflow-booking-preview",
+          primaryColor: cfg.primaryColor,
+          accentColor: cfg.accentColor,
+          backgroundColor: cfg.backgroundColor,
+          textColor: cfg.textColor,
+          headline: cfg.headline,
+          description: cfg.description,
+          logoUrl: cfg.logoUrl || null,
+        },
+        window.location.origin
+      )
+    } catch {
+      /* ignore */
+    }
+  }, [cfg])
+
+  useEffect(() => {
+    pushPreview()
+  }, [pushPreview])
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      if (e.data?.type === "tidyflow-booking-ready") pushPreview()
+    }
+    window.addEventListener("message", onMsg)
+    return () => window.removeEventListener("message", onMsg)
+  }, [pushPreview])
+
+  const uploadLogo = async (file: File) => {
+    try {
+      setLogoUploading(true)
+      setError("")
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/company/booking-widget/logo", {
+        method: "POST",
+        headers: getAdminAuthHeaders(),
+        body: fd,
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.success) {
+        setError(json?.message || "Logo upload failed")
+        return
+      }
+      setCfg((c) => ({ ...c, logoUrl: json.data.url }))
+      setToast("Logo uploaded")
+      setPreviewKey((k) => k + 1)
+    } catch (e: any) {
+      setError(e?.message || "Logo upload failed")
+    } finally {
+      setLogoUploading(false)
+    }
+  }
 
   const publicPath =
     cfg.publicUrl || (cfg.publicSlug ? `/book/${cfg.publicSlug}` : "")
@@ -446,15 +512,61 @@ function Content() {
                     </div>
                   </div>
                   <div>
-                    <L>Logo URL</L>
-                    <input
-                      className={inp}
-                      value={cfg.logoUrl}
-                      onChange={(e) =>
-                        setCfg((c) => ({ ...c, logoUrl: e.target.value }))
-                      }
-                      placeholder="https://…"
-                    />
+                    <L>Company logo</L>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-navy-800 dark:bg-navy-950">
+                        {cfg.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={cfg.logoUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <ImagePlus size={18} className="text-slate-300" />
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          ref={fileRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) void uploadLogo(f)
+                            e.target.value = ""
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={logoUploading}
+                          onClick={() => fileRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-navy-900 px-3 py-2 text-[11px] font-bold text-amber-300 disabled:opacity-50 dark:bg-amber-600 dark:text-white"
+                        >
+                          {logoUploading ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <ImagePlus size={12} />
+                          )}
+                          {logoUploading ? "Uploading…" : "Choose image"}
+                        </button>
+                        {cfg.logoUrl ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCfg((c) => ({ ...c, logoUrl: "" }))
+                            }
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-500 dark:border-navy-800"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-slate-400">
+                      PNG/JPG/WebP · max 4MB · saved via Cloudinary
+                    </p>
                   </div>
                 </div>
 
@@ -785,10 +897,12 @@ function Content() {
           <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white">
             {previewSrc ? (
               <iframe
+                ref={iframeRef}
                 key={previewKey}
                 src={previewSrc}
                 title="Booking preview"
                 className="h-full w-full border-0"
+                onLoad={pushPreview}
               />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-slate-400">

@@ -123,6 +123,15 @@ export default function PublicBookPage() {
   const [done, setDone] = useState<string | null>(null)
   const [phase, setPhase] = useState<"when" | "details">("when")
   const [ready, setReady] = useState(false)
+  const [previewOverride, setPreviewOverride] = useState<{
+    primaryColor?: string
+    accentColor?: string
+    backgroundColor?: string
+    textColor?: string
+    headline?: string
+    description?: string
+    logoUrl?: string | null
+  } | null>(null)
 
   const duration = useMemo(() => {
     const svc = answers.serviceType
@@ -136,6 +145,33 @@ export default function PublicBookPage() {
     const t = requestAnimationFrame(() => setReady(true))
     return () => cancelAnimationFrame(t)
   }, [])
+
+  // Live preview from Booking studio (postMessage) — colors/copy without save
+  useEffect(() => {
+    if (!isEmbed) return
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      const data = e.data
+      if (!data || data.type !== "tidyflow-booking-preview") return
+      setPreviewOverride({
+        primaryColor: data.primaryColor,
+        accentColor: data.accentColor,
+        backgroundColor: data.backgroundColor,
+        textColor: data.textColor,
+        headline: data.headline,
+        description: data.description,
+        logoUrl: data.logoUrl,
+      })
+    }
+    window.addEventListener("message", onMsg)
+    // Tell parent we're ready to receive theme
+    try {
+      window.parent?.postMessage({ type: "tidyflow-booking-ready" }, window.location.origin)
+    } catch {
+      /* ignore */
+    }
+    return () => window.removeEventListener("message", onMsg)
+  }, [isEmbed])
 
   useEffect(() => {
     if (!slug) return
@@ -273,7 +309,7 @@ export default function PublicBookPage() {
     )
   }
 
-  if ((error && !config) || !config || !theme) {
+  if ((error && !config) || !config) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0a1520] px-6 text-center">
         <p className="font-[family-name:var(--bk-display)] text-2xl text-white">
@@ -283,6 +319,21 @@ export default function PublicBookPage() {
       </div>
     )
   }
+
+  const liveTheme = {
+    primary: previewOverride?.primaryColor || config.theme.primary,
+    accent: previewOverride?.accentColor || config.theme.accent,
+    background: previewOverride?.backgroundColor || config.theme.background,
+    text: previewOverride?.textColor || config.theme.text,
+  }
+  const liveHeadline = previewOverride?.headline ?? config.headline
+  const liveDescription = previewOverride?.description ?? config.description
+  const liveLogo =
+    previewOverride?.logoUrl !== undefined
+      ? previewOverride.logoUrl
+      : config.logoUrl
+
+  const theme = liveTheme
 
   const cssVars = {
     ["--bk-primary" as string]: theme.primary,
@@ -310,7 +361,12 @@ export default function PublicBookPage() {
       : null
 
   return (
-    <div style={cssVars} className={`bk-atelier ${ready ? "bk-ready" : ""}`}>
+    <div
+      style={cssVars}
+      className={`bk-atelier ${ready ? "bk-ready" : ""} ${
+        isEmbed ? "" : "lg:grid lg:min-h-screen lg:grid-cols-[minmax(300px,42vw)_minmax(0,1fr)]"
+      }`}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Outfit:wght@300;400;500;600;700&display=swap');
         .bk-atelier {
@@ -407,72 +463,92 @@ export default function PublicBookPage() {
         }
       `}</style>
 
-      <div
-        className={`mx-auto grid min-h-screen max-w-[1360px] ${
-          isEmbed
-            ? "grid-cols-1 px-3 py-4 sm:px-6"
-            : "lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.25fr)]"
-        }`}
-      >
-        {/* Brand plane */}
+        {/* Brand plane — full-bleed left, sticky, no outer gap */}
         {!isEmbed && (
-          <aside className="bk-brand-plane bk-rise relative hidden overflow-hidden lg:flex lg:min-h-screen lg:flex-col lg:justify-between lg:p-12 xl:p-14">
+          <aside className="bk-brand-plane bk-rise relative hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between lg:overflow-hidden lg:p-12 xl:p-16">
             <div className="bk-grain pointer-events-none absolute inset-0 opacity-40 mix-blend-overlay" />
             <div
-              className="pointer-events-none absolute -right-20 top-24 h-72 w-72 rounded-full blur-3xl"
-              style={{ background: rgba("#fff", 0.12) }}
+              className="pointer-events-none absolute -right-16 top-16 h-80 w-80 rounded-full blur-3xl"
+              style={{ background: rgba("#fff", 0.1) }}
             />
+            <div
+              className="pointer-events-none absolute -bottom-20 -left-10 h-64 w-64 rounded-full blur-3xl"
+              style={{ background: rgba(theme.accent, 0.25) }}
+            />
+
             <div className="relative z-10">
-              <div className="flex items-center gap-3">
-                {config.logoUrl ? (
+              <div className="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/8 px-3 py-2.5 backdrop-blur-md">
+                {liveLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={config.logoUrl}
+                    src={liveLogo}
                     alt=""
-                    className="h-14 w-14 rounded-2xl object-cover ring-2 ring-white/25"
+                    className="h-12 w-12 rounded-xl object-cover ring-1 ring-white/25"
                   />
                 ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-xl font-semibold text-white ring-1 ring-white/20">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 text-lg font-semibold text-white ring-1 ring-white/20">
                     {config.companyName.slice(0, 1).toUpperCase()}
                   </div>
                 )}
-                <p className="text-sm font-medium tracking-[0.18em] text-white/70 uppercase">
-                  {config.companyName}
-                </p>
+                <div>
+                  <p className="text-[10px] font-semibold tracking-[0.22em] text-white/55 uppercase">
+                    Book with
+                  </p>
+                  <p className="text-sm font-semibold tracking-wide text-white">
+                    {config.companyName}
+                  </p>
+                </div>
               </div>
-              <h1 className="bk-display mt-14 max-w-md text-5xl leading-[1.05] text-white xl:text-6xl">
-                {config.headline}
+
+              <h1 className="bk-display mt-16 max-w-lg text-[3.25rem] leading-[1.02] text-white xl:text-[3.75rem]">
+                {liveHeadline}
               </h1>
-              <p className="mt-6 max-w-sm text-base leading-relaxed text-white/70">
-                {config.description}
+              <p className="mt-6 max-w-md text-[15px] leading-relaxed text-white/68">
+                {liveDescription}
               </p>
+
+              <div className="mt-10 flex flex-col gap-3">
+                {[
+                  "Pick a time that works for you",
+                  "Your request goes straight to the team",
+                  "We’ll confirm shortly",
+                ].map((line) => (
+                  <div key={line} className="flex items-center gap-3 text-sm text-white/70">
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                      style={{ background: rgba("#fff", 0.12) }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M5 13l4 4L19 7"
+                          stroke="#fff"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    {line}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="relative z-10 space-y-4">
-              <div className="flex gap-6 text-white/55">
-                {["Secure request", "Confirmed by team", "On your schedule"].map(
-                  (t) => (
-                    <p key={t} className="text-[11px] tracking-wide uppercase">
-                      {t}
-                    </p>
-                  )
-                )}
-              </div>
-              <div className="pt-2">
-                <a
-                  href={tidyflowMarketingUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-xs text-white/50 transition hover:text-white/80"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/assets/logot-transparent.png"
-                    alt=""
-                    className="h-5 w-5 rounded object-contain"
-                  />
-                  tidyflowapp.com
-                </a>
-              </div>
+
+            <div className="relative z-10">
+              <a
+                href={tidyflowMarketingUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2.5 rounded-full border border-white/12 bg-white/8 px-3.5 py-2 text-xs text-white/60 backdrop-blur transition hover:bg-white/12 hover:text-white/85"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/assets/logot-transparent.png"
+                  alt=""
+                  className="h-5 w-5 rounded object-contain"
+                />
+                Powered by TidyFlow · tidyflowapp.com
+              </a>
             </div>
           </aside>
         )}
@@ -480,16 +556,18 @@ export default function PublicBookPage() {
         {/* Booking atelier */}
         <main
           className={`relative flex flex-col ${
-            isEmbed ? "py-2" : "px-4 py-8 sm:px-8 lg:px-12 lg:py-12 xl:px-14"
+            isEmbed
+              ? "px-3 py-4 sm:px-5"
+              : "min-h-screen px-4 py-8 sm:px-8 lg:px-12 lg:py-12 xl:px-16"
           }`}
         >
           {isEmbed && (
             <header className="bk-rise mb-6">
               <div className="flex items-center gap-3">
-                {config.logoUrl ? (
+                {liveLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={config.logoUrl}
+                    src={liveLogo}
                     alt=""
                     className="h-11 w-11 rounded-xl object-cover"
                   />
@@ -502,12 +580,12 @@ export default function PublicBookPage() {
                     {config.companyName}
                   </p>
                   <h1 className="bk-display text-3xl leading-tight sm:text-4xl">
-                    {config.headline}
+                    {liveHeadline}
                   </h1>
                 </div>
               </div>
               <p className="mt-2 max-w-lg text-sm" style={{ color: rgba(theme.text, 0.6) }}>
-                {config.description}
+                {liveDescription}
               </p>
             </header>
           )}
@@ -521,7 +599,7 @@ export default function PublicBookPage() {
                 {config.companyName}
               </p>
               <h1 className="bk-display mt-1 text-4xl leading-tight">
-                {config.headline}
+                {liveHeadline}
               </h1>
             </div>
           )}
@@ -849,7 +927,6 @@ export default function PublicBookPage() {
             </a>
           </footer>
         </main>
-      </div>
     </div>
   )
 }

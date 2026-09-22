@@ -48,6 +48,7 @@ import {
 import CompanySelector from "./CompanySelector"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { CurrencyProvider } from "@/contexts/CurrencyContext"
+import WorkspaceAppFooter from "@/components/WorkspaceAppFooter"
 import {
   buildCompanySlug,
   isCompanyWorkspaceRole,
@@ -433,6 +434,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="mx-auto max-w-[1600px] space-y-6">
             <OpsStatusLegend compact />
             {children}
+            <WorkspaceAppFooter />
           </div>
         </main>
       </div>

@@ -420,6 +420,60 @@ export async function uploadVoiceNoteToCloudinary(
 }
 
 /**
+ * Upload booking-widget / public booking page logo
+ */
+export async function uploadBookingLogoToCloudinary(
+  photoBuffer: Buffer,
+  companyId: number
+): Promise<CloudinaryUploadResult> {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return { success: false, error: 'Cloudinary credentials are not configured' };
+    }
+
+    const publicId = `mayaops/booking-logos/company-${companyId}_${Date.now()}`;
+
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: publicId,
+          folder: 'mayaops/booking-logos',
+          resource_type: 'image',
+          overwrite: true,
+          transformation: [
+            { width: 512, height: 512, crop: 'limit' },
+            { quality: 'auto' },
+            { fetch_format: 'auto' },
+          ],
+          context: {
+            companyId: companyId.toString(),
+            type: 'booking_logo',
+          },
+        },
+        (error, res) => {
+          if (error) reject(error);
+          else resolve(res);
+        }
+      );
+      uploadStream.end(photoBuffer);
+    });
+
+    return {
+      success: true,
+      url: result.secure_url,
+      secureUrl: result.secure_url,
+      publicId: result.public_id,
+    };
+  } catch (error) {
+    console.error('Cloudinary booking logo upload error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Booking logo upload failed',
+    };
+  }
+}
+
+/**
  * Delete a file from Cloudinary by public ID
  */
 export async function deleteFromCloudinary(publicId: string): Promise<boolean> {

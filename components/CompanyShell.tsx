@@ -48,6 +48,7 @@ import {
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { CurrencyProvider } from "@/contexts/CurrencyContext"
+import WorkspaceAppFooter from "@/components/WorkspaceAppFooter"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 import HeaderNotifications from "@/components/ops/HeaderNotifications"
 import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
@@ -850,6 +851,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
             <OpsOnboardingCard />
             <OpsStatusLegend compact />
             {children}
+            <WorkspaceAppFooter />
           </div>
         </main>
       </div>
