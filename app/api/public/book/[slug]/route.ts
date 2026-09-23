@@ -157,6 +157,11 @@ export async function POST(request: NextRequest, context: Ctx) {
     durationMinutes: duration,
     autoCreateProperty: config.autoCreateProperty,
     autoCreateTask: config.autoCreateTask,
+    fieldAnswers:
+      fieldAnswers && typeof fieldAnswers === "object"
+        ? (fieldAnswers as Record<string, unknown>)
+        : null,
+    formFieldsJson: config.formFields,
   })
 
   const booking = await prisma.bookingRequest.create({

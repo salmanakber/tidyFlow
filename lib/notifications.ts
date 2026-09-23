@@ -47,11 +47,24 @@ export async function createNotification(input: CreateNotificationInput) {
       pushTokens.push(token);
     }
     if (pushTokens.length > 0) {
+      // Flatten payload — Expo clients handle top-level keys more reliably than nested objects
+      const flatParams = (input.screenParams || {}) as Record<string, unknown>;
       await sendExpoPush(pushTokens, input.title, input.message, {
         ...(input.metadata || {}),
-        screenRoute: input.screenRoute,
-        screenParams: input.screenParams,
+        ...flatParams,
         type: input.type,
+        screenRoute: input.screenRoute || undefined,
+        // Always mirror booking id under both keys for mobile Clients deep-link
+        bookingRequestId:
+          flatParams.bookingId ??
+          flatParams.bookingRequestId ??
+          input.metadata?.bookingRequestId,
+        bookingId:
+          flatParams.bookingId ??
+          flatParams.bookingRequestId ??
+          input.metadata?.bookingRequestId,
+        tab: flatParams.tab ?? (input.screenRoute === 'Clients' ? 'bookings' : undefined),
+        taskId: flatParams.taskId ?? input.metadata?.taskId,
       });
     }
   } catch (err) {
@@ -365,10 +378,17 @@ export async function notifyNewBookingRequest(input: {
       type: 'booking_request',
       metadata: {
         bookingRequestId: input.bookingRequestId,
+        bookingId: input.bookingRequestId,
         source: input.source || 'link',
+        tab: 'bookings',
       },
+      // Mobile RootStack screen — opens Clients CRM booking inbox
       screenRoute: 'Clients',
-      screenParams: { bookingId: input.bookingRequestId, tab: 'bookings' },
+      screenParams: {
+        tab: 'bookings',
+        bookingId: input.bookingRequestId,
+        bookingRequestId: input.bookingRequestId,
+      },
     }).catch(() => {})
   }
 }

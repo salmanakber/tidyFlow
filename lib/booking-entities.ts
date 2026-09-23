@@ -19,6 +19,9 @@ export async function resolveBookingEntities(input: {
   existingClientId?: number | null
   existingPropertyId?: number | null
   existingTaskId?: number | null
+  /** Extra dynamic field answers (JSON-serializable) */
+  fieldAnswers?: Record<string, unknown> | null
+  formFieldsJson?: string | null
 }) {
   let clientId = input.existingClientId || null
 
@@ -111,6 +114,14 @@ export async function resolveBookingEntities(input: {
   let taskId = input.existingTaskId || null
 
   if (!taskId && input.autoCreateTask && propertyId) {
+    const { formatFieldAnswersForTask, parseJson, DEFAULT_FORM_FIELDS } =
+      await import("@/lib/booking-widget")
+    const fields = parseJson(input.formFieldsJson, DEFAULT_FORM_FIELDS)
+    const extras = formatFieldAnswersForTask(
+      (input.fieldAnswers || {}) as Record<string, unknown>,
+      fields
+    )
+    const descParts = [input.notes, extras].filter(Boolean)
     const task = await prisma.task.create({
       data: {
         companyId: input.companyId,
@@ -118,7 +129,7 @@ export async function resolveBookingEntities(input: {
         title: input.serviceType
           ? `${input.serviceType} — ${input.guestName}`
           : `Booking — ${input.guestName}`,
-        description: input.notes,
+        description: descParts.length ? descParts.join("\n\n") : null,
         status: "PLANNED",
         scheduledDate: input.requestedStart,
         estimatedDurationMinutes: input.durationMinutes,

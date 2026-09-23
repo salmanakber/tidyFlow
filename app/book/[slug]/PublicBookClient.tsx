@@ -222,6 +222,11 @@ export default function PublicBookPage() {
   }, [slug, config?.showCalendar, month, duration])
 
   useEffect(() => {
+    // Changing the day clears the chosen time; changing service duration must NOT
+    setSelectedSlot(null)
+  }, [selectedDate])
+
+  useEffect(() => {
     if (!selectedDate || !slug) {
       setSlots([])
       return
@@ -229,13 +234,22 @@ export default function PublicBookPage() {
     let cancelled = false
     ;(async () => {
       setSlotsLoading(true)
-      setSelectedSlot(null)
       try {
         const res = await fetch(
           `/api/public/book/${encodeURIComponent(slug)}?mode=slots&date=${selectedDate}&duration=${duration}`
         )
         const json = await res.json()
-        if (!cancelled && json?.success) setSlots(json.data.slots || [])
+        if (!cancelled && json?.success) {
+          const next: Slot[] = json.data.slots || []
+          setSlots(next)
+          // Keep prior time if still offered; otherwise keep it so submit stays enabled
+          // after the guest changes service on the details step.
+          setSelectedSlot((prev) => {
+            if (!prev) return null
+            const match = next.find((s) => s.start === prev.start)
+            return match || prev
+          })
+        }
       } finally {
         if (!cancelled) setSlotsLoading(false)
       }
@@ -506,7 +520,10 @@ export default function PublicBookPage() {
               <h1 className="bk-display mt-16 max-w-lg text-[3.25rem] leading-[1.02] text-white xl:text-[3.75rem]">
                 {liveHeadline}
               </h1>
-              <p className="mt-6 max-w-md text-[15px] leading-relaxed text-white/68">
+              <p
+                className="mt-6 max-w-md text-[15px] leading-relaxed"
+                style={{ color: rgba("#ffffff", 0.72) }}
+              >
                 {liveDescription}
               </p>
 
@@ -587,7 +604,7 @@ export default function PublicBookPage() {
                   </h1>
                 </div>
               </div>
-              <p className="mt-2 max-w-lg text-sm" style={{ color: rgba(theme.text, 0.6) }}>
+              <p className="mt-2 max-w-lg text-sm leading-relaxed" style={{ color: theme.text, opacity: 0.72 }}>
                 {liveDescription}
               </p>
             </header>
@@ -601,9 +618,12 @@ export default function PublicBookPage() {
               >
                 {config.companyName}
               </p>
-              <h1 className="bk-display mt-1 text-4xl leading-tight">
+              <h1 className="bk-display mt-1 text-4xl leading-tight" style={{ color: theme.text }}>
                 {liveHeadline}
               </h1>
+              <p className="mt-2 max-w-lg text-sm leading-relaxed" style={{ color: theme.text, opacity: 0.7 }}>
+                {liveDescription}
+              </p>
             </div>
           )}
 
@@ -696,6 +716,9 @@ export default function PublicBookPage() {
 
               {phase === "when" && config.showCalendar && (
                 <div className="space-y-7">
+                  <p className="text-sm leading-relaxed" style={{ color: theme.text, opacity: 0.72 }}>
+                    {liveDescription}
+                  </p>
                   <div className="flex items-end justify-between gap-3">
                     <div>
                       <p
@@ -704,7 +727,7 @@ export default function PublicBookPage() {
                       >
                         Select a day
                       </p>
-                      <h2 className="bk-display mt-1 text-2xl sm:text-3xl">
+                      <h2 className="bk-display mt-1 text-2xl sm:text-3xl" style={{ color: theme.text }}>
                         {monthLabel}
                       </h2>
                     </div>
@@ -839,79 +862,270 @@ export default function PublicBookPage() {
                     </div>
                   )}
 
-                  {config.formFields.map((field, idx) => (
-                    <label
-                      key={field.id}
-                      className={`bk-rise-${Math.min(idx + 2, 4)} block`}
-                    >
-                      <span
-                        className="mb-1.5 block text-[10px] font-semibold tracking-[0.16em] uppercase"
-                        style={{ color: rgba(theme.text, 0.42) }}
+                  {config.formFields.map((field, idx) => {
+                    const isChoice =
+                      field.type === "select" ||
+                      field.type === "dropdown" ||
+                      field.type === "radio"
+                    const isPlan = field.type === "plan" || field.id === "serviceType"
+                    const choiceOpts =
+                      field.options && field.options.length > 0
+                        ? field.options
+                        : isPlan
+                          ? config.serviceOptions.map((s) => s.label)
+                          : []
+
+                    return (
+                      <div
+                        key={field.id}
+                        className={`bk-rise-${Math.min(idx + 2, 4)} block`}
                       >
-                        {field.label}
-                        {field.required ? " *" : ""}
-                      </span>
-                      {field.type === "textarea" ? (
-                        <textarea
-                          className="bk-input"
-                          rows={3}
-                          placeholder={field.placeholder}
-                          required={field.required}
-                          value={answers[field.id] || ""}
-                          onChange={(e) =>
-                            setAnswers((a) => ({
-                              ...a,
-                              [field.id]: e.target.value,
-                            }))
-                          }
-                        />
-                      ) : field.type === "select" ? (
-                        <select
-                          className="bk-input"
-                          required={field.required}
-                          value={answers[field.id] || ""}
-                          onChange={(e) =>
-                            setAnswers((a) => ({
-                              ...a,
-                              [field.id]: e.target.value,
-                            }))
-                          }
+                        <span
+                          className="mb-1.5 block text-[10px] font-semibold tracking-[0.16em] uppercase"
+                          style={{ color: rgba(theme.text, 0.42) }}
                         >
-                          <option value="">Select…</option>
-                          {(
-                            field.options ||
-                            config.serviceOptions.map((s) => s.label)
-                          ).map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type={
-                            field.type === "email"
-                              ? "email"
-                              : field.type === "tel"
-                                ? "tel"
-                                : field.type === "number"
-                                  ? "number"
-                                  : "text"
-                          }
-                          className="bk-input"
-                          placeholder={field.placeholder}
-                          required={field.required}
-                          value={answers[field.id] || ""}
-                          onChange={(e) =>
-                            setAnswers((a) => ({
-                              ...a,
-                              [field.id]: e.target.value,
-                            }))
-                          }
-                        />
-                      )}
-                    </label>
-                  ))}
+                          {field.label}
+                          {field.required ? " *" : ""}
+                        </span>
+                        {field.helpText ? (
+                          <p
+                            className="mb-2 text-xs"
+                            style={{ color: theme.text, opacity: 0.55 }}
+                          >
+                            {field.helpText}
+                          </p>
+                        ) : null}
+
+                        {field.type === "textarea" ? (
+                          <textarea
+                            className="bk-input"
+                            rows={3}
+                            placeholder={field.placeholder}
+                            required={field.required}
+                            value={answers[field.id] || ""}
+                            onChange={(e) =>
+                              setAnswers((a) => ({
+                                ...a,
+                                [field.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        ) : field.type === "checkbox" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAnswers((a) => ({
+                                ...a,
+                                [field.id]:
+                                  a[field.id] === "yes" || a[field.id] === "true"
+                                    ? "no"
+                                    : "yes",
+                              }))
+                            }
+                            className="flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition"
+                            style={{
+                              borderColor:
+                                answers[field.id] === "yes" ||
+                                answers[field.id] === "true"
+                                  ? theme.accent
+                                  : rgba(theme.primary, 0.12),
+                              background:
+                                answers[field.id] === "yes" ||
+                                answers[field.id] === "true"
+                                  ? rgba(theme.accent, 0.1)
+                                  : "#fff",
+                            }}
+                          >
+                            {field.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={field.imageUrl}
+                                alt=""
+                                className="h-12 w-12 rounded-xl object-cover"
+                              />
+                            ) : (
+                              <span
+                                className="flex h-10 w-10 items-center justify-center rounded-xl text-lg"
+                                style={{ background: rgba(theme.primary, 0.08) }}
+                              >
+                                {field.icon === "check" || !field.icon ? "✓" : field.icon.slice(0, 2)}
+                              </span>
+                            )}
+                            <span className="flex-1 text-sm font-semibold" style={{ color: theme.text }}>
+                              {field.placeholder || field.label}
+                            </span>
+                            <span
+                              className="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold"
+                              style={{
+                                borderColor: theme.accent,
+                                background:
+                                  answers[field.id] === "yes" ||
+                                  answers[field.id] === "true"
+                                    ? theme.accent
+                                    : "transparent",
+                                color:
+                                  answers[field.id] === "yes" ||
+                                  answers[field.id] === "true"
+                                    ? "#fff"
+                                    : theme.accent,
+                              }}
+                            >
+                              {(answers[field.id] === "yes" ||
+                                answers[field.id] === "true") &&
+                                "✓"}
+                            </span>
+                          </button>
+                        ) : isPlan ? (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {config.serviceOptions.map((s) => {
+                              const selected =
+                                answers[field.id] === s.label ||
+                                answers[field.id] === s.id
+                              return (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setAnswers((a) => ({
+                                      ...a,
+                                      [field.id]: s.label,
+                                      serviceType: s.label,
+                                    }))
+                                  }
+                                  className="rounded-2xl border px-4 py-3 text-left transition"
+                                  style={{
+                                    borderColor: selected
+                                      ? theme.accent
+                                      : rgba(theme.primary, 0.1),
+                                    background: selected
+                                      ? rgba(theme.accent, 0.1)
+                                      : "#fff",
+                                    boxShadow: selected
+                                      ? `0 8px 20px ${rgba(theme.accent, 0.18)}`
+                                      : undefined,
+                                  }}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    {s.imageUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={s.imageUrl}
+                                        alt=""
+                                        className="h-11 w-11 rounded-xl object-cover"
+                                      />
+                                    ) : (
+                                      <span
+                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold"
+                                        style={{
+                                          background: rgba(theme.primary, 0.08),
+                                          color: theme.primary,
+                                        }}
+                                      >
+                                        {(s.icon || s.label).slice(0, 1).toUpperCase()}
+                                      </span>
+                                    )}
+                                    <div className="min-w-0">
+                                      <p
+                                        className="text-sm font-bold"
+                                        style={{ color: theme.text }}
+                                      >
+                                        {s.label}
+                                      </p>
+                                      <p
+                                        className="mt-0.5 text-[11px]"
+                                        style={{ color: theme.text, opacity: 0.5 }}
+                                      >
+                                        ~{s.durationMinutes} min
+                                        {s.description ? ` · ${s.description}` : ""}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : field.type === "radio" ? (
+                          <div className="flex flex-wrap gap-2">
+                            {choiceOpts.map((opt) => {
+                              const selected = answers[field.id] === opt
+                              const icon = field.optionIcons?.[opt]
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() =>
+                                    setAnswers((a) => ({ ...a, [field.id]: opt }))
+                                  }
+                                  className="inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold transition"
+                                  style={{
+                                    borderColor: selected
+                                      ? theme.accent
+                                      : rgba(theme.primary, 0.12),
+                                    background: selected
+                                      ? theme.accent
+                                      : "#fff",
+                                    color: selected ? "#fff" : theme.text,
+                                  }}
+                                >
+                                  {icon?.startsWith("http") ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={icon} alt="" className="h-4 w-4 rounded-full object-cover" />
+                                  ) : icon ? (
+                                    <span>{icon.slice(0, 2)}</span>
+                                  ) : null}
+                                  {opt}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : isChoice ? (
+                          <select
+                            className="bk-input"
+                            required={field.required}
+                            value={answers[field.id] || ""}
+                            onChange={(e) =>
+                              setAnswers((a) => ({
+                                ...a,
+                                [field.id]: e.target.value,
+                                ...(field.id === "serviceType"
+                                  ? { serviceType: e.target.value }
+                                  : {}),
+                              }))
+                            }
+                          >
+                            <option value="">Select…</option>
+                            {choiceOpts.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={
+                              field.type === "email"
+                                ? "email"
+                                : field.type === "tel"
+                                  ? "tel"
+                                  : field.type === "number"
+                                    ? "number"
+                                    : "text"
+                            }
+                            className="bk-input"
+                            placeholder={field.placeholder}
+                            required={field.required}
+                            value={answers[field.id] || ""}
+                            onChange={(e) =>
+                              setAnswers((a) => ({
+                                ...a,
+                                [field.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
 
                   <button
                     type="button"

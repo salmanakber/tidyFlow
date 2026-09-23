@@ -137,6 +137,23 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           },
           orderBy: { createdAt: 'desc' },
         },
+        bookingRequests: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            guestName: true,
+            guestEmail: true,
+            guestPhone: true,
+            serviceType: true,
+            address: true,
+            notes: true,
+            fieldAnswers: true,
+            source: true,
+            status: true,
+            requestedStart: true,
+          },
+        },
       },
     });
     if (!task) return NextResponse.json({ success: false, message: 'Task not found' }, { status: 404 });

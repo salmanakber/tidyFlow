@@ -84,6 +84,22 @@ export async function PATCH(request: NextRequest) {
         )
       : 120
 
+    let fieldAnswers: Record<string, unknown> | null = null
+    try {
+      fieldAnswers = booking.fieldAnswers
+        ? (JSON.parse(booking.fieldAnswers) as Record<string, unknown>)
+        : null
+    } catch {
+      fieldAnswers = null
+    }
+
+    const widget = booking.widgetConfigId
+      ? await prisma.bookingWidgetConfig.findUnique({
+          where: { id: booking.widgetConfigId },
+          select: { formFields: true },
+        })
+      : null
+
     const { resolveBookingEntities } = await import("@/lib/booking-entities")
     const { clientId, propertyId, taskId } = await resolveBookingEntities({
       companyId,
@@ -100,6 +116,8 @@ export async function PATCH(request: NextRequest) {
       existingClientId: booking.clientId,
       existingPropertyId: booking.propertyId,
       existingTaskId: booking.taskId,
+      fieldAnswers,
+      formFieldsJson: widget?.formFields,
     })
 
     if (!propertyId || !taskId) {

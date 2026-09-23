@@ -1,6 +1,16 @@
 /** Defaults + helpers for public booking link/embed */
 
-export type BookingFormFieldType = "text" | "email" | "tel" | "textarea" | "number" | "select"
+export type BookingFormFieldType =
+  | "text"
+  | "email"
+  | "tel"
+  | "textarea"
+  | "number"
+  | "select"
+  | "dropdown"
+  | "checkbox"
+  | "radio"
+  | "plan"
 
 export type BookingFormField = {
   id: string
@@ -9,17 +19,42 @@ export type BookingFormField = {
   required: boolean
   enabled: boolean
   placeholder?: string
+  /** Select / dropdown / radio choices */
   options?: string[]
+  /** Optional icon name (Feather) or image URL per option label */
+  optionIcons?: Record<string, string>
+  /** Field-level icon (checkbox / section) */
+  icon?: string
+  /** Optional image for checkbox / plan cards */
+  imageUrl?: string
+  helpText?: string
 }
 
 export type BookingServiceOption = {
   id: string
   label: string
   durationMinutes: number
+  /** Optional marketing blurb / price line */
+  description?: string
+  icon?: string
+  imageUrl?: string
 }
 
 export type DayHours = { start: string; end: string } | null
 export type WeeklyHours = Record<string, DayHours>
+
+export const FIELD_TYPE_OPTIONS: { value: BookingFormFieldType; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "email", label: "Email" },
+  { value: "tel", label: "Phone" },
+  { value: "textarea", label: "Long text" },
+  { value: "number", label: "Number" },
+  { value: "select", label: "Dropdown" },
+  { value: "dropdown", label: "Dropdown (alt)" },
+  { value: "radio", label: "Radio buttons" },
+  { value: "checkbox", label: "Checkbox + icon" },
+  { value: "plan", label: "Service / plan cards" },
+]
 
 export const DEFAULT_FORM_FIELDS: BookingFormField[] = [
   {
@@ -57,10 +92,9 @@ export const DEFAULT_FORM_FIELDS: BookingFormField[] = [
   {
     id: "serviceType",
     label: "Service",
-    type: "select",
+    type: "plan",
     required: true,
     enabled: true,
-    options: ["Standard clean", "Deep clean", "End of tenancy", "Airbnb turnover"],
   },
   {
     id: "notes",
@@ -73,10 +107,10 @@ export const DEFAULT_FORM_FIELDS: BookingFormField[] = [
 ]
 
 export const DEFAULT_SERVICE_OPTIONS: BookingServiceOption[] = [
-  { id: "standard", label: "Standard clean", durationMinutes: 120 },
-  { id: "deep", label: "Deep clean", durationMinutes: 180 },
-  { id: "eot", label: "End of tenancy", durationMinutes: 240 },
-  { id: "airbnb", label: "Airbnb turnover", durationMinutes: 90 },
+  { id: "standard", label: "Standard clean", durationMinutes: 120, icon: "home" },
+  { id: "deep", label: "Deep clean", durationMinutes: 180, icon: "sparkles" },
+  { id: "eot", label: "End of tenancy", durationMinutes: 240, icon: "key" },
+  { id: "airbnb", label: "Airbnb turnover", durationMinutes: 90, icon: "repeat" },
 ]
 
 /** Mon–Fri 09:00–17:00, weekends closed */
@@ -115,6 +149,32 @@ export function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   } catch {
     return fallback
   }
+}
+
+export function newFieldId(prefix = "field") {
+  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`
+}
+
+/** Format dynamic booking answers for task notes / mobile display */
+export function formatFieldAnswersForTask(
+  answers: Record<string, unknown>,
+  fields?: BookingFormField[]
+): string {
+  const lines: string[] = []
+  const fieldMap = new Map((fields || []).map((f) => [f.id, f]))
+  const skip = new Set(["name", "email", "phone", "address", "notes", "requestedStart", "source"])
+
+  for (const [key, raw] of Object.entries(answers || {})) {
+    if (skip.has(key) || raw == null || raw === "") continue
+    const field = fieldMap.get(key)
+    const label = field?.label || key
+    let value = String(raw)
+    if (field?.type === "checkbox") {
+      value = raw === true || raw === "true" || raw === "yes" || raw === "on" ? "Yes" : "No"
+    }
+    lines.push(`${label}: ${value}`)
+  }
+  return lines.join("\n")
 }
 
 export function serializeWidgetPublic(config: {
