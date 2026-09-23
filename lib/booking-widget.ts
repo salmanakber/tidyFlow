@@ -44,16 +44,15 @@ export type DayHours = { start: string; end: string } | null
 export type WeeklyHours = Record<string, DayHours>
 
 export const FIELD_TYPE_OPTIONS: { value: BookingFormFieldType; label: string }[] = [
-  { value: "text", label: "Text" },
+  { value: "text", label: "Short text" },
   { value: "email", label: "Email" },
   { value: "tel", label: "Phone" },
   { value: "textarea", label: "Long text" },
   { value: "number", label: "Number" },
   { value: "select", label: "Dropdown" },
-  { value: "dropdown", label: "Dropdown (alt)" },
-  { value: "radio", label: "Radio buttons" },
-  { value: "checkbox", label: "Checkbox + icon" },
-  { value: "plan", label: "Service / plan cards" },
+  { value: "radio", label: "Choice buttons" },
+  { value: "checkbox", label: "Yes / No checkbox" },
+  { value: "plan", label: "Service cards" },
 ]
 
 export const DEFAULT_FORM_FIELDS: BookingFormField[] = [

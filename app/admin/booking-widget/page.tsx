@@ -24,6 +24,8 @@ import {
   Check,
   Copy,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
   ImagePlus,
   Loader2,
   Plus,
@@ -156,6 +158,13 @@ function Content() {
   const [copied, setCopied] = useState<string | null>(null)
   const [newClosedDate, setNewClosedDate] = useState("")
   const [tab, setTab] = useState<StudioTab>("brand")
+  const [fieldsPanel, setFieldsPanel] = useState<"questions" | "services">(
+    "questions"
+  )
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null)
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    null
+  )
   const [previewKey, setPreviewKey] = useState(0)
   const [logoUploading, setLogoUploading] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -333,15 +342,35 @@ function Content() {
         },
       ],
     }))
+    setFieldsPanel("questions")
+    setSelectedFieldId(id)
   }
 
   const removeField = (id: string) => {
     const locked = new Set(["name", "email", "phone", "address"])
     if (locked.has(id)) return
+    const idx = cfg.formFields.findIndex((f) => f.id === id)
+    const nextFields = cfg.formFields.filter((f) => f.id !== id)
+    const nextId =
+      nextFields[Math.min(Math.max(idx, 0), nextFields.length - 1)]?.id ?? null
     setCfg((c) => ({
       ...c,
       formFields: c.formFields.filter((f) => f.id !== id),
     }))
+    setSelectedFieldId((cur) => (cur === id ? nextId : cur))
+  }
+
+  const moveField = (id: string, dir: -1 | 1) => {
+    setCfg((c) => {
+      const idx = c.formFields.findIndex((f) => f.id === id)
+      if (idx < 0) return c
+      const next = idx + dir
+      if (next < 0 || next >= c.formFields.length) return c
+      const copy = [...c.formFields]
+      const [row] = copy.splice(idx, 1)
+      copy.splice(next, 0, row)
+      return { ...c, formFields: copy }
+    })
   }
 
   const updateService = (id: string, patch: Partial<BookingServiceOption>) => {
@@ -362,14 +391,43 @@ function Content() {
         { id, label: "New service", durationMinutes: 120, icon: "sparkles" },
       ],
     }))
+    setFieldsPanel("services")
+    setSelectedServiceId(id)
   }
 
   const removeService = (id: string) => {
+    const idx = cfg.serviceOptions.findIndex((s) => s.id === id)
+    const next = cfg.serviceOptions.filter((s) => s.id !== id)
+    const nextId =
+      next[Math.min(Math.max(idx, 0), next.length - 1)]?.id ?? null
     setCfg((c) => ({
       ...c,
       serviceOptions: c.serviceOptions.filter((s) => s.id !== id),
     }))
+    setSelectedServiceId((cur) => (cur === id ? nextId : cur))
   }
+
+  const moveService = (id: string, dir: -1 | 1) => {
+    setCfg((c) => {
+      const idx = c.serviceOptions.findIndex((s) => s.id === id)
+      if (idx < 0) return c
+      const next = idx + dir
+      if (next < 0 || next >= c.serviceOptions.length) return c
+      const copy = [...c.serviceOptions]
+      const [row] = copy.splice(idx, 1)
+      copy.splice(next, 0, row)
+      return { ...c, serviceOptions: copy }
+    })
+  }
+
+  const selectedField =
+    cfg.formFields.find((f) => f.id === selectedFieldId) || null
+  const selectedService =
+    cfg.serviceOptions.find((s) => s.id === selectedServiceId) || null
+
+  const typeLabel = (type: string) =>
+    FIELD_TYPE_OPTIONS.find((o) => o.value === type)?.label ||
+    (type === "dropdown" ? "Dropdown" : type)
 
   const save = async () => {
     try {
@@ -523,19 +581,39 @@ function Content() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
                 className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${
                   tab === t.id
                     ? "bg-navy-900 text-amber-300 dark:bg-amber-600 dark:text-white"
                     : "text-slate-500 hover:bg-slate-50 dark:hover:bg-navy-900"
                 }`}
+                onClick={() => {
+                  setTab(t.id)
+                  if (t.id === "fields") {
+                    setSelectedFieldId((cur) =>
+                      cur && cfg.formFields.some((f) => f.id === cur)
+                        ? cur
+                        : cfg.formFields[0]?.id || null
+                    )
+                    setSelectedServiceId((cur) =>
+                      cur && cfg.serviceOptions.some((s) => s.id === cur)
+                        ? cur
+                        : cfg.serviceOptions[0]?.id || null
+                    )
+                  }
+                }}
               >
                 {t.label}
               </button>
             ))}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div
+            className={`min-h-0 flex-1 p-4 ${
+              tab === "fields"
+                ? "flex flex-col overflow-hidden"
+                : "overflow-y-auto"
+            }`}
+          >
             {tab === "brand" && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-3 md:col-span-2">
@@ -678,240 +756,480 @@ function Content() {
             )}
 
             {tab === "fields" && (
-              <div className="space-y-5">
-                <div>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-slate-400">
-                      Form questions · answers create{" "}
-                      <strong>Client → Property → Task</strong>
-                    </p>
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                {/* Sub-nav: Questions vs Services */}
+                <div className="flex shrink-0 items-center gap-1 rounded-xl bg-slate-100/90 p-1 dark:bg-navy-950">
+                  {(
+                    [
+                      [
+                        "questions",
+                        "Form questions",
+                        cfg.formFields.filter((f) => f.enabled).length,
+                      ],
+                      ["services", "Services", cfg.serviceOptions.length],
+                    ] as const
+                  ).map(([id, label, count]) => (
                     <button
+                      key={id}
                       type="button"
-                      onClick={addField}
-                      className="inline-flex items-center gap-1 rounded-lg bg-navy-950 px-2.5 py-1.5 text-[10px] font-bold text-white"
+                      onClick={() => setFieldsPanel(id)}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-bold transition ${
+                        fieldsPanel === id
+                          ? "bg-white text-navy-900 shadow-sm dark:bg-navy-800 dark:text-white"
+                          : "text-slate-500 hover:text-navy-900 dark:hover:text-white"
+                      }`}
                     >
-                      <Plus size={12} /> Add field
+                      {label}
+                      <span className="rounded-full bg-slate-200/80 px-1.5 py-0.5 font-mono text-[9px] dark:bg-navy-900">
+                        {count}
+                      </span>
                     </button>
-                  </div>
-                  <div className="space-y-2">
-                    {cfg.formFields.map((f) => {
-                      const needsOptions = [
-                        "select",
-                        "dropdown",
-                        "radio",
-                      ].includes(f.type)
-                      return (
-                        <div
-                          key={f.id}
-                          className={`rounded-xl border px-3 py-3 ${
-                            f.enabled
-                              ? "border-amber-200/80 bg-amber-50/30 dark:border-amber-900/40 dark:bg-amber-950/15"
-                              : "border-slate-100 bg-slate-50/60 opacity-70 dark:border-navy-800"
-                          }`}
+                  ))}
+                </div>
+
+                {fieldsPanel === "questions" ? (
+                  <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,280px)]">
+                    {/* Compact list */}
+                    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-navy-800">
+                      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-navy-800">
+                        <p className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">
+                          Tap a row to edit
+                        </p>
+                        <button
+                          type="button"
+                          onClick={addField}
+                          className="inline-flex items-center gap-1 rounded-lg bg-navy-950 px-2.5 py-1.5 text-[10px] font-bold text-white"
                         >
-                          <div className="flex flex-wrap items-start gap-2">
-                            <div className="min-w-0 flex-1 space-y-1.5">
-                              <input
-                                className={`${inp} py-1.5 text-[13px] font-bold`}
-                                value={f.label}
-                                onChange={(e) =>
-                                  updateField(f.id, { label: e.target.value })
-                                }
-                                placeholder="Field label"
-                              />
-                              <div className="flex flex-wrap gap-1.5">
-                                <select
-                                  className={`${inp} w-auto py-1 text-[11px]`}
-                                  value={f.type}
-                                  onChange={(e) =>
-                                    updateField(f.id, {
-                                      type: e.target.value as BookingFormFieldType,
-                                    })
-                                  }
-                                >
-                                  {FIELD_TYPE_OPTIONS.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </option>
-                                  ))}
-                                </select>
-                                <input
-                                  className={`${inp} min-w-[120px] flex-1 py-1 text-[11px]`}
-                                  value={f.placeholder || ""}
-                                  onChange={(e) =>
-                                    updateField(f.id, {
-                                      placeholder: e.target.value,
-                                    })
-                                  }
-                                  placeholder="Placeholder / checkbox text"
+                          <Plus size={12} /> Add
+                        </button>
+                      </div>
+                      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
+                        {cfg.formFields.map((f, idx) => {
+                          const active = selectedFieldId === f.id
+                          return (
+                            <li key={f.id}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedFieldId(f.id)}
+                                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                                  active
+                                    ? "bg-amber-50 ring-1 ring-amber-400/50 dark:bg-amber-950/40 dark:ring-amber-600/40"
+                                    : "hover:bg-slate-50 dark:hover:bg-navy-900/60"
+                                } ${!f.enabled ? "opacity-45" : ""}`}
+                              >
+                                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 font-mono text-[10px] font-bold text-slate-500 dark:bg-navy-900">
+                                  {idx + 1}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[13px] font-bold text-navy-900 dark:text-white">
+                                    {f.label || "Untitled"}
+                                  </p>
+                                  <p className="truncate font-mono text-[9px] text-slate-400">
+                                    {typeLabel(f.type)}
+                                    {f.required ? " · required" : ""}
+                                    {!f.enabled ? " · hidden" : ""}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`h-2 w-2 shrink-0 rounded-full ${
+                                    f.enabled ? "bg-emerald-500" : "bg-slate-300"
+                                  }`}
                                 />
-                              </div>
-                              {(f.type === "checkbox" || f.type === "plan") && (
-                                <div className="flex flex-wrap gap-1.5">
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+
+                    {/* Single-field inspector */}
+                    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/50 dark:border-navy-800 dark:bg-navy-950/40">
+                      {!selectedField ? (
+                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+                          <p className="text-[13px] font-semibold text-navy-900 dark:text-white">
+                            Select a question
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            Or add a new one to start editing
+                          </p>
+                          <button
+                            type="button"
+                            onClick={addField}
+                            className="mt-2 inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold text-navy-950"
+                          >
+                            <Plus size={12} /> New question
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-navy-800">
+                            <p className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">
+                              Edit question
+                            </p>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                title="Move up"
+                                onClick={() => moveField(selectedField.id, -1)}
+                                className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-navy-900 dark:hover:bg-navy-900"
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                title="Move down"
+                                onClick={() => moveField(selectedField.id, 1)}
+                                className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-navy-900 dark:hover:bg-navy-900"
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                              {!["name", "email", "phone", "address"].includes(
+                                selectedField.id
+                              ) && (
+                                <button
+                                  type="button"
+                                  title="Delete"
+                                  onClick={() => removeField(selectedField.id)}
+                                  className="rounded-md p-1 text-rose-500 hover:bg-rose-50"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+                            <div>
+                              <L>Label</L>
+                              <input
+                                className={inp}
+                                value={selectedField.label}
+                                onChange={(e) =>
+                                  updateField(selectedField.id, {
+                                    label: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <L>Type</L>
+                              <select
+                                className={inp}
+                                value={
+                                  selectedField.type === "dropdown"
+                                    ? "select"
+                                    : selectedField.type
+                                }
+                                onChange={(e) =>
+                                  updateField(selectedField.id, {
+                                    type: e.target
+                                      .value as BookingFormFieldType,
+                                  })
+                                }
+                              >
+                                {FIELD_TYPE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              <Pill
+                                on={selectedField.enabled}
+                                label={
+                                  selectedField.enabled ? "Visible" : "Hidden"
+                                }
+                                onClick={() =>
+                                  updateField(selectedField.id, {
+                                    enabled: !selectedField.enabled,
+                                  })
+                                }
+                              />
+                              <Pill
+                                on={
+                                  !!selectedField.required &&
+                                  selectedField.enabled
+                                }
+                                label="Required"
+                                onClick={() => {
+                                  if (!selectedField.enabled) return
+                                  updateField(selectedField.id, {
+                                    required: !selectedField.required,
+                                  })
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <L>
+                                {selectedField.type === "checkbox"
+                                  ? "Checkbox text"
+                                  : "Placeholder"}
+                              </L>
+                              <input
+                                className={inp}
+                                value={selectedField.placeholder || ""}
+                                onChange={(e) =>
+                                  updateField(selectedField.id, {
+                                    placeholder: e.target.value,
+                                  })
+                                }
+                                placeholder="Optional hint for the guest"
+                              />
+                            </div>
+                            {(selectedField.type === "checkbox" ||
+                              selectedField.type === "plan") && (
+                              <>
+                                <div>
+                                  <L>Icon name</L>
                                   <input
-                                    className={`${inp} w-28 py-1 text-[11px]`}
-                                    value={f.icon || ""}
+                                    className={inp}
+                                    value={selectedField.icon || ""}
                                     onChange={(e) =>
-                                      updateField(f.id, { icon: e.target.value })
+                                      updateField(selectedField.id, {
+                                        icon: e.target.value,
+                                      })
                                     }
-                                    placeholder="Icon name"
+                                    placeholder="e.g. home, sparkles"
                                   />
+                                </div>
+                                <div>
+                                  <L>Image URL</L>
                                   <input
-                                    className={`${inp} min-w-[140px] flex-1 py-1 text-[11px]`}
-                                    value={f.imageUrl || ""}
+                                    className={inp}
+                                    value={selectedField.imageUrl || ""}
                                     onChange={(e) =>
-                                      updateField(f.id, {
+                                      updateField(selectedField.id, {
                                         imageUrl: e.target.value,
                                       })
                                     }
-                                    placeholder="Image URL (optional)"
+                                    placeholder="https://…"
                                   />
                                 </div>
-                              )}
-                              {needsOptions && (
+                              </>
+                            )}
+                            {["select", "dropdown", "radio"].includes(
+                              selectedField.type
+                            ) && (
+                              <div>
+                                <L>Options (one per line)</L>
                                 <textarea
-                                  className={`${inp} py-1.5 text-[11px]`}
-                                  rows={2}
-                                  value={(f.options || []).join("\n")}
+                                  className={inp}
+                                  rows={4}
+                                  value={(selectedField.options || []).join(
+                                    "\n"
+                                  )}
                                   onChange={(e) =>
-                                    updateField(f.id, {
+                                    updateField(selectedField.id, {
                                       options: e.target.value
                                         .split("\n")
                                         .map((x) => x.trim())
                                         .filter(Boolean),
                                     })
                                   }
-                                  placeholder={"One option per line"}
+                                  placeholder={"Option A\nOption B"}
                                 />
-                              )}
-                              {f.type === "plan" && (
-                                <p className="text-[10px] text-slate-400">
-                                  Plan cards use the Services list below.
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex shrink-0 flex-col gap-1">
-                              <Pill
-                                on={f.enabled}
-                                label="Show"
-                                onClick={() =>
-                                  updateField(f.id, { enabled: !f.enabled })
-                                }
-                              />
-                              <Pill
-                                on={f.required && f.enabled}
-                                label="Req"
-                                onClick={() => {
-                                  if (!f.enabled) return
-                                  updateField(f.id, { required: !f.required })
-                                }}
-                              />
-                              {!["name", "email", "phone", "address"].includes(
-                                f.id
-                              ) && (
+                              </div>
+                            )}
+                            {selectedField.type === "plan" && (
+                              <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                                Service cards come from the{" "}
                                 <button
                                   type="button"
-                                  onClick={() => removeField(f.id)}
-                                  className="inline-flex items-center justify-center rounded-lg border border-rose-200 px-2 py-1 text-rose-600 hover:bg-rose-50"
-                                  title="Remove"
+                                  className="font-bold underline"
+                                  onClick={() => setFieldsPanel("services")}
                                 >
-                                  <Trash2 size={12} />
-                                </button>
-                              )}
-                            </div>
+                                  Services
+                                </button>{" "}
+                                tab.
+                              </p>
+                            )}
+                            <p className="font-mono text-[9px] text-slate-400">
+                              id: {selectedField.id}
+                            </p>
                           </div>
-                          <p className="mt-1.5 font-mono text-[9px] text-slate-400">
-                            id: {f.id}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[12px] font-bold text-navy-900 dark:text-white">
-                        Services / plans
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        Edit labels, duration, icons — used by plan cards & calendar
-                      </p>
+                        </>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={addService}
-                      className="inline-flex items-center gap-1 rounded-lg border border-navy-900/15 px-2.5 py-1.5 text-[10px] font-bold text-navy-900 dark:border-navy-700 dark:text-white"
-                    >
-                      <Plus size={12} /> Add service
-                    </button>
                   </div>
-                  <div className="space-y-2">
-                    {cfg.serviceOptions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-100 bg-white px-3 py-2.5 dark:border-navy-800 dark:bg-navy-950"
-                      >
-                        <input
-                          className={`${inp} min-w-[140px] flex-1 py-1.5 text-[13px] font-semibold`}
-                          value={s.label}
-                          onChange={(e) =>
-                            updateService(s.id, { label: e.target.value })
-                          }
-                        />
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={15}
-                            step={15}
-                            className={`${inp} w-20 py-1.5 text-[12px]`}
-                            value={s.durationMinutes}
-                            onChange={(e) =>
-                              updateService(s.id, {
-                                durationMinutes: Math.max(
-                                  15,
-                                  Number(e.target.value) || 60
-                                ),
-                              })
-                            }
-                          />
-                          <span className="text-[10px] font-bold text-slate-400">
-                            min
-                          </span>
-                        </div>
-                        <input
-                          className={`${inp} w-24 py-1.5 text-[11px]`}
-                          value={s.icon || ""}
-                          onChange={(e) =>
-                            updateService(s.id, { icon: e.target.value })
-                          }
-                          placeholder="Icon"
-                        />
-                        <input
-                          className={`${inp} min-w-[120px] flex-1 py-1.5 text-[11px]`}
-                          value={s.imageUrl || ""}
-                          onChange={(e) =>
-                            updateService(s.id, { imageUrl: e.target.value })
-                          }
-                          placeholder="Image URL"
-                        />
+                ) : (
+                  <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,280px)]">
+                    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-navy-800">
+                      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-navy-800">
+                        <p className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">
+                          Cleaning packages
+                        </p>
                         <button
                           type="button"
-                          onClick={() => removeService(s.id)}
-                          className="rounded-lg border border-rose-200 p-1.5 text-rose-600 hover:bg-rose-50"
+                          onClick={addService}
+                          className="inline-flex items-center gap-1 rounded-lg bg-navy-950 px-2.5 py-1.5 text-[10px] font-bold text-white"
                         >
-                          <Trash2 size={12} />
+                          <Plus size={12} /> Add
                         </button>
                       </div>
-                    ))}
-                    {cfg.serviceOptions.length === 0 && (
-                      <p className="text-[11px] text-slate-400">
-                        No services — add at least one for plan fields.
-                      </p>
-                    )}
+                      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
+                        {cfg.serviceOptions.length === 0 ? (
+                          <li className="px-3 py-8 text-center text-[11px] text-slate-400">
+                            No services yet — add your first package
+                          </li>
+                        ) : (
+                          cfg.serviceOptions.map((s, idx) => {
+                            const active = selectedServiceId === s.id
+                            return (
+                              <li key={s.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedServiceId(s.id)}
+                                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                                    active
+                                      ? "bg-amber-50 ring-1 ring-amber-400/50 dark:bg-amber-950/40"
+                                      : "hover:bg-slate-50 dark:hover:bg-navy-900/60"
+                                  }`}
+                                >
+                                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 font-mono text-[10px] font-bold text-slate-500 dark:bg-navy-900">
+                                    {idx + 1}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-[13px] font-bold text-navy-900 dark:text-white">
+                                      {s.label}
+                                    </p>
+                                    <p className="font-mono text-[9px] text-slate-400">
+                                      {s.durationMinutes} min
+                                    </p>
+                                  </div>
+                                </button>
+                              </li>
+                            )
+                          })
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/50 dark:border-navy-800 dark:bg-navy-950/40">
+                      {!selectedService ? (
+                        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+                          <p className="text-[13px] font-semibold text-navy-900 dark:text-white">
+                            Select a service
+                          </p>
+                          <button
+                            type="button"
+                            onClick={addService}
+                            className="mt-2 inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-bold text-navy-950"
+                          >
+                            <Plus size={12} /> New service
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-navy-800">
+                            <p className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">
+                              Edit service
+                            </p>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  moveService(selectedService.id, -1)
+                                }
+                                className="rounded-md p-1 text-slate-400 hover:bg-white dark:hover:bg-navy-900"
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  moveService(selectedService.id, 1)
+                                }
+                                className="rounded-md p-1 text-slate-400 hover:bg-white dark:hover:bg-navy-900"
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeService(selectedService.id)
+                                }
+                                className="rounded-md p-1 text-rose-500 hover:bg-rose-50"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+                            <div>
+                              <L>Name</L>
+                              <input
+                                className={inp}
+                                value={selectedService.label}
+                                onChange={(e) =>
+                                  updateService(selectedService.id, {
+                                    label: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <L>Duration (minutes)</L>
+                              <input
+                                type="number"
+                                min={15}
+                                step={15}
+                                className={inp}
+                                value={selectedService.durationMinutes}
+                                onChange={(e) =>
+                                  updateService(selectedService.id, {
+                                    durationMinutes: Math.max(
+                                      15,
+                                      Number(e.target.value) || 60
+                                    ),
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <L>Short description</L>
+                              <input
+                                className={inp}
+                                value={selectedService.description || ""}
+                                onChange={(e) =>
+                                  updateService(selectedService.id, {
+                                    description: e.target.value,
+                                  })
+                                }
+                                placeholder="Optional blurb on the card"
+                              />
+                            </div>
+                            <div>
+                              <L>Icon</L>
+                              <input
+                                className={inp}
+                                value={selectedService.icon || ""}
+                                onChange={(e) =>
+                                  updateService(selectedService.id, {
+                                    icon: e.target.value,
+                                  })
+                                }
+                                placeholder="home, sparkles…"
+                              />
+                            </div>
+                            <div>
+                              <L>Image URL</L>
+                              <input
+                                className={inp}
+                                value={selectedService.imageUrl || ""}
+                                onChange={(e) =>
+                                  updateService(selectedService.id, {
+                                    imageUrl: e.target.value,
+                                  })
+                                }
+                                placeholder="https://…"
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
