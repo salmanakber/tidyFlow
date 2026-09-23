@@ -14,6 +14,7 @@ import {
 import { useParams, useSearchParams } from "next/navigation"
 import {
   tidyflowMarketingUrl,
+  BOOKING_RECURRING_OPTIONS,
   type BookingFormField,
 } from "@/lib/booking-widget"
 
@@ -35,6 +36,8 @@ type PublicConfig = {
   formFields: BookingFormField[]
   serviceOptions: Array<{ id: string; label: string; durationMinutes: number }>
   showCalendar: boolean
+  showRecurringOption?: boolean
+  recurringOptions?: typeof BOOKING_RECURRING_OPTIONS
 }
 
 type DayInfo = { date: string; available: boolean; slotCount: number }
@@ -119,6 +122,10 @@ export default function PublicBookPage() {
   const [slotsLoading, setSlotsLoading] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [wantsRecurring, setWantsRecurring] = useState(false)
+  const [recurringPattern, setRecurringPattern] = useState<
+    "weekly" | "biweekly" | "monthly"
+  >("weekly")
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   const [trackUrl, setTrackUrl] = useState<string | null>(null)
@@ -299,7 +306,23 @@ export default function PublicBookPage() {
           requestedStart:
             selectedSlot?.start || new Date().toISOString(),
           source: isEmbed ? "embed" : "link",
-          answers,
+          answers: {
+            ...answers,
+            ...(config.showRecurringOption
+              ? {
+                  wantsRecurring,
+                  recurringRequested: wantsRecurring,
+                  recurringPattern: wantsRecurring
+                    ? recurringPattern
+                    : undefined,
+                }
+              : {}),
+          },
+          wantsRecurring: !!config.showRecurringOption && wantsRecurring,
+          recurringPattern:
+            config.showRecurringOption && wantsRecurring
+              ? recurringPattern
+              : undefined,
         }),
       })
       const json = await res.json()
@@ -1126,6 +1149,74 @@ export default function PublicBookPage() {
                       </div>
                     )
                   })}
+
+                  {config.showRecurringOption && (
+                    <div
+                      className="bk-rise rounded-2xl border p-4"
+                      style={{
+                        borderColor: rgba(theme.primary, 0.12),
+                        background: rgba(theme.primary, 0.03),
+                      }}
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-[var(--bk-accent)]"
+                          checked={wantsRecurring}
+                          onChange={(e) => setWantsRecurring(e.target.checked)}
+                        />
+                        <span>
+                          <span
+                            className="block text-sm font-semibold"
+                            style={{ color: theme.text }}
+                          >
+                            Make this a recurring clean
+                          </span>
+                          <span
+                            className="mt-0.5 block text-[12px] opacity-60"
+                            style={{ color: theme.text }}
+                          >
+                            Optional — we’ll confirm the schedule with you
+                          </span>
+                        </span>
+                      </label>
+                      {wantsRecurring && (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          {(
+                            config.recurringOptions || BOOKING_RECURRING_OPTIONS
+                          ).map((opt) => {
+                            const on = recurringPattern === opt.value
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() =>
+                                  setRecurringPattern(opt.value)
+                                }
+                                className="rounded-xl border px-3 py-2.5 text-left transition"
+                                style={{
+                                  borderColor: on
+                                    ? theme.accent
+                                    : rgba(theme.primary, 0.12),
+                                  background: on
+                                    ? rgba(theme.accent, 0.12)
+                                    : "transparent",
+                                  color: theme.text,
+                                }}
+                              >
+                                <span className="block text-[13px] font-semibold">
+                                  {opt.label}
+                                </span>
+                                <span className="block text-[11px] opacity-55">
+                                  {opt.hint}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     type="button"

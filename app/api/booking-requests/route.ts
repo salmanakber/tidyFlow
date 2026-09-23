@@ -131,6 +131,44 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
+    // Seed recurring series when the guest asked for one
+    let recurringJobId: number | null = null
+    const wantsRecurring =
+      booking.wantsRecurring === true ||
+      fieldAnswers?.wantsRecurring === true ||
+      fieldAnswers?.recurringRequested === true ||
+      fieldAnswers?.wantsRecurring === "true" ||
+      fieldAnswers?.recurringRequested === "true"
+    const pattern = String(
+      booking.recurringPattern || fieldAnswers?.recurringPattern || ""
+    )
+      .trim()
+      .toLowerCase()
+    if (
+      wantsRecurring &&
+      ["weekly", "biweekly", "monthly"].includes(pattern)
+    ) {
+      try {
+        const { createRecurringJobFromBooking } = await import(
+          "@/lib/booking-entities"
+        )
+        const job = await createRecurringJobFromBooking({
+          companyId,
+          propertyId,
+          serviceType: booking.serviceType,
+          guestName: booking.guestName,
+          notes: booking.notes,
+          fieldAnswers,
+          formFieldsJson: widget?.formFields,
+          requestedStart: booking.requestedStart,
+          recurringPattern: pattern,
+        })
+        recurringJobId = job.id
+      } catch (err) {
+        console.warn("[Booking] approve recurring create failed:", err)
+      }
+    }
+
     const { newBookingTrackToken } = await import("@/lib/booking-jobs")
     const updated = await prisma.bookingRequest.update({
       where: { id },
@@ -155,9 +193,17 @@ export async function PATCH(request: NextRequest) {
       await createNotification({
         userId: m.id,
         title: "Booking converted to job",
-        message: `${booking.guestName} → task #${taskId}`,
+        message: recurringJobId
+          ? `${booking.guestName} → task #${taskId} + recurring series`
+          : `${booking.guestName} → task #${taskId}`,
         type: "booking_converted",
-        metadata: { bookingRequestId: id, taskId, clientId, propertyId },
+        metadata: {
+          bookingRequestId: id,
+          taskId,
+          clientId,
+          propertyId,
+          recurringJobId,
+        },
         screenRoute: "TaskDetail",
         screenParams: { taskId },
       }).catch(() => {})
@@ -174,7 +220,10 @@ export async function PATCH(request: NextRequest) {
       }).catch((err) => console.warn("[Booking] approve email failed:", err))
     }
 
-    return NextResponse.json({ success: true, data: updated })
+    return NextResponse.json({
+      success: true,
+      data: { ...updated, recurringJobId },
+    })
   }
 
   return NextResponse.json(

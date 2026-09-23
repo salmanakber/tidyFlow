@@ -130,6 +130,62 @@ export const DEFAULT_THEME = {
   textColor: "#0F172A",
 }
 
+/** Cadence choices shown on the public form when studio enables recurring */
+export const BOOKING_RECURRING_OPTIONS: {
+  value: "weekly" | "biweekly" | "monthly"
+  label: string
+  hint: string
+}[] = [
+  { value: "weekly", label: "Every week", hint: "Same day each week" },
+  { value: "biweekly", label: "Every 2 weeks", hint: "Fortnightly" },
+  { value: "monthly", label: "Every month", hint: "~4 weeks" },
+]
+
+export function labelForRecurringPattern(pattern?: string | null): string {
+  const match = BOOKING_RECURRING_OPTIONS.find((o) => o.value === pattern)
+  return match?.label || (pattern ? String(pattern) : "")
+}
+
+/** Map booking cadence → RecurringJob create payload pieces */
+export function recurringPatternToJobFields(
+  pattern: string,
+  requestedStart: Date
+): {
+  recurrenceType: "weekly" | "interval"
+  intervalDays?: number
+  allowedDaysOfWeek?: number[]
+  nextRunAt: Date
+} {
+  // RecurringJob weekday: 1=Mon … 7=Sun
+  const js = requestedStart.getDay()
+  const isoDay = js === 0 ? 7 : js
+  const addDays = (d: Date, n: number) => {
+    const x = new Date(d.getTime())
+    x.setDate(x.getDate() + n)
+    return x
+  }
+  if (pattern === "weekly") {
+    return {
+      recurrenceType: "weekly",
+      allowedDaysOfWeek: [isoDay],
+      nextRunAt: addDays(requestedStart, 7),
+    }
+  }
+  if (pattern === "monthly") {
+    return {
+      recurrenceType: "interval",
+      intervalDays: 28,
+      nextRunAt: addDays(requestedStart, 28),
+    }
+  }
+  // biweekly default
+  return {
+    recurrenceType: "interval",
+    intervalDays: 14,
+    nextRunAt: addDays(requestedStart, 14),
+  }
+}
+
 export function slugifyBooking(input: string): string {
   return (
     String(input || "book")
@@ -161,7 +217,18 @@ export function formatFieldAnswersForTask(
 ): string {
   const lines: string[] = []
   const fieldMap = new Map((fields || []).map((f) => [f.id, f]))
-  const skip = new Set(["name", "email", "phone", "address", "notes", "requestedStart", "source"])
+  const skip = new Set([
+    "name",
+    "email",
+    "phone",
+    "address",
+    "notes",
+    "requestedStart",
+    "source",
+    "recurringRequested",
+    "wantsRecurring",
+    "recurringPattern",
+  ])
 
   for (const [key, raw] of Object.entries(answers || {})) {
     if (skip.has(key) || raw == null || raw === "") continue
@@ -173,6 +240,19 @@ export function formatFieldAnswersForTask(
     }
     lines.push(`${label}: ${value}`)
   }
+
+  const wants =
+    answers?.recurringRequested === true ||
+    answers?.recurringRequested === "true" ||
+    answers?.wantsRecurring === true ||
+    answers?.wantsRecurring === "true"
+  const pattern = String(answers?.recurringPattern || "").trim()
+  if (wants && pattern) {
+    lines.push(`Recurring: ${labelForRecurringPattern(pattern)}`)
+  } else if (wants) {
+    lines.push("Recurring: requested")
+  }
+
   return lines.join("\n")
 }
 
@@ -189,6 +269,7 @@ export function serializeWidgetPublic(config: {
   formFields: string
   serviceOptions: string
   showCalendar: boolean
+  showRecurringOption?: boolean
   companyName?: string
 }) {
   return {
@@ -213,6 +294,8 @@ export function serializeWidgetPublic(config: {
     ),
     serviceOptions: parseJson(config.serviceOptions, DEFAULT_SERVICE_OPTIONS),
     showCalendar: config.showCalendar !== false,
+    showRecurringOption: config.showRecurringOption === true,
+    recurringOptions: BOOKING_RECURRING_OPTIONS,
   }
 }
 

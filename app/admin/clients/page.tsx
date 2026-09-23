@@ -66,6 +66,8 @@ type BookingRequest = {
   serviceType?: string | null
   notes?: string | null
   status: string
+  wantsRecurring?: boolean
+  recurringPattern?: string | null
   requestedStart?: string | null
   requestedEnd?: string | null
   createdAt?: string
@@ -230,9 +232,14 @@ function Content() {
       const res = await adminPatch("/api/booking-requests", { id, action })
       if (res.data?.success) {
         const taskId = Number(res.data?.data?.taskId) || null
+        const recurringJobId = Number(res.data?.data?.recurringJobId) || null
         if (action === "approve" && taskId) {
           setApprovedTaskId(taskId)
-          setToast(`Booking approved · planned task #${taskId} created`)
+          setToast(
+            recurringJobId
+              ? `Approved · task #${taskId} + recurring series #${recurringJobId}`
+              : `Booking approved · planned task #${taskId} created`
+          )
         } else {
           setToast(action === "approve" ? "Booking approved" : "Booking rejected")
         }
@@ -407,7 +414,15 @@ function Content() {
                     <p className="font-bold text-navy-900 dark:text-white">{b.guestName}</p>
                     <p className="text-xs text-slate-400">{b.guestEmail || b.guestPhone || "—"}</p>
                   </td>
-                  <td className={`${opsTd} text-sm`}>{b.serviceType || "—"}</td>
+                  <td className={`${opsTd} text-sm`}>
+                    <span>{b.serviceType || "—"}</span>
+                    {b.wantsRecurring ? (
+                      <span className="mt-1 block text-[10px] font-bold tracking-wide text-amber-700 uppercase dark:text-amber-400">
+                        Recurring
+                        {b.recurringPattern ? ` · ${b.recurringPattern}` : ""}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className={`${opsTd} text-xs`}>
                     {b.requestedStart
                       ? new Date(b.requestedStart).toLocaleString(undefined, {

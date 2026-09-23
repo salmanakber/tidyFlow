@@ -106,6 +106,37 @@ export async function POST(request: NextRequest, context: Ctx) {
   const fieldAnswers =
     body.answers && typeof body.answers === "object" ? body.answers : body
 
+  const wantsRecurring =
+    config.showRecurringOption === true &&
+    (body.wantsRecurring === true ||
+      body.recurringRequested === true ||
+      fieldAnswers?.wantsRecurring === true ||
+      fieldAnswers?.recurringRequested === true ||
+      fieldAnswers?.wantsRecurring === "true" ||
+      fieldAnswers?.recurringRequested === "true")
+  const recurringPatternRaw = String(
+    body.recurringPattern || fieldAnswers?.recurringPattern || ""
+  )
+    .trim()
+    .toLowerCase()
+  const recurringPattern =
+    wantsRecurring &&
+    ["weekly", "biweekly", "monthly"].includes(recurringPatternRaw)
+      ? recurringPatternRaw
+      : null
+
+  // Keep answers in sync for task notes / CRM
+  if (fieldAnswers && typeof fieldAnswers === "object") {
+    ;(fieldAnswers as Record<string, unknown>).wantsRecurring = !!wantsRecurring
+    ;(fieldAnswers as Record<string, unknown>).recurringRequested = !!wantsRecurring
+    if (recurringPattern) {
+      ;(fieldAnswers as Record<string, unknown>).recurringPattern =
+        recurringPattern
+    } else {
+      delete (fieldAnswers as Record<string, unknown>).recurringPattern
+    }
+  }
+
   if (!guestName) {
     return NextResponse.json(
       { success: false, message: "Name is required" },
@@ -182,9 +213,34 @@ export async function POST(request: NextRequest, context: Ctx) {
       requestedEnd,
       status: taskId ? "converted" : "pending",
       source,
+      wantsRecurring: !!wantsRecurring,
+      recurringPattern,
       trackToken: (await import("@/lib/booking-jobs")).newBookingTrackToken(),
     },
   })
+
+  // If auto-converted and guest asked for recurring, seed a series
+  if (taskId && propertyId && wantsRecurring && recurringPattern) {
+    const { createRecurringJobFromBooking } = await import(
+      "@/lib/booking-entities"
+    )
+    await createRecurringJobFromBooking({
+      companyId: config.companyId,
+      propertyId,
+      serviceType,
+      guestName,
+      notes,
+      fieldAnswers:
+        fieldAnswers && typeof fieldAnswers === "object"
+          ? (fieldAnswers as Record<string, unknown>)
+          : null,
+      formFieldsJson: config.formFields,
+      requestedStart,
+      recurringPattern,
+    }).catch((err) =>
+      console.warn("[Booking] recurring job create failed:", err)
+    )
+  }
 
   const { notifyNewBookingRequest } = await import("@/lib/notifications")
   await notifyNewBookingRequest({

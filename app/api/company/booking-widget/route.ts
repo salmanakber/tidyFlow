@@ -128,6 +128,8 @@ export async function PATCH(request: NextRequest) {
   if (typeof body.useCleanerAvailability === "boolean")
     data.useCleanerAvailability = body.useCleanerAvailability
   if (typeof body.showCalendar === "boolean") data.showCalendar = body.showCalendar
+  if (typeof body.showRecurringOption === "boolean")
+    data.showRecurringOption = body.showRecurringOption
   if (typeof body.autoCreateTask === "boolean") data.autoCreateTask = body.autoCreateTask
   if (typeof body.autoCreateProperty === "boolean")
     data.autoCreateProperty = body.autoCreateProperty

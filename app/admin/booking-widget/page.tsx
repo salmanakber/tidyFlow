@@ -61,6 +61,7 @@ type WidgetConfig = {
   formFields: BookingFormField[]
   serviceOptions: BookingServiceOption[]
   showCalendar: boolean
+  showRecurringOption: boolean
   weeklyHours: WeeklyHours
   closedDates: string[]
   slotIntervalMinutes: number
@@ -88,6 +89,7 @@ function emptyConfig(): WidgetConfig {
     formFields: DEFAULT_FORM_FIELDS.map((f) => ({ ...f })),
     serviceOptions: DEFAULT_SERVICE_OPTIONS.map((s) => ({ ...s })),
     showCalendar: true,
+    showRecurringOption: false,
     weeklyHours: { ...DEFAULT_WEEKLY_HOURS },
     closedDates: [],
     slotIntervalMinutes: 60,
@@ -200,6 +202,7 @@ function Content() {
           ? d.serviceOptions
           : DEFAULT_SERVICE_OPTIONS.map((s) => ({ ...s })),
         showCalendar: d.showCalendar !== false,
+        showRecurringOption: d.showRecurringOption === true,
         weeklyHours: d.weeklyHours || { ...DEFAULT_WEEKLY_HOURS },
         closedDates: Array.isArray(d.closedDates) ? d.closedDates : [],
         slotIntervalMinutes: Number(d.slotIntervalMinutes) || 60,
@@ -446,6 +449,7 @@ function Content() {
         formFields: cfg.formFields,
         serviceOptions: cfg.serviceOptions,
         showCalendar: cfg.showCalendar,
+        showRecurringOption: cfg.showRecurringOption,
         weeklyHours: cfg.weeklyHours,
         closedDates: cfg.closedDates,
         slotIntervalMinutes: Number(cfg.slotIntervalMinutes),
@@ -1239,6 +1243,7 @@ function Content() {
                   {(
                     [
                       ["showCalendar", "Calendar"],
+                      ["showRecurringOption", "Recurring option"],
                       ["useCleanerAvailability", "Cleaner hours"],
                       ["autoCreateProperty", "Auto property"],
                       ["autoCreateTask", "Auto task"],
@@ -1254,6 +1259,18 @@ function Content() {
                     />
                   ))}
                 </div>
+                {cfg.showRecurringOption ? (
+                  <p className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                    Guests can optionally request a recurring schedule (weekly /
+                    every 2 weeks / monthly). Approving the booking creates the
+                    first job and a recurring series.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    Turn on <span className="font-semibold">Recurring option</span>{" "}
+                    to let clients request a repeating clean on the public form.
+                  </p>
+                )}
 
                 <div>
                   <L>Weekly hours</L>

@@ -2323,6 +2323,8 @@ model BookingWidgetConfig {
   bufferMinutes        Int      @default(30) @map("buffer_minutes")
   useCleanerAvailability Boolean @default(true) @map("use_cleaner_availability")
   showCalendar         Boolean  @default(true) @map("show_calendar")
+  /// When true, public booking form offers optional recurring schedule request
+  showRecurringOption  Boolean  @default(false) @map("show_recurring_option")
   autoCreateTask       Boolean  @default(false) @map("auto_create_task")
   autoCreateProperty   Boolean  @default(true) @map("auto_create_property")
   createdAt            DateTime @default(now()) @map("created_at")
@@ -2354,6 +2356,10 @@ model BookingRequest {
   requestedEnd   DateTime? @map("requested_end")
   status         String    @default("pending") // pending, approved, rejected, converted, cancelled
   source         String    @default("link") // link, embed
+  /// Guest asked for a recurring series (optional studio-gated field)
+  wantsRecurring Boolean   @default(false) @map("wants_recurring")
+  /// weekly | biweekly | monthly
+  recurringPattern String? @map("recurring_pattern")
   trackToken     String?   @unique @map("track_token")
   metadata       String?   @db.Text
   createdAt      DateTime  @default(now()) @map("created_at")

@@ -140,3 +140,49 @@ export async function resolveBookingEntities(input: {
 
   return { clientId, propertyId, taskId }
 }
+
+/** Create a RecurringJob after a booking is converted (first visit already tasked). */
+export async function createRecurringJobFromBooking(input: {
+  companyId: number
+  propertyId: number
+  serviceType?: string | null
+  guestName: string
+  notes?: string | null
+  fieldAnswers?: Record<string, unknown> | null
+  formFieldsJson?: string | null
+  requestedStart: Date
+  recurringPattern: string
+}) {
+  const { recurringPatternToJobFields, formatFieldAnswersForTask, parseJson, DEFAULT_FORM_FIELDS } =
+    await import("@/lib/booking-widget")
+  const fields = parseJson(input.formFieldsJson, DEFAULT_FORM_FIELDS)
+  const extras = formatFieldAnswersForTask(
+    (input.fieldAnswers || {}) as Record<string, unknown>,
+    fields
+  )
+  const descParts = [input.notes, extras].filter(Boolean)
+  const jobFields = recurringPatternToJobFields(
+    input.recurringPattern,
+    input.requestedStart
+  )
+
+  return prisma.recurringJob.create({
+    data: {
+      companyId: input.companyId,
+      propertyId: input.propertyId,
+      recurrenceType: jobFields.recurrenceType,
+      intervalDays: jobFields.intervalDays ?? null,
+      allowedDaysOfWeek: jobFields.allowedDaysOfWeek
+        ? JSON.stringify(jobFields.allowedDaysOfWeek)
+        : null,
+      nextRunAt: jobFields.nextRunAt,
+      active: true,
+      taskTitle: input.serviceType
+        ? `${input.serviceType} — ${input.guestName}`
+        : `Recurring — ${input.guestName}`,
+      taskDescription: descParts.length
+        ? `From online booking (recurring request)\n\n${descParts.join("\n\n")}`
+        : "From online booking (recurring request)",
+    },
+  })
+}
