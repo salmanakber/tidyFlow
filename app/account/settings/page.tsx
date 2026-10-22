@@ -72,7 +72,7 @@ export default function CustomerSettingsPage() {
     try {
       const token = getCustomerToken()
       if (!token) {
-        window.location.href = "/account/login"
+        window.location.href = "/account/signin"
         return
       }
       clearAdminSession()
@@ -122,7 +122,7 @@ export default function CustomerSettingsPage() {
     } catch (err: any) {
       if (err?.response?.status === 401) {
         clearCustomerSession()
-        window.location.href = "/account/login"
+        window.location.href = "/account/signin"
         return
       }
       setError(err?.response?.data?.message || "Could not load settings")

@@ -7,7 +7,7 @@ import { getCustomerToken } from "@/lib/customer-account"
 export default function AccountIndexPage() {
   useEffect(() => {
     const token = getCustomerToken()
-    window.location.replace(token ? "/account/billing" : "/account/login")
+    window.location.replace(token ? "/account/billing" : "/account/signin")
   }, [])
 
   return (

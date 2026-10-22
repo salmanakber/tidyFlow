@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
           message:
             'An account with this email already exists. Sign in to your customer dashboard to manage billing.',
           code: 'EMAIL_EXISTS',
-          loginUrl: '/account/login',
+          loginUrl: '/account/signin',
         },
         { status: 409 }
       );
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
             message:
               'An unfinished account already exists for this email. Sign in (or use Google) to finish checkout.',
             code: 'EMAIL_EXISTS',
-            loginUrl: '/account/login',
+            loginUrl: '/account/signin',
           },
           { status: 409 }
         );
@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
           {
             success: false,
             message: 'Could not start checkout. Sign in to your dashboard to retry.',
-            loginUrl: '/account/login',
+            loginUrl: '/account/signin',
             code: 'CHECKOUT_FAILED',
           },
           { status: 500 }
@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
           success: false,
           message: `${mapped.message} Your account is saved — sign in at the customer dashboard to retry checkout.`,
           code: mapped.code || 'CHECKOUT_FAILED',
-          loginUrl: '/account/login',
+          loginUrl: '/account/signin',
         },
         { status: mapped.status || 500 }
       );

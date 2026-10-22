@@ -41,7 +41,7 @@ function planFieldsFromCompany(company: any, meNeedsPlan?: boolean | null) {
   }
 }
 
-/** Company owner / manager sign-in (platform admins also use this). Customers: /account/login */
+/** Company owner / manager sign-in (platform admins also use this). New customers: /account/login · Billing: /account/signin */
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
@@ -620,11 +620,17 @@ export default function LoginPage() {
                     <GoogleSignInButton portal="admin" next="/login" label="Continue with Google" />
                   </div>
 
-                  <div className="mt-6 space-y-2 text-center text-sm text-slate-600">
+                  <div className="mt-6 space-y-3 text-center text-sm text-slate-600">
+                    <p>
+                      New here?{" "}
+                      <Link href="/account/login" className="font-bold text-amber-700 hover:text-amber-800">
+                        Create an account
+                      </Link>
+                    </p>
                     <p>
                       Managing subscription only?{" "}
-                      <Link href="/account/login" className="font-bold text-amber-700 hover:text-amber-800">
-                        Billing login
+                      <Link href="/account/signin" className="font-bold text-amber-700 hover:text-amber-800">
+                        Billing sign in
                       </Link>
                     </p>
                   </div>

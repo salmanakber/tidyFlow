@@ -147,7 +147,7 @@ export default function PublicSubscribePlanPage() {
       if (!json.success || !json.data?.url) {
         const suffix =
           json.loginUrl
-            ? ` Sign in at ${json.loginUrl === '/account/login' ? 'the customer dashboard' : json.loginUrl} to finish checkout.`
+            ? ` Sign in at ${json.loginUrl === '/account/signin' || json.loginUrl === '/account/login' ? 'the customer dashboard' : json.loginUrl} to finish checkout.`
             : '';
         throw new Error((json.message || 'Could not start checkout') + suffix);
       }
@@ -679,7 +679,7 @@ export default function PublicSubscribePlanPage() {
               {error ? (
                 <p style={{ margin: '4px 0 0', color: T.rose, fontSize: 13, fontWeight: 700 }}>
                   {error}{' '}
-                  <Link href="/account/login" style={{ color: T.navy, textDecoration: 'underline' }}>
+                  <Link href="/account/signin" style={{ color: T.navy, textDecoration: 'underline' }}>
                     Customer sign in
                   </Link>
                 </p>
