@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
         isActive: true,
         isHeadSuperAdmin: true,
         googleId: true,
+        salaryType: true,
         company: { select: { id: true, name: true } },
       }
     });
@@ -285,7 +286,8 @@ export async function POST(request: NextRequest) {
           lastName: user.lastName,
           role: billingUser.role,
           companyId: billingUser.companyId,
-          isHeadSuperAdmin: user.isHeadSuperAdmin
+          isHeadSuperAdmin: user.isHeadSuperAdmin,
+          salaryType: user.salaryType || null,
         },
         company: billingUser.companyId
           ? {

@@ -24,11 +24,28 @@ async function loadTaskForReview(taskId: number, companyId?: number | null) {
       title: true,
       status: true,
       companyId: true,
-      property: { select: { address: true } },
+      property: {
+        select: {
+          address: true,
+          clientName: true,
+          clientEmail: true,
+          clientPhone: true,
+          client: { select: { name: true, email: true, phone: true } },
+        },
+      },
       assignedUser: { select: { id: true, firstName: true, lastName: true } },
       taskAssignments: {
         select: {
           user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      },
+      bookingRequests: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          guestName: true,
+          guestEmail: true,
+          guestPhone: true,
         },
       },
       reviewRequests: {
@@ -82,6 +99,23 @@ export async function GET(request: NextRequest) {
         })
       : [];
 
+  const booking = task.bookingRequests?.[0];
+  const clientPhone =
+    task.property.clientPhone ||
+    task.property.client?.phone ||
+    booking?.guestPhone ||
+    null;
+  const clientEmail =
+    task.property.clientEmail ||
+    task.property.client?.email ||
+    booking?.guestEmail ||
+    null;
+  const clientName =
+    task.property.clientName ||
+    task.property.client?.name ||
+    booking?.guestName ||
+    null;
+
   return NextResponse.json({
     success: true,
     data: {
@@ -91,6 +125,9 @@ export async function GET(request: NextRequest) {
       reviewLink: active ? buildReviewLink(active.token) : null,
       reviewRequest: active,
       submitted: task.reviewRequests.some((r) => r.submittedAt),
+      clientPhone,
+      clientEmail,
+      clientName,
       clientFeedback: task.clientFeedback.map((f) => ({
         id: f.id,
         rating: f.rating,
@@ -115,7 +152,7 @@ export async function POST(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
-  const { taskId, redirectUrl, clientPhone } = body;
+  const { taskId, redirectUrl, clientPhone, clientEmail } = body;
 
   if (!taskId) {
     return NextResponse.json({ success: false, message: 'taskId required' }, { status: 400 });
@@ -141,13 +178,27 @@ export async function POST(request: NextRequest) {
     (r) => !r.submittedAt && (!r.expiresAt || r.expiresAt > new Date())
   );
 
+  const emailOverride =
+    typeof clientEmail === 'string' && clientEmail.includes('@')
+      ? clientEmail.trim()
+      : task.property.clientEmail ||
+        task.property.client?.email ||
+        task.bookingRequests?.[0]?.guestEmail ||
+        null;
+
   if (existing) {
     const reviewLink = buildReviewLink(existing.token);
     const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
-    await ensureAndSendClientFeedbackEmail(task.id).catch(() => {});
-    if (clientPhone) {
+    await ensureAndSendClientFeedbackEmail(task.id, { overrideEmail: emailOverride }).catch(() => {});
+    const phone =
+      (typeof clientPhone === 'string' && clientPhone.trim()) ||
+      task.property.clientPhone ||
+      task.property.client?.phone ||
+      task.bookingRequests?.[0]?.guestPhone ||
+      null;
+    if (phone) {
       await sendSMS({
-        to: clientPhone,
+        to: phone,
         message: `Thank you for choosing our cleaning service. Please share your feedback: ${reviewLink}`,
       }).catch(() => {});
     }
@@ -172,13 +223,19 @@ export async function POST(request: NextRequest) {
 
   const reviewLink = buildReviewLink(token);
 
-  // Prefer email via SystemSetting providers; SMS remains optional
+  // Prefer email via SystemSetting providers; SMS via Twilio SystemSetting / env
   const { ensureAndSendClientFeedbackEmail } = await import('@/lib/review-emails');
-  await ensureAndSendClientFeedbackEmail(task.id).catch(() => {});
+  await ensureAndSendClientFeedbackEmail(task.id, { overrideEmail: emailOverride }).catch(() => {});
 
-  if (clientPhone) {
+  const phone =
+    (typeof clientPhone === 'string' && clientPhone.trim()) ||
+    task.property.clientPhone ||
+    task.property.client?.phone ||
+    task.bookingRequests?.[0]?.guestPhone ||
+    null;
+  if (phone) {
     await sendSMS({
-      to: clientPhone,
+      to: phone,
       message: `Thank you for choosing our cleaning service. Please share your feedback: ${reviewLink}`,
     }).catch(() => {});
   }

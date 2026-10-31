@@ -44,6 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
                 lastName: true,
                 email: true,
                 profileImage: true,
+                salaryType: true,
               },
             },
             startedAt: true,
@@ -102,6 +103,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             lastName: true,
             email: true,
             profileImage: true,
+            salaryType: true,
           },
         },
         checklists: {
@@ -373,6 +375,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
                 lastName: true,
                 email: true,
                 profileImage: true,
+                salaryType: true,
               },
             },
           },
@@ -420,6 +423,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
             lastName: true,
             email: true,
             profileImage: true,
+            salaryType: true,
           },
         },
         checklists: {

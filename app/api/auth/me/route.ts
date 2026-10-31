@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
         isHeadSuperAdmin: true,
         createdAt: true,
         googleId: true,
+        salaryType: true,
+        basicSalary: true,
+        defaultHourlyRate: true,
         company: {
           select: {
             id: true,
@@ -111,6 +114,9 @@ export async function GET(request: NextRequest) {
           isHeadSuperAdmin: user.isHeadSuperAdmin,
           createdAt: user.createdAt,
           hasGoogle: !!user.googleId,
+          salaryType: user.salaryType,
+          basicSalary: user.basicSalary != null ? Number(user.basicSalary) : null,
+          defaultHourlyRate: user.defaultHourlyRate != null ? Number(user.defaultHourlyRate) : null,
         },
         company: user.company
           ? {

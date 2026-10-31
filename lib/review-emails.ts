@@ -24,7 +24,10 @@ function escapeHtml(s: string) {
  * Ensure a ReviewRequest exists for a finished job and email the client.
  * Prefer the public booking track page when a trackToken exists (same design).
  */
-export async function ensureAndSendClientFeedbackEmail(taskId: number) {
+export async function ensureAndSendClientFeedbackEmail(
+  taskId: number,
+  opts?: { overrideEmail?: string | null }
+) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
@@ -36,7 +39,10 @@ export async function ensureAndSendClientFeedbackEmail(taskId: number) {
       property: {
         select: {
           address: true,
-          client: { select: { name: true, email: true } },
+          clientName: true,
+          clientEmail: true,
+          clientPhone: true,
+          client: { select: { name: true, email: true, phone: true } },
         },
       },
       bookingRequests: {
@@ -69,8 +75,10 @@ export async function ensureAndSendClientFeedbackEmail(taskId: number) {
 
   const booking = task.bookingRequests[0] || null
   const to =
+    opts?.overrideEmail?.trim() ||
     booking?.guestEmail?.trim() ||
     task.property?.client?.email?.trim() ||
+    task.property?.clientEmail?.trim() ||
     null
   if (!to || !to.includes("@")) {
     return { sent: false, reason: "no client email" }
@@ -95,7 +103,10 @@ export async function ensureAndSendClientFeedbackEmail(taskId: number) {
 
   const companyName = task.company.name
   const guestName =
-    booking?.guestName || task.property?.client?.name || "there"
+    booking?.guestName ||
+    task.property?.client?.name ||
+    task.property?.clientName ||
+    "there"
   const primary = booking?.widgetConfig?.primaryColor || "#0B1F33"
   const accent = booking?.widgetConfig?.accentColor || "#D97706"
   const logoUrl = booking?.widgetConfig?.logoUrl

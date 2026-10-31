@@ -52,6 +52,7 @@ const CATEGORIES = [
   { value: 'stripe', label: 'Stripe Integration', icon: CreditCard, description: 'Manage payments and webhook keys' },
   { value: 'billing', label: 'Billing Configuration', icon: Receipt, description: 'Pricing models and trial periods' },
   { value: 'email', label: 'Email Services', icon: Mail, description: 'SMTP, AWS SES, Brevo, and SendGrid settings' },
+  { value: 'sms', label: 'SMS Gateway', icon: Smartphone, description: 'Twilio credentials for review links and OTPs' },
   { value: 'notifications', label: 'Push Notifications', icon: Smartphone, description: 'FCM and Expo push notification settings' },
   { value: 'google_maps', label: 'Google Maps', icon: MapIcon, description: 'API keys for map rendering' },
   { value: 'app', label: 'Application', icon: Smartphone, description: 'Version control and maintenance' },
@@ -85,6 +86,12 @@ const DEFAULT_SETTINGS = {
     { key: 'brevo_sender_name', description: 'Brevo Sender Name', isEncrypted: false },
     { key: 'sendgrid_api_key', description: 'SendGrid API Key (legacy)', isEncrypted: true },
     { key: 'from_email', description: 'System From Email', isEncrypted: false },
+  ],
+  sms: [
+    { key: 'sms_provider', description: 'SMS Provider (twilio)', isEncrypted: false },
+    { key: 'twilio_account_sid', description: 'Twilio Account SID', isEncrypted: true },
+    { key: 'twilio_auth_token', description: 'Twilio Auth Token', isEncrypted: true },
+    { key: 'twilio_phone_number', description: 'Twilio From Phone Number (E.164)', isEncrypted: false },
   ],
   notifications: [
     { key: 'notification_provider', description: 'Notification Provider (expo|fcm)', isEncrypted: false },

@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
           role: true,
           defaultHourlyRate: true,
           basicSalary: true,
+          salaryType: true,
           payrollWorkerType: true,
           hireDate: true,
         },
@@ -99,6 +100,7 @@ export async function POST(request: NextRequest) {
           role: true,
           defaultHourlyRate: true,
           basicSalary: true,
+          salaryType: true,
           payrollWorkerType: true,
           hireDate: true,
         },
@@ -152,14 +154,21 @@ export async function POST(request: NextRequest) {
         let totalHours = 0;
         let totalAmount = 0;
 
-        // If payrollType is explicitly provided, use it
-        if (payrollType === 'fixed') {
+        // Per-employee salaryType wins; request payrollType is fallback when unset
+        const useFixedSalary =
+          employee.salaryType === 'monthly' ||
+          (employee.salaryType !== 'hourly' && payrollType === 'fixed');
+
+        if (useFixedSalary) {
           finalPayrollType = 'fixed';
-          const salary = fixedSalary && fixedSalary > 0
-            ? Number(fixedSalary)
-            : employee.basicSalary
+          const salary =
+            employee.salaryType === 'monthly' && employee.basicSalary
               ? Number(employee.basicSalary)
-              : null;
+              : fixedSalary && fixedSalary > 0
+                ? Number(fixedSalary)
+                : employee.basicSalary
+                  ? Number(employee.basicSalary)
+                  : null;
           if (!salary || salary <= 0) {
             errors.push(`Fixed salary required for ${employee.firstName} ${employee.lastName}`);
             continue;
