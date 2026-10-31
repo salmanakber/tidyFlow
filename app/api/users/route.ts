@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
           isActive: true, 
           createdAt: true,
           profileImage: true,
+          salaryType: true,
+          basicSalary: true,
+          defaultHourlyRate: true,
           company: {
             select: {
               id: true,
@@ -95,7 +98,19 @@ export async function GET(request: NextRequest) {
 
     const users = await prisma.user.findMany({
       where: { companyId },
-      select: { id: true, email: true, firstName: true, lastName: true, role: true, companyId: true, isActive: true, createdAt: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        companyId: true,
+        isActive: true,
+        createdAt: true,
+        salaryType: true,
+        basicSalary: true,
+        defaultHourlyRate: true,
+      },
       orderBy: { id: 'asc' },
     });
     return NextResponse.json({ success: true, data: { users } });

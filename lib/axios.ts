@@ -32,13 +32,24 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      // Unauthorized - clear tokens and redirect to login
-      if (typeof window !== 'undefined') {
+      const url = String(error.config?.url || '')
+      // Wrong password on login (and other credential auth) returns 401 —
+      // do not treat as expired session / force redirect (matches mobile).
+      const isAuthCredentialRoute =
+        url.includes('/api/auth/login') ||
+        url.includes('/api/auth/register') ||
+        url.includes('/api/auth/forgot-password') ||
+        url.includes('/api/auth/reset-password') ||
+        url.includes('/api/auth/verify-otp') ||
+        url.includes('/api/auth/send-otp')
+      if (!isAuthCredentialRoute && typeof window !== 'undefined') {
         localStorage.removeItem('authToken')
         localStorage.removeItem('userData')
         sessionStorage.removeItem('authToken')
         sessionStorage.removeItem('userData')
-        window.location.href = '/login'
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login'
+        }
       }
     }
     return Promise.reject(error)

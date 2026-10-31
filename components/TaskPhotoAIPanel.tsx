@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react"
 import axios from "axios"
-import { Camera, Sparkles, AlertTriangle, CheckCircle, XCircle } from "lucide-react"
+import { Camera, Sparkles, AlertTriangle, CheckCircle, XCircle, Crown } from "lucide-react"
+import Link from "next/link"
 
 interface PhotoScore {
   id: number
@@ -13,13 +14,41 @@ interface PhotoScore {
   photo?: { id: number; url: string; photoType: string; caption?: string }
 }
 
-export default function TaskPhotoAIPanel({ taskId }: { taskId: number }) {
+export default function TaskPhotoAIPanel({
+  taskId,
+  companyId,
+}: {
+  taskId: number
+  companyId?: number | null
+}) {
   const [scores, setScores] = useState<PhotoScore[]>([])
   const [loading, setLoading] = useState(true)
   const [reviewingId, setReviewingId] = useState<number | null>(null)
+  const [aiAllowed, setAiAllowed] = useState(true)
+  const [planChecked, setPlanChecked] = useState(false)
 
   const getToken = () =>
     localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+
+  const loadPlan = async () => {
+    try {
+      const res = await axios.get("/api/subscription/usage", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (res.data.success && res.data.data) {
+        const d = res.data.data
+        const allowed =
+          !!d.features?.aiPhoto &&
+          !d.blocked?.photoVerification &&
+          !d.blocked?.ai
+        setAiAllowed(allowed)
+      }
+    } catch {
+      setAiAllowed(true)
+    } finally {
+      setPlanChecked(true)
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -37,10 +66,12 @@ export default function TaskPhotoAIPanel({ taskId }: { taskId: number }) {
 
   useEffect(() => {
     if (!taskId) return
+    loadPlan()
     load()
   }, [taskId])
 
   const review = async (id: number, reviewStatus: "approved" | "rejected") => {
+    if (!aiAllowed) return
     setReviewingId(id)
     try {
       await axios.patch(
@@ -54,9 +85,34 @@ export default function TaskPhotoAIPanel({ taskId }: { taskId: number }) {
     }
   }
 
-  if (loading) {
+  const billingHref = companyId
+    ? `/account/billing`
+    : "/account/billing"
+
+  if (loading || !planChecked) {
     return (
       <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 animate-pulse h-24" />
+    )
+  }
+
+  if (!aiAllowed) {
+    return (
+      <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 space-y-3">
+        <div className="flex items-center gap-2">
+          <Crown size={16} className="text-amber-700" />
+          <h3 className="text-sm font-semibold text-amber-900">AI Photo Verification limit reached</h3>
+        </div>
+        <p className="text-xs text-amber-800">
+          Your plan’s photo analysis quota is used up for this month. Upgrade or wait for the next
+          billing cycle to continue AI quality checks.
+        </p>
+        <Link
+          href={billingHref}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-navy-950 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-navy-900"
+        >
+          <Crown size={12} /> Upgrade plan
+        </Link>
+      </div>
     )
   }
 
@@ -65,7 +121,9 @@ export default function TaskPhotoAIPanel({ taskId }: { taskId: number }) {
       <div className="p-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50">
         <div className="flex items-center gap-2 text-gray-500 text-sm">
           <Camera size={16} />
-          <span>No photos scored yet. Upload before/after photos — AI scores them automatically.</span>
+          <span>
+            No photos scored yet. Upload before/after photos — AI scores them automatically.
+          </span>
         </div>
       </div>
     )
@@ -119,6 +177,7 @@ export default function TaskPhotoAIPanel({ taskId }: { taskId: number }) {
             className="bg-white rounded-lg border border-gray-200 overflow-hidden"
           >
             {item.photo?.url && (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={item.photo.url} alt="" className="w-full h-28 object-cover" />
             )}
             <div className="p-3 space-y-2">

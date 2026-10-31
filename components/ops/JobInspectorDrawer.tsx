@@ -31,6 +31,8 @@ import {
   type LiveCleaner,
   type LocationLog,
 } from "@/lib/ops-tracking"
+import TaskReviewLinkPanel from "@/components/TaskReviewLinkPanel"
+import TaskPhotoAIPanel from "@/components/TaskPhotoAIPanel"
 
 export interface JobTask {
   id: number
@@ -47,7 +49,17 @@ export interface JobTask {
     lastName?: string
     email?: string
     profileImage?: string
+    salaryType?: string | null
   } | null
+  companyId?: number | null
+  taskAssignments?: Array<{
+    user?: {
+      id: number
+      firstName?: string
+      lastName?: string
+      salaryType?: string | null
+    } | null
+  }>
 }
 
 export interface JobProperty {
@@ -185,6 +197,9 @@ export default function JobInspectorDrawer({
   const [shareBusy, setShareBusy] = useState(false)
   const [shareFlash, setShareFlash] = useState("")
   const [auditOpen, setAuditOpen] = useState(false)
+  const [assigneeSalaryTypes, setAssigneeSalaryTypes] = useState<string[]>([])
+  const [detailCompanyId, setDetailCompanyId] = useState<number | null>(null)
+  const [clientFeedbackCount, setClientFeedbackCount] = useState(0)
   const [drawerWidth, setDrawerWidth] = useState(() => {
     if (typeof window === "undefined") return 520
     return readStoredDrawerWidth() || Math.round(window.innerWidth * DRAWER_DEFAULT_RATIO)
@@ -298,6 +313,23 @@ export default function JobInspectorDrawer({
           setTimeLogs(Array.isArray(logs) ? logs : [])
           setLocationLogs([])
           setLiveForJob([])
+          setDetailCompanyId(d?.companyId != null ? Number(d.companyId) : task.companyId ?? null)
+          const salaryTypes: string[] = []
+          if (Array.isArray(d?.taskAssignments)) {
+            for (const ta of d.taskAssignments) {
+              if (ta?.user?.salaryType) salaryTypes.push(String(ta.user.salaryType))
+            }
+          }
+          if (d?.assignedUser?.salaryType) {
+            salaryTypes.push(String(d.assignedUser.salaryType))
+          }
+          if (!salaryTypes.length && task.assignedUser?.salaryType) {
+            salaryTypes.push(String(task.assignedUser.salaryType))
+          }
+          setAssigneeSalaryTypes(salaryTypes)
+          setClientFeedbackCount(
+            Array.isArray(d?.clientFeedback) ? d.clientFeedback.length : 0
+          )
         } finally {
           setDetailLoading(false)
         }
@@ -308,6 +340,9 @@ export default function JobInspectorDrawer({
       setTimeLogs([])
       setLocationLogs([])
       setLiveForJob([])
+      setAssigneeSalaryTypes([])
+      setDetailCompanyId(null)
+      setClientFeedbackCount(0)
       setForm({
         title: "",
         description: "",
@@ -442,12 +477,28 @@ export default function JobInspectorDrawer({
     ? Math.round((doneCount / checklists.length) * 100)
     : 0
 
+  const REVIEW_ELIGIBLE = ["SUBMITTED", "QA_REVIEW", "APPROVED", "COMPLETED", "ARCHIVED"]
+  const canShowClientReview =
+    !!task &&
+    (REVIEW_ELIGIBLE.includes(String(form.status || task.status || "").toUpperCase()) ||
+      clientFeedbackCount > 0)
+  const canShowPhotoVerify = !!task && photos.length > 0
+  // Hide Hours when every assignee is on fixed (monthly) salary — matches mobile cleaner UX
+  const allAssigneesFixedSalary =
+    assigneeSalaryTypes.length > 0 &&
+    assigneeSalaryTypes.every((s) => String(s).toLowerCase() === "monthly")
+  const canShowHours = !!task && !allAssigneesFixedSalary
+
+  useEffect(() => {
+    if (tab === "hours" && !canShowHours) setTab("details")
+  }, [tab, canShowHours])
+
   const tabs: { id: Tab; label: string; icon: any; show?: boolean }[] = [
     { id: "details", label: "Details", icon: ClipboardList },
     { id: "schedule", label: "Schedule", icon: Calendar },
     { id: "checklist", label: `SOP (${doneCount}/${checklists.length || 0})`, icon: CheckSquare, show: !!task },
     { id: "proofs", label: `Proofs (${photos.length})`, icon: Camera, show: !!task },
-    { id: "hours", label: "Hours", icon: Clock, show: !!task },
+    { id: "hours", label: "Hours", icon: Clock, show: canShowHours },
     { id: "gps", label: "Live GPS", icon: Radio, show: !!task },
   ]
 
@@ -699,6 +750,22 @@ export default function JobInspectorDrawer({
                     placeholder="Access codes, special instructions…"
                   />
                 </Field>
+
+                {canShowClientReview && task && (
+                  <div className="pt-2">
+                    <TaskReviewLinkPanel
+                      taskId={task.id}
+                      taskStatus={form.status || task.status}
+                    />
+                  </div>
+                )}
+
+                {allAssigneesFixedSalary && (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-navy-800 dark:bg-navy-950 dark:text-slate-400">
+                    Assigned cleaner(s) are on <strong>fixed salary</strong> — job time tracking is
+                    hidden (same as mobile). Payroll uses their monthly basic salary.
+                  </p>
+                )}
               </>
             )}
 
@@ -799,37 +866,42 @@ export default function JobInspectorDrawer({
                 ) : photos.length === 0 ? (
                   <p className="py-8 text-center text-sm text-slate-400">No photo proofs yet</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    {photos.map((p) => (
-                      <div
-                        key={p.id}
-                        className="overflow-hidden rounded-lg border border-control-border dark:border-navy-800"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={p.url || p.imageUrl || p.secureUrl}
-                          alt=""
-                          className="h-28 w-full object-cover"
-                        />
-                        <div className="flex justify-between bg-navy-950 px-2 py-1.5 font-mono text-[10px] text-white">
-                          <span>{(p.type || p.photoType || "PHOTO").toString().toUpperCase()}</span>
-                          <span className="text-amber-400">
-                            {p.createdAt
-                              ? new Date(p.createdAt).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })
-                              : ""}
-                          </span>
+                  <>
+                    {canShowPhotoVerify && task && (
+                      <TaskPhotoAIPanel taskId={task.id} companyId={detailCompanyId} />
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      {photos.map((p) => (
+                        <div
+                          key={p.id}
+                          className="overflow-hidden rounded-lg border border-control-border dark:border-navy-800"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={p.url || p.imageUrl || p.secureUrl}
+                            alt=""
+                            className="h-28 w-full object-cover"
+                          />
+                          <div className="flex justify-between bg-navy-950 px-2 py-1.5 font-mono text-[10px] text-white">
+                            <span>{(p.type || p.photoType || "PHOTO").toString().toUpperCase()}</span>
+                            <span className="text-amber-400">
+                              {p.createdAt
+                                ? new Date(p.createdAt).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : ""}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
 
-            {tab === "hours" && (
+            {tab === "hours" && canShowHours && (
               <div className="space-y-2">
                 {detailLoading ? (
                   <div className="flex justify-center py-10">

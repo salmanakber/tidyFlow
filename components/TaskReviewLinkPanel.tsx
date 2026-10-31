@@ -1,23 +1,36 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import axios from "axios"
-import { Link2, Copy, Share2, MessageSquare, Star, Users } from "lucide-react"
+import { Link2, Copy, Share2, MessageSquare, Star, Users, Mail } from "lucide-react"
 
 interface ReviewData {
   reviewLink: string | null
   submitted: boolean
+  clientPhone?: string | null
+  clientEmail?: string | null
+  clientName?: string | null
   assignedCleaners: Array<{ id: number; name: string }>
   clientFeedback: Array<{ id: number; rating: number; createdAt: string }>
 }
 
-export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
+const REVIEW_ELIGIBLE = ["SUBMITTED", "QA_REVIEW", "APPROVED", "COMPLETED", "ARCHIVED"]
+
+export default function TaskReviewLinkPanel({
+  taskId,
+  taskStatus,
+}: {
+  taskId: number
+  taskStatus?: string
+}) {
   const [data, setData] = useState<ReviewData | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [phone, setPhone] = useState("")
+  const [email, setEmail] = useState("")
   const [googleUrl, setGoogleUrl] = useState("")
   const [message, setMessage] = useState<string | null>(null)
+  const prefillsApplied = useRef(false)
 
   const getToken = () =>
     localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
@@ -28,31 +41,54 @@ export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
       const res = await axios.get(`/api/reviews/request?taskId=${taskId}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
-      if (res.data.success) setData(res.data.data)
+      if (res.data.success) {
+        const info = res.data.data as ReviewData
+        setData(info)
+        if (!prefillsApplied.current) {
+          if (info.clientPhone) setPhone(info.clientPhone)
+          if (info.clientEmail) setEmail(info.clientEmail)
+          prefillsApplied.current = true
+        }
+      }
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
+    prefillsApplied.current = false
     if (taskId) load()
   }, [taskId])
 
-  const generate = async () => {
+  const canInvite =
+    !!taskStatus && REVIEW_ELIGIBLE.includes(String(taskStatus).toUpperCase())
+  const hasFeedback = (data?.clientFeedback?.length || 0) > 0
+
+  const generate = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     setGenerating(true)
     setMessage(null)
     try {
       const res = await axios.post(
         "/api/reviews/request",
-        { taskId, clientPhone: phone || undefined, redirectUrl: googleUrl || undefined },
+        {
+          taskId,
+          clientPhone: phone.trim() || undefined,
+          clientEmail: email.trim() || undefined,
+          redirectUrl: googleUrl.trim() || undefined,
+        },
         { headers: { Authorization: `Bearer ${getToken()}` } }
       )
       if (res.data.success) {
-        setMessage(res.data.data.reused ? "Existing link loaded." : "Review link created.")
+        setMessage(
+          res.data.data.reused
+            ? "Existing link loaded — email/SMS resent when configured."
+            : "Review link created — email/SMS sent when configured."
+        )
         load()
       }
-    } catch {
-      setMessage("Failed to generate link.")
+    } catch (err: any) {
+      setMessage(err?.response?.data?.message || "Failed to generate link.")
     } finally {
       setGenerating(false)
     }
@@ -83,6 +119,11 @@ export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
     return <div className="h-24 rounded-xl bg-teal-50/50 animate-pulse border border-teal-100" />
   }
 
+  // Mirror mobile: keep panel invisible until actionable (parent should also gate)
+  if (!canInvite && !hasFeedback) {
+    return null
+  }
+
   return (
     <div className="p-4 rounded-xl border border-teal-200 bg-teal-50/50 space-y-3">
       <div>
@@ -95,6 +136,15 @@ export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
           4–5★ can go public; lower ratings stay private.
         </p>
       </div>
+
+      {data?.clientName ? (
+        <div className="flex items-start gap-2 text-xs text-teal-800 bg-white/70 rounded-lg px-3 py-2 border border-teal-100">
+          <Users size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Client: <strong>{data.clientName}</strong>
+          </span>
+        </div>
+      ) : null}
 
       {data?.assignedCleaners && data.assignedCleaners.length > 0 ? (
         <div className="flex items-start gap-2 text-xs text-teal-800 bg-white/70 rounded-lg px-3 py-2 border border-teal-100">
@@ -110,36 +160,58 @@ export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
         </p>
       )}
 
-      {data?.submitted && data.clientFeedback.length > 0 && (
+      {hasFeedback && (
         <div className="flex items-center gap-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
           <Star size={14} className="fill-amber-400 text-amber-400" />
-          Client submitted {data.clientFeedback[0].rating}/5 — assigned to cleaner(s).
+          Client submitted {data!.clientFeedback[0].rating}/5 — assigned to cleaner(s).
         </div>
       )}
 
-      <input
-        type="url"
-        value={googleUrl}
-        onChange={(e) => setGoogleUrl(e.target.value)}
-        placeholder="Google review URL (optional, for 4–5★ redirect)"
-        className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-white"
-      />
-      <input
-        type="tel"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-        placeholder="Client phone (optional — sends SMS with link)"
-        className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-white"
-      />
+      {canInvite && (
+        <form onSubmit={generate} className="space-y-2">
+          <input
+            type="url"
+            value={googleUrl}
+            onChange={(e) => setGoogleUrl(e.target.value)}
+            placeholder="Google review URL (optional, for 4–5★ redirect)"
+            className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-white"
+          />
+          <div className="relative">
+            <Mail
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-teal-500"
+            />
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Client email (optional — sends email with link)"
+              autoComplete="email"
+              className="w-full pl-9 pr-3 py-2 border border-teal-200 rounded-lg text-sm bg-white"
+            />
+          </div>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Client phone (optional — sends SMS with link)"
+            autoComplete="tel"
+            className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-white"
+          />
 
-      <button
-        type="button"
-        onClick={generate}
-        disabled={generating}
-        className="w-full py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50"
-      >
-        {generating ? "Working..." : link ? "Refresh / Resend SMS" : "Generate Review Link"}
-      </button>
+          <button
+            type="submit"
+            disabled={generating}
+            className="w-full py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50"
+          >
+            {generating
+              ? "Working..."
+              : link
+                ? "Refresh / Resend"
+                : "Generate Review Link"}
+          </button>
+        </form>
+      )}
 
       {link && (
         <div className="space-y-2">
@@ -164,13 +236,13 @@ export default function TaskReviewLinkPanel({ taskId }: { taskId: number }) {
             >
               <Share2 size={14} /> Share
             </button>
-            {phone && (
+            {(phone || email) && canInvite && (
               <button
                 type="button"
-                onClick={generate}
+                onClick={() => generate()}
                 className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-semibold rounded-lg bg-teal-600 text-white"
               >
-                <MessageSquare size={14} /> SMS
+                <MessageSquare size={14} /> Resend
               </button>
             )}
           </div>

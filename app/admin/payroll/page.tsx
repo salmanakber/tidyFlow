@@ -92,7 +92,7 @@ function PayrollContent() {
   const [periodEnd, setPeriodEnd] = useState(
     new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
   )
-  const [payrollType, setPayrollType] = useState<"hourly" | "fixed">("hourly")
+  const [payrollType, setPayrollType] = useState<"auto" | "hourly" | "fixed">("auto")
   const [actionId, setActionId] = useState<number | null>(null)
   const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
@@ -161,7 +161,8 @@ function PayrollContent() {
       const res = await adminPost("/api/payroll/generate", {
         periodStart,
         periodEnd,
-        payrollType,
+        // auto = each cleaner's salaryType (monthly→fixed, hourly→hours); override only when set
+        ...(payrollType !== "auto" ? { payrollType } : {}),
         useAutoTax: true,
         autoApproveHours: false,
       })
@@ -433,7 +434,10 @@ function PayrollContent() {
               {formatDate(periodStart)} → {formatDate(periodEnd)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Type: <span className="font-bold capitalize text-navy-800 dark:text-slate-200">{payrollType}</span>
+              Type:{" "}
+              <span className="font-bold capitalize text-navy-800 dark:text-slate-200">
+                {payrollType === "auto" ? "Per employee" : payrollType}
+              </span>
               {" · "}Tax auto-calc enabled
             </p>
           </div>
@@ -454,11 +458,16 @@ function PayrollContent() {
           </div>
 
           <OpsField label="Pay type" required>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  { id: "hourly", label: "Hourly", hint: "From approved hours" },
-                  { id: "fixed", label: "Fixed", hint: "Salary schedule" },
+                  {
+                    id: "auto",
+                    label: "Per employee",
+                    hint: "Uses each cleaner’s hourly / fixed setting",
+                  },
+                  { id: "hourly", label: "Hourly", hint: "Fallback if unset" },
+                  { id: "fixed", label: "Fixed", hint: "Fallback if unset" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -479,8 +488,9 @@ function PayrollContent() {
           </OpsField>
 
           <p className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-500 dark:border-navy-800 dark:bg-navy-950">
-            Generated lines appear as <strong>pending</strong>. Approve each (or mark paid) from the
-            ledger. Hours still pending approval are not auto-included.
+            <strong>Per employee</strong> matches mobile: monthly salary cleaners get fixed pay from
+            basic salary; hourly cleaners use approved hours. Generated lines appear as{" "}
+            <strong>pending</strong>. Hours still pending approval are not auto-included.
           </p>
         </div>
       </OpsDrawer>

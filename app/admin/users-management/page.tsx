@@ -67,6 +67,9 @@ function Content() {
     email: "",
     role: "CLEANER",
     password: "",
+    salaryType: "hourly" as "hourly" | "monthly",
+    basicSalary: "",
+    defaultHourlyRate: "",
   })
 
   const load = async () => {
@@ -106,18 +109,36 @@ function Content() {
     const lastName = parts.slice(1).join(" ") || ""
     try {
       setSaving(true)
-      const res = await adminPost("/api/users", {
+      const payload: Record<string, unknown> = {
         firstName,
         lastName,
         name: form.name.trim(),
         email: form.email.trim(),
         role: form.role,
         password: form.password,
-      })
+      }
+      if (form.role === "CLEANER") {
+        payload.salaryType = form.salaryType
+        if (form.salaryType === "monthly" && form.basicSalary) {
+          payload.basicSalary = Number(form.basicSalary)
+        }
+        if (form.salaryType === "hourly" && form.defaultHourlyRate) {
+          payload.defaultHourlyRate = Number(form.defaultHourlyRate)
+        }
+      }
+      const res = await adminPost("/api/users", payload)
       if (res.data?.success) {
         setToast("Team member created")
         setShowForm(false)
-        setForm({ name: "", email: "", role: "CLEANER", password: "" })
+        setForm({
+          name: "",
+          email: "",
+          role: "CLEANER",
+          password: "",
+          salaryType: "hourly",
+          basicSalary: "",
+          defaultHourlyRate: "",
+        })
         await load()
       } else setError(res.data?.message || "Failed")
     } catch (err: any) {
@@ -133,6 +154,21 @@ function Content() {
       const res = await adminPatch(`/api/users/${id}`, { role })
       if (res.data?.success) {
         setToast("Role updated")
+        await load()
+      } else setError(res.data?.message || "Failed")
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Failed")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const setSalaryType = async (id: number, salaryType: "hourly" | "monthly") => {
+    try {
+      setBusyId(id)
+      const res = await adminPatch(`/api/users/${id}`, { salaryType })
+      if (res.data?.success) {
+        setToast(salaryType === "monthly" ? "Set to fixed salary" : "Set to hourly")
         await load()
       } else setError(res.data?.message || "Failed")
     } catch (e: any) {
@@ -260,6 +296,53 @@ function Content() {
               onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
           </label>
+          {form.role === "CLEANER" && (
+            <>
+              <label className="space-y-1 text-xs font-semibold">
+                Pay type
+                <select
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                  value={form.salaryType}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      salaryType: e.target.value as "hourly" | "monthly",
+                    })
+                  }
+                >
+                  <option value="hourly">Hourly (time tracking on)</option>
+                  <option value="monthly">Fixed salary (no job timer)</option>
+                </select>
+              </label>
+              {form.salaryType === "monthly" ? (
+                <label className="space-y-1 text-xs font-semibold">
+                  Monthly salary
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                    value={form.basicSalary}
+                    onChange={(e) => setForm({ ...form, basicSalary: e.target.value })}
+                    placeholder="e.g. 2500"
+                  />
+                </label>
+              ) : (
+                <label className="space-y-1 text-xs font-semibold">
+                  Default hourly rate
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-navy-800 dark:bg-navy-950"
+                    value={form.defaultHourlyRate}
+                    onChange={(e) => setForm({ ...form, defaultHourlyRate: e.target.value })}
+                    placeholder="e.g. 15.00"
+                  />
+                </label>
+              )}
+            </>
+          )}
           <div className="flex justify-end gap-2 md:col-span-4">
             <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm font-semibold">
                   Cancel
@@ -300,6 +383,7 @@ function Content() {
                   <th className={opsTh}>Name</th>
                   <th className={opsTh}>Email</th>
                   <th className={opsTh}>Role</th>
+                  <th className={opsTh}>Pay</th>
                   <th className={opsTh}>Status</th>
                   <th className={opsTh}>Joined</th>
                   <th className={`${opsTh} text-right`}>Actions</th>
@@ -328,6 +412,24 @@ function Content() {
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td className={opsTd}>
+                        {u.role === "CLEANER" ? (
+                          <select
+                            disabled={busyId === u.id}
+                            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold dark:border-navy-800 dark:bg-navy-950"
+                            value={u.salaryType === "monthly" ? "monthly" : "hourly"}
+                            onChange={(e) =>
+                              setSalaryType(u.id, e.target.value as "hourly" | "monthly")
+                            }
+                            title="Hourly shows job time tracking; fixed salary hides it"
+                          >
+                            <option value="hourly">Hourly</option>
+                            <option value="monthly">Fixed</option>
+                          </select>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </td>
                       <td className={opsTd}>
                         <OpsBadge status={active ? "active" : "inactive"} />
