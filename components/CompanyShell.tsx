@@ -53,6 +53,7 @@ import { CurrencyProvider } from "@/contexts/CurrencyContext"
 import WorkspaceAppFooter from "@/components/WorkspaceAppFooter"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 import HeaderNotifications from "@/components/ops/HeaderNotifications"
+import HeaderChatBadge from "@/components/ops/HeaderChatBadge"
 import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
 import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
 import { OpsLoader } from "@/components/ops/OpsLoader"
@@ -798,6 +799,7 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
               {darkMode ? <Sun size={14} className="text-amber-500" /> : <Moon size={14} className="text-navy-700" />}
               <span className="hidden sm:inline">{darkMode ? "Dark" : "Light"}</span>
             </button>
+            <HeaderChatBadge />
             <HeaderNotifications />
             <Link
               href={`${wsHref("jobs")}?create=1`}

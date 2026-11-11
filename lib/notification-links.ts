@@ -65,6 +65,9 @@ export function resolveNotificationHref(
       return taskId ? `${href("jobs")}?task=${taskId}&tab=review` : href("jobs")
     case "Clients":
       return `${href("clients")}?tab=bookings`
+    case "Chat":
+    case "TaskChats":
+      return taskId ? `${href("chat")}?taskId=${taskId}` : href("chat")
     default:
       break
   }
@@ -79,6 +82,9 @@ export function resolveNotificationHref(
   if (type.includes("announcement")) return href("announcements")
   if (type.includes("booking_request") || type === "booking_request") {
     return `${href("clients")}?tab=bookings`
+  }
+  if (type.includes("chat")) {
+    return taskId ? `${href("chat")}?taskId=${taskId}` : href("chat")
   }
 
   return null

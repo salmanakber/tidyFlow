@@ -9,6 +9,9 @@ import {
   OpsEmpty,
   OpsRefreshButton,
 } from "@/components/ops/OpsChrome"
+import AssigneeAvatarStack, {
+  type AssigneeBubble,
+} from "@/components/ops/AssigneeAvatarStack"
 import { useOpsRealtime, useInterval } from "@/hooks/useOpsRealtime"
 import {
   MessageCircle,
@@ -18,6 +21,7 @@ import {
   Wifi,
   WifiOff,
   MapPin,
+  UserX,
 } from "lucide-react"
 
 type InboxTask = {
@@ -27,6 +31,9 @@ type InboxTask = {
   scheduledDate?: string | null
   address?: string | null
   unreadCount?: number
+  assignees?: AssigneeBubble[]
+  hasAssignees?: boolean
+  chatEnabled?: boolean
 }
 
 type ChatMessage = {
@@ -79,6 +86,11 @@ function statusTone(status?: string | null) {
   return "bg-slate-100 text-slate-600"
 }
 
+function isChatEnabled(task: InboxTask) {
+  if (typeof task.chatEnabled === "boolean") return task.chatEnabled
+  return (task.assignees?.length || 0) > 0
+}
+
 export default function ChatPage() {
   return (
     <AdminLayout>
@@ -93,6 +105,7 @@ function Content() {
   const [loadingInbox, setLoadingInbox] = useState(true)
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
   const [threadTitle, setThreadTitle] = useState("")
+  const [activeAssignees, setActiveAssignees] = useState<AssigneeBubble[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadingThread, setLoadingThread] = useState(false)
   const [draft, setDraft] = useState("")
@@ -101,6 +114,7 @@ function Content() {
   const [search, setSearch] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const deepLinkHandled = useRef(false)
 
   const loadInbox = useCallback(async (silent = false) => {
     try {
@@ -143,6 +157,24 @@ function Content() {
     loadInbox()
   }, [loadInbox])
 
+  // Deep-link from notifications: ?taskId=
+  useEffect(() => {
+    if (deepLinkHandled.current || loadingInbox || !inbox.length) return
+    if (typeof window === "undefined") return
+    const id = Number(new URLSearchParams(window.location.search).get("taskId") || 0)
+    if (!id) return
+    const task = inbox.find((t) => t.taskId === id)
+    if (task && isChatEnabled(task)) {
+      deepLinkHandled.current = true
+      setActiveTaskId(task.taskId)
+      setThreadTitle(task.title || `Task #${task.taskId}`)
+      setActiveAssignees(task.assignees || [])
+    } else if (task && !isChatEnabled(task)) {
+      deepLinkHandled.current = true
+      setError("This job has no assigned cleaners — assign someone before chatting.")
+    }
+  }, [inbox, loadingInbox])
+
   useEffect(() => {
     if (activeTaskId) loadThread(activeTaskId)
   }, [activeTaskId, loadThread])
@@ -152,12 +184,13 @@ function Content() {
   }, [messages, activeTaskId])
 
   const { status: socketStatus } = useOpsRealtime((eventName, payload) => {
-    if (eventName !== "chat:message") return
-    const taskId = Number(payload?.taskId)
-    if (activeTaskId && taskId === activeTaskId) {
-      loadThread(activeTaskId, true)
+    if (eventName === "chat:message" || eventName === "notification:new") {
+      const taskId = Number(payload?.taskId)
+      if (activeTaskId && (!taskId || taskId === activeTaskId)) {
+        loadThread(activeTaskId, true)
+      }
+      loadInbox(true)
     }
-    loadInbox(true)
   })
 
   useInterval(
@@ -176,13 +209,19 @@ function Content() {
       (t) =>
         t.title?.toLowerCase().includes(q) ||
         t.address?.toLowerCase().includes(q) ||
-        String(t.taskId).includes(q)
+        String(t.taskId).includes(q) ||
+        (t.assignees || []).some((a) => a.name?.toLowerCase().includes(q))
     )
   }, [inbox, search])
 
   const openThread = (task: InboxTask) => {
+    if (!isChatEnabled(task)) {
+      setError("Assign a cleaner to this job before opening chat.")
+      return
+    }
     setActiveTaskId(task.taskId)
     setThreadTitle(task.title || `Task #${task.taskId}`)
+    setActiveAssignees(task.assignees || [])
     setDraft("")
     setError("")
   }
@@ -209,9 +248,7 @@ function Content() {
         { headers: authHeaders() }
       )
       if (res.data?.success) {
-        const list = Array.isArray(res.data.data?.messages)
-          ? res.data.data.messages
-          : null
+        const list = Array.isArray(res.data.data?.messages) ? res.data.data.messages : null
         if (list) setMessages(list)
         else await loadThread(activeTaskId, true)
         await loadInbox(true)
@@ -242,7 +279,7 @@ function Content() {
       <OpsPageHeader
         eyebrow="Team communication"
         title="Task chat"
-        subtitle="Job threads with cleaners and staff — same conversations as the mobile app"
+        subtitle="Job threads with assigned cleaners — live over websocket with mobile push"
         actions={
           <div className="flex items-center gap-2">
             <span
@@ -269,7 +306,6 @@ function Content() {
       {error && <OpsFlash ok={false} text={error} onClose={() => setError("")} />}
 
       <div className="grid min-h-0 flex-1 overflow-hidden rounded-2xl border border-control-border bg-white shadow-sm dark:border-amber-900/40 dark:bg-control-darkCard lg:grid-cols-[340px_1fr]">
-        {/* Inbox */}
         <aside
           className={`flex min-h-0 flex-col border-control-border dark:border-navy-800 ${
             activeTaskId ? "hidden lg:flex lg:border-r" : "flex border-r-0 lg:border-r"
@@ -281,7 +317,7 @@ function Content() {
                 Inbox
               </p>
               {totalUnread > 0 && (
-                <span className="rounded-full bg-amber-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                <span className="rounded-full bg-rose-600 px-2 py-0.5 font-mono text-[10px] font-bold text-white">
                   {totalUnread}
                 </span>
               )}
@@ -289,7 +325,7 @@ function Content() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search jobs…"
+              placeholder="Search jobs or people…"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none ring-amber-500/30 placeholder:text-slate-400 focus:border-amber-500 focus:ring-2 dark:border-navy-800 dark:bg-navy-950"
             />
           </div>
@@ -308,39 +344,45 @@ function Content() {
               <ul>
                 {filteredInbox.map((task) => {
                   const active = activeTaskId === task.taskId
+                  const enabled = isChatEnabled(task)
+                  const assignees = task.assignees || []
                   return (
                     <li key={task.taskId}>
                       <button
                         type="button"
+                        disabled={!enabled}
                         onClick={() => openThread(task)}
                         className={`flex w-full gap-3 border-b border-slate-50 px-4 py-3.5 text-left transition-colors dark:border-navy-900 ${
-                          active
-                            ? "bg-amber-50/80 dark:bg-amber-950/20"
-                            : "hover:bg-slate-50 dark:hover:bg-navy-950/50"
+                          !enabled
+                            ? "cursor-not-allowed opacity-55"
+                            : active
+                              ? "bg-amber-50/80 dark:bg-amber-950/20"
+                              : "hover:bg-slate-50 dark:hover:bg-navy-950/50"
                         }`}
                       >
-                        <div
-                          className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                            active
-                              ? "bg-navy-900 text-amber-300"
-                              : "bg-navy-50 text-navy-700 dark:bg-navy-900 dark:text-amber-400"
-                          }`}
-                        >
-                          <MessageCircle size={18} />
-                        </div>
+                        <AssigneeAvatarStack assignees={assignees} size="md" max={3} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <p className="truncate text-sm font-bold text-navy-900 dark:text-white">
                               {task.title || `Task #${task.taskId}`}
                             </p>
-                            {(task.unreadCount || 0) > 0 && (
-                              <span className="shrink-0 rounded-full bg-amber-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
+                            {enabled && (task.unreadCount || 0) > 0 && (
+                              <span className="shrink-0 rounded-full bg-rose-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
                                 {task.unreadCount}
                               </span>
                             )}
                           </div>
+                          {!enabled ? (
+                            <p className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                              <UserX size={11} /> Unassigned — chat disabled
+                            </p>
+                          ) : (
+                            <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                              {assignees.map((a) => a.name).join(", ")}
+                            </p>
+                          )}
                           {task.address ? (
-                            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-500">
+                            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-slate-400">
                               <MapPin size={11} className="shrink-0" />
                               {task.address}
                             </p>
@@ -353,11 +395,6 @@ function Content() {
                             >
                               {task.status || "open"}
                             </span>
-                            {task.scheduledDate ? (
-                              <span className="font-mono text-[10px] text-slate-400">
-                                {new Date(task.scheduledDate).toLocaleDateString()}
-                              </span>
-                            ) : null}
                           </div>
                         </div>
                       </button>
@@ -369,7 +406,6 @@ function Content() {
           </div>
         </aside>
 
-        {/* Thread */}
         <section
           className={`relative flex min-h-0 flex-col ${
             activeTaskId ? "flex" : "hidden lg:flex"
@@ -381,10 +417,11 @@ function Content() {
                 <MessageCircle size={28} />
               </div>
               <h2 className="text-lg font-extrabold text-navy-900 dark:text-white">
-                Select a job thread
+                Select an assigned job
               </h2>
               <p className="max-w-sm text-sm text-slate-500">
-                Conversations stay tied to each task so cleaners and managers share the same context.
+                Only jobs with cleaners assigned can be opened. Unassigned threads stay visible but
+                disabled.
               </p>
             </div>
           ) : (
@@ -398,11 +435,17 @@ function Content() {
                 >
                   <ArrowLeft size={16} />
                 </button>
+                <AssigneeAvatarStack assignees={activeAssignees} size="lg" max={4} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-extrabold text-navy-900 dark:text-white">
                     {threadTitle}
                   </p>
-                  <p className="font-mono text-[10px] text-slate-400">TASK #{activeTaskId}</p>
+                  <p className="truncate text-[11px] text-slate-500">
+                    {activeAssignees.length
+                      ? activeAssignees.map((a) => a.name).join(" · ")
+                      : "No assignees"}
+                    <span className="font-mono text-slate-400"> · TASK #{activeTaskId}</span>
+                  </p>
                 </div>
               </header>
 
@@ -416,7 +459,7 @@ function Content() {
                   <div className="flex h-full flex-col items-center justify-center text-center">
                     <p className="text-sm font-semibold text-slate-500">No messages yet</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      Say hello — the team will see it on mobile instantly.
+                      Say hello — the team gets a push on mobile and a live update here.
                     </p>
                   </div>
                 ) : (

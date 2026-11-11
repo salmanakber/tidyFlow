@@ -430,6 +430,43 @@ export async function sendTaskThreadMessage(params: {
     await broadcastChatRow(companyId, taskId, senderId, created[0] as unknown as Record<string, unknown>);
   }
 
+  // Push + in-app notifications so mobile + web badge update even when socket is offline
+  try {
+    const { createNotification } = await import('@/lib/notifications');
+    const isVoice = messageText.startsWith(CHAT_VOICE_PREFIX);
+    const preview = isVoice
+      ? 'Sent a voice message'
+      : messageText.length > 120
+        ? `${messageText.slice(0, 117)}…`
+        : messageText;
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { title: true },
+    });
+    const title = task?.title ? `Chat · ${task.title}` : 'New chat message';
+
+    await Promise.all(
+      recipientIds.map((rid) =>
+        createNotification({
+          userId: rid,
+          title,
+          message: `${senderName}: ${preview}`,
+          type: 'chat_message',
+          metadata: {
+            taskId,
+            companyId,
+            senderId,
+            kind: isVoice ? 'voice' : 'text',
+          },
+          screenRoute: 'Chat',
+          screenParams: { taskId, threadTitle: task?.title || undefined },
+        }).catch((err) => console.warn('[chat] notification failed:', err))
+      )
+    );
+  } catch (err) {
+    console.warn('[chat] notification dispatch failed:', err);
+  }
+
   const raw = await fetchTaskThreadRaw(taskId, senderId, senderRole);
   const messages = buildTaskThreadMessages(raw, senderId, senderRole);
 
@@ -480,6 +517,31 @@ export async function getChatInboxForUser(tokenUser: JWTPayload) {
       status: true,
       scheduledDate: true,
       property: { select: { address: true } },
+      assignedUserId: true,
+      assignedUser: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          profileImage: true,
+          role: true,
+          isActive: true,
+        },
+      },
+      taskAssignments: {
+        select: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              profileImage: true,
+              role: true,
+              isActive: true,
+            },
+          },
+        },
+      },
     },
     orderBy: { updatedAt: 'desc' },
     take: 80,
@@ -500,17 +562,87 @@ export async function getChatInboxForUser(tokenUser: JWTPayload) {
   });
 
   const unreadMap = new Map(unreadGroups.map((g) => [g.taskId!, g._count._all]));
-  const enriched = tasks.map((t) => ({
-    taskId: t.id,
-    title: t.title,
-    status: t.status,
-    scheduledDate: t.scheduledDate?.toISOString() ?? null,
-    address: t.property?.address ?? null,
-    unreadCount: unreadMap.get(t.id) ?? 0,
-  }));
+  const enriched = tasks.map((t) => {
+    const assignees = collectTaskAssignees(t);
+    return {
+      taskId: t.id,
+      title: t.title,
+      status: t.status,
+      scheduledDate: t.scheduledDate?.toISOString() ?? null,
+      address: t.property?.address ?? null,
+      unreadCount: unreadMap.get(t.id) ?? 0,
+      assignees,
+      hasAssignees: assignees.length > 0,
+      chatEnabled: assignees.length > 0,
+    };
+  });
 
-  const sorted = sortTasksInProgressFirst(enriched);
-  const totalUnread = sorted.reduce((sum, t) => sum + (t.unreadCount as number), 0);
+  // Assigned threads first; unassigned stay visible but disabled on clients
+  const sorted = sortTasksInProgressFirst(enriched).sort((a, b) => {
+    if (a.chatEnabled !== b.chatEnabled) return a.chatEnabled ? -1 : 1;
+    return 0;
+  });
+  const totalUnread = sorted
+    .filter((t) => t.chatEnabled)
+    .reduce((sum, t) => sum + (t.unreadCount as number), 0);
 
   return { totalUnread, tasks: sorted };
+}
+
+function collectTaskAssignees(task: {
+  assignedUser?: {
+    id: number;
+    firstName: string | null;
+    lastName: string | null;
+    profileImage: string | null;
+    role: UserRole;
+    isActive: boolean;
+  } | null;
+  taskAssignments: Array<{
+    user: {
+      id: number;
+      firstName: string | null;
+      lastName: string | null;
+      profileImage: string | null;
+      role: UserRole;
+      isActive: boolean;
+    } | null;
+  }>;
+}) {
+  const map = new Map<
+    number,
+    {
+      id: number;
+      firstName: string | null;
+      lastName: string | null;
+      name: string;
+      profileImage: string | null;
+      role: string;
+    }
+  >();
+
+  const add = (u: {
+    id: number;
+    firstName: string | null;
+    lastName: string | null;
+    profileImage: string | null;
+    role: UserRole;
+    isActive: boolean;
+  } | null | undefined) => {
+    if (!u?.isActive) return;
+    const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || 'Team member';
+    map.set(u.id, {
+      id: u.id,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      name,
+      profileImage: u.profileImage,
+      role: u.role,
+    });
+  };
+
+  add(task.assignedUser);
+  for (const ta of task.taskAssignments) add(ta.user);
+
+  return Array.from(map.values());
 }
