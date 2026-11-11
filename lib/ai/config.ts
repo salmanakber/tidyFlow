@@ -1,6 +1,8 @@
 import prisma from '@/lib/prisma';
 import { decryptStoredSecret, encryptSecret } from '@/lib/encrypt';
 
+export type AIProviderId = 'openai' | 'groq' | 'google';
+
 export interface AIConfig {
   enabled: boolean;
   provider: string;
@@ -14,8 +16,13 @@ export interface AIConfig {
   googleApiKey: string | null;
   googleModel: string;
   googleVisionModel: string;
+  openaiApiKey: string | null;
+  openaiModel: string;
+  openaiVisionModel: string;
   groqKeySource: 'database' | 'environment' | null;
   googleKeySource: 'database' | 'environment' | null;
+  openaiKeySource: 'database' | 'environment' | null;
+  providerPriority: AIProviderId[];
 }
 
 type AIConfigurationRow = {
@@ -31,6 +38,10 @@ type AIConfigurationRow = {
   googleApiKey?: string | null;
   googleModel?: string | null;
   googleVisionModel?: string | null;
+  openaiApiKey?: string | null;
+  openaiModel?: string | null;
+  openaiVisionModel?: string | null;
+  providerPriority?: string | null;
 };
 
 const ENV_GROQ_KEY = (): string | null => {
@@ -41,6 +52,12 @@ const ENV_GOOGLE_KEY = (): string | null => {
   const key = process.env.GOOGLE_AI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
   return key || null;
 };
+const ENV_OPENAI_KEY = (): string | null => {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  return key || null;
+};
+
+const DEFAULT_PROVIDER_PRIORITY: AIProviderId[] = ['groq', 'google', 'openai'];
 
 const DEFAULT_CONFIG = {
   enabled: true,
@@ -52,6 +69,8 @@ const DEFAULT_CONFIG = {
     process.env.GOOGLE_AI_VISION_MODEL ||
     process.env.GEMINI_VISION_MODEL ||
     'gemini-2.0-flash',
+  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  openaiVisionModel: process.env.OPENAI_VISION_MODEL || 'gpt-4o',
   photoVerification: true,
   assignmentRecommend: true,
   insightsEnabled: true,
@@ -76,6 +95,38 @@ export function resolveGroqVisionModel(model: string | null | undefined): string
 
 export function isDecommissionedGroqVisionModel(model: string | null | undefined): boolean {
   return !!model && DECOMMISSIONED_GROQ_VISION_MODELS.has(model);
+}
+
+const VALID_PROVIDERS = new Set<AIProviderId>(['openai', 'groq', 'google']);
+
+export function parseProviderPriority(raw: string | null | undefined): AIProviderId[] {
+  if (!raw?.trim()) return [...DEFAULT_PROVIDER_PRIORITY];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_PROVIDER_PRIORITY];
+    const cleaned = parsed.filter(
+      (p): p is AIProviderId => typeof p === 'string' && VALID_PROVIDERS.has(p as AIProviderId)
+    );
+    // Ensure unique + fill any missing providers at the end
+    const seen = new Set<AIProviderId>();
+    const ordered: AIProviderId[] = [];
+    for (const p of cleaned) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        ordered.push(p);
+      }
+    }
+    for (const p of DEFAULT_PROVIDER_PRIORITY) {
+      if (!seen.has(p)) ordered.push(p);
+    }
+    return ordered.length ? ordered : [...DEFAULT_PROVIDER_PRIORITY];
+  } catch {
+    return [...DEFAULT_PROVIDER_PRIORITY];
+  }
+}
+
+export function serializeProviderPriority(priority: AIProviderId[]): string {
+  return JSON.stringify(parseProviderPriority(JSON.stringify(priority)));
 }
 
 /** Platform-wide AI settings (admin). One row applies to all companies. */
@@ -114,9 +165,23 @@ function resolveGoogleKey(storedInDb: string | null | undefined): {
   return { key: null, source: null };
 }
 
+function resolveOpenaiKey(storedInDb: string | null | undefined): {
+  key: string | null;
+  source: 'database' | 'environment' | null;
+} {
+  const stored = storedInDb?.trim();
+  if (stored) {
+    return { key: decryptStoredSecret(stored), source: 'database' };
+  }
+  const fromEnv = ENV_OPENAI_KEY();
+  if (fromEnv) return { key: fromEnv, source: 'environment' };
+  return { key: null, source: null };
+}
+
 function buildConfig(row: AIConfigurationRow | null): AIConfig {
   const groq = resolveGroqKey(row?.groqApiKey);
   const google = resolveGoogleKey(row?.googleApiKey);
+  const openai = resolveOpenaiKey(row?.openaiApiKey);
 
   return {
     enabled: row?.enabled ?? DEFAULT_CONFIG.enabled,
@@ -131,8 +196,13 @@ function buildConfig(row: AIConfigurationRow | null): AIConfig {
     googleApiKey: google.key,
     googleModel: row?.googleModel || DEFAULT_CONFIG.googleModel,
     googleVisionModel: row?.googleVisionModel || DEFAULT_CONFIG.googleVisionModel,
+    openaiApiKey: openai.key,
+    openaiModel: row?.openaiModel || DEFAULT_CONFIG.openaiModel,
+    openaiVisionModel: row?.openaiVisionModel || DEFAULT_CONFIG.openaiVisionModel,
     groqKeySource: groq.source,
     googleKeySource: google.source,
+    openaiKeySource: openai.source,
+    providerPriority: parseProviderPriority(row?.providerPriority),
   };
 }
 
@@ -167,13 +237,25 @@ export interface UpsertAIConfigInput {
   minPhotoScore?: number;
   googleModel?: string;
   googleVisionModel?: string;
+  openaiModel?: string;
+  openaiVisionModel?: string;
+  providerPriority?: AIProviderId[] | string;
   /** Plaintext key — encrypted before storage. Empty string clears DB key (env fallback). */
   groqApiKey?: string;
   googleApiKey?: string;
+  openaiApiKey?: string;
+  clearOpenaiApiKey?: boolean;
 }
 
 export async function upsertAIConfig(data: UpsertAIConfigInput) {
-  const { groqApiKey, googleApiKey, ...rest } = data;
+  const {
+    groqApiKey,
+    googleApiKey,
+    openaiApiKey,
+    clearOpenaiApiKey,
+    providerPriority,
+    ...rest
+  } = data;
 
   const keyUpdates: Record<string, string | null> = {};
   if (groqApiKey !== undefined) {
@@ -182,13 +264,29 @@ export async function upsertAIConfig(data: UpsertAIConfigInput) {
   if (googleApiKey !== undefined) {
     keyUpdates.googleApiKey = googleApiKey.trim() ? encryptSecret(googleApiKey.trim()) : null;
   }
+  if (clearOpenaiApiKey) {
+    keyUpdates.openaiApiKey = null;
+  } else if (openaiApiKey !== undefined) {
+    keyUpdates.openaiApiKey = openaiApiKey.trim() ? encryptSecret(openaiApiKey.trim()) : null;
+  }
+
+  const priorityUpdate: Record<string, string> = {};
+  if (providerPriority !== undefined) {
+    const raw =
+      typeof providerPriority === 'string'
+        ? providerPriority
+        : JSON.stringify(providerPriority);
+    priorityUpdate.providerPriority = serializeProviderPriority(parseProviderPriority(raw));
+  }
 
   const addingKey =
     (groqApiKey !== undefined && !!groqApiKey.trim()) ||
-    (googleApiKey !== undefined && !!googleApiKey.trim());
+    (googleApiKey !== undefined && !!googleApiKey.trim()) ||
+    (openaiApiKey !== undefined && !!openaiApiKey.trim());
 
   const settings = {
     ...rest,
+    ...priorityUpdate,
     ...(addingKey && rest.enabled !== false ? { enabled: true } : {}),
   };
 
@@ -226,7 +324,7 @@ export async function upsertAIConfig(data: UpsertAIConfigInput) {
 }
 
 export function hasAIProviderKeys(config: AIConfig): boolean {
-  return !!(config.apiKey || config.googleApiKey);
+  return !!(config.apiKey || config.googleApiKey || config.openaiApiKey);
 }
 
 export function isAIEnabled(config: AIConfig): boolean {

@@ -30,13 +30,19 @@ export async function GET(request: NextRequest) {
       minPhotoScore: config.minPhotoScore,
       googleModel: config.googleModel,
       googleVisionModel: config.googleVisionModel,
+      openaiModel: config.openaiModel,
+      openaiVisionModel: config.openaiVisionModel,
+      providerPriority: config.providerPriority,
       hasGroqKey: !!config.apiKey,
       hasGoogleKey: !!config.googleApiKey,
+      hasOpenaiKey: !!config.openaiApiKey,
       hasStoredGroqKey: !!dbRow?.groqApiKey?.trim(),
       hasStoredGoogleKey: !!dbRow?.googleApiKey?.trim(),
+      hasStoredOpenaiKey: !!dbRow?.openaiApiKey?.trim(),
       groqKeySource: config.groqKeySource,
       googleKeySource: config.googleKeySource,
-      providerLabel: 'TidyFlow AI (Groq + Google Gemini fallback)',
+      openaiKeySource: config.openaiKeySource,
+      providerLabel: 'TidyFlow AI (OpenAI / Groq / Google Gemini — configurable priority)',
       providers,
     },
   });
@@ -60,10 +66,15 @@ export async function PATCH(request: NextRequest) {
       minPhotoScore,
       googleModel,
       googleVisionModel,
+      openaiModel,
+      openaiVisionModel,
+      providerPriority,
       groqApiKey,
       googleApiKey,
+      openaiApiKey,
       clearGroqApiKey,
       clearGoogleApiKey,
+      clearOpenaiApiKey,
     } = body;
 
     const updated = await upsertAIConfig({
@@ -76,10 +87,15 @@ export async function PATCH(request: NextRequest) {
       ...(minPhotoScore !== undefined && { minPhotoScore }),
       ...(googleModel !== undefined && { googleModel }),
       ...(googleVisionModel !== undefined && { googleVisionModel }),
+      ...(openaiModel !== undefined && { openaiModel }),
+      ...(openaiVisionModel !== undefined && { openaiVisionModel }),
+      ...(providerPriority !== undefined && { providerPriority }),
       ...(groqApiKey !== undefined && { groqApiKey }),
       ...(googleApiKey !== undefined && { googleApiKey }),
+      ...(openaiApiKey !== undefined && { openaiApiKey }),
       ...(clearGroqApiKey && { groqApiKey: '' }),
       ...(clearGoogleApiKey && { googleApiKey: '' }),
+      ...(clearOpenaiApiKey && { clearOpenaiApiKey: true }),
     });
 
     const config = await getAIConfig();
@@ -90,8 +106,11 @@ export async function PATCH(request: NextRequest) {
         ...updated,
         hasGroqKey: !!config.apiKey,
         hasGoogleKey: !!config.googleApiKey,
+        hasOpenaiKey: !!config.openaiApiKey,
         groqKeySource: config.groqKeySource,
         googleKeySource: config.googleKeySource,
+        openaiKeySource: config.openaiKeySource,
+        providerPriority: config.providerPriority,
       },
     });
   } catch (error) {

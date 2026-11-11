@@ -1279,6 +1279,10 @@ model AIConfiguration {
   googleApiKey          String?  @map("google_api_key") @db.Text
   googleModel           String?  @map("google_model")
   googleVisionModel     String?  @map("google_vision_model")
+  openaiApiKey          String?  @map("openai_api_key") @db.Text
+  openaiModel           String?  @map("openai_model")
+  openaiVisionModel     String?  @map("openai_vision_model")
+  providerPriority      String?  @map("provider_priority") // JSON array e.g. ["openai","groq","google"]
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 

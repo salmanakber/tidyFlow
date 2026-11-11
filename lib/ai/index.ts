@@ -1,5 +1,14 @@
-export { getAIConfig, getGlobalAIConfigurationRow, upsertAIConfig, isAIEnabled, hasAIProviderKeys } from './config';
+export {
+  getAIConfig,
+  getGlobalAIConfigurationRow,
+  upsertAIConfig,
+  isAIEnabled,
+  hasAIProviderKeys,
+  parseProviderPriority,
+  type AIProviderId,
+} from './config';
 export { aiChat, aiVisionAnalysis, getAIProviderStatus, parseJSONResponse } from './client';
+export { openaiChat, openaiVisionAnalysis } from './openai-client';
 export { generateTaskSuggestions, type TaskSuggestions, type SupplySuggestion } from './task-suggestions';
 export { analyzePhoto } from './photo-verification';
 export { recalculateCleanerProfile, recalculateCompanyProfiles } from './cleaner-profile';

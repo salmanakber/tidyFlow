@@ -210,6 +210,27 @@ export async function ensureComplianceReminderScanScheduler() {
   return true;
 }
 
+/** Weekly compliance digest (Monday 08:00 UTC). */
+export async function ensureWeeklyComplianceDigestScheduler() {
+  try {
+    await automationQueue.add(
+      'scan-compliance-weekly-digest',
+      {},
+      {
+        jobId: 'scan-compliance-weekly-digest-repeat',
+        repeat: { pattern: '0 8 * * 1' },
+      }
+    );
+  } catch (error) {
+    if (isRedisUnavailable(error)) {
+      console.warn('[Automation] Redis unavailable — weekly compliance digest not scheduled');
+      return false;
+    }
+    throw error;
+  }
+  return true;
+}
+
 /**
  * Daily rebook opportunity scan (09:00 UTC) — notifies managers when a property
  * has no upcoming job and last completed service is older than the threshold.

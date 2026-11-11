@@ -15,6 +15,16 @@ import {
   TrendingUp,
 } from "lucide-react"
 
+type AIProviderId = "openai" | "groq" | "google"
+
+const PROVIDER_OPTIONS: { id: AIProviderId; label: string }[] = [
+  { id: "openai", label: "OpenAI" },
+  { id: "groq", label: "Groq" },
+  { id: "google", label: "Google" },
+]
+
+const DEFAULT_PRIORITY: AIProviderId[] = ["groq", "google", "openai"]
+
 interface AIConfig {
   enabled: boolean
   provider: string
@@ -26,16 +36,24 @@ interface AIConfig {
   minPhotoScore: number
   googleModel?: string
   googleVisionModel?: string
+  openaiModel?: string
+  openaiVisionModel?: string
+  providerPriority?: AIProviderId[]
   hasGroqKey?: boolean
   hasGoogleKey?: boolean
+  hasOpenaiKey?: boolean
   groqKeySource?: "database" | "environment" | null
   googleKeySource?: "database" | "environment" | null
+  openaiKeySource?: "database" | "environment" | null
   providers?: {
+    openai?: boolean
     groq: boolean
     google: boolean
     anyAvailable: boolean
+    openaiKeySource?: string | null
     groqKeySource?: string | null
     googleKeySource?: string | null
+    providerPriority?: AIProviderId[]
   }
 }
 
@@ -48,6 +66,22 @@ interface AIInsight {
   createdAt: string
 }
 
+function normalizePriority(raw?: AIProviderId[] | null): AIProviderId[] {
+  const base = Array.isArray(raw) && raw.length ? raw : DEFAULT_PRIORITY
+  const seen = new Set<AIProviderId>()
+  const ordered: AIProviderId[] = []
+  for (const p of base) {
+    if (PROVIDER_OPTIONS.some((o) => o.id === p) && !seen.has(p)) {
+      seen.add(p)
+      ordered.push(p)
+    }
+  }
+  for (const o of PROVIDER_OPTIONS) {
+    if (!seen.has(o.id)) ordered.push(o.id)
+  }
+  return ordered
+}
+
 export default function TidyFlowAIPage() {
   const [config, setConfig] = useState<AIConfig | null>(null)
   const [insights, setInsights] = useState<AIInsight[]>([])
@@ -58,6 +92,7 @@ export default function TidyFlowAIPage() {
   const [activeTab, setActiveTab] = useState<"insights" | "settings">("insights")
   const [groqApiKeyInput, setGroqApiKeyInput] = useState("")
   const [googleApiKeyInput, setGoogleApiKeyInput] = useState("")
+  const [openaiApiKeyInput, setOpenaiApiKeyInput] = useState("")
 
   useEffect(() => {
     loadAll()
@@ -86,9 +121,14 @@ export default function TidyFlowAIPage() {
         axios.get(`/api/ai/insights${cq}`, { headers: { Authorization: `Bearer ${token}` } }),
       ])
       if (configRes.data.success) {
-        setConfig(configRes.data.data)
+        const data = configRes.data.data
+        setConfig({
+          ...data,
+          providerPriority: normalizePriority(data.providerPriority),
+        })
         setGroqApiKeyInput("")
         setGoogleApiKeyInput("")
+        setOpenaiApiKeyInput("")
       }
       if (insightsRes.data.success) setInsights(insightsRes.data.data)
     } catch (error) {
@@ -114,9 +154,13 @@ export default function TidyFlowAIPage() {
         minPhotoScore: config.minPhotoScore,
         googleModel: config.googleModel,
         googleVisionModel: config.googleVisionModel,
+        openaiModel: config.openaiModel,
+        openaiVisionModel: config.openaiVisionModel,
+        providerPriority: normalizePriority(config.providerPriority),
       }
       if (groqApiKeyInput.trim()) payload.groqApiKey = groqApiKeyInput.trim()
       if (googleApiKeyInput.trim()) payload.googleApiKey = googleApiKeyInput.trim()
+      if (openaiApiKeyInput.trim()) payload.openaiApiKey = openaiApiKeyInput.trim()
 
       const res = await axios.patch(
         `/api/ai/config`,
@@ -127,6 +171,7 @@ export default function TidyFlowAIPage() {
         setMessage({ type: "success", text: "AI configuration saved." })
         setGroqApiKeyInput("")
         setGoogleApiKeyInput("")
+        setOpenaiApiKeyInput("")
         loadAll()
       }
     } catch (error: any) {
@@ -137,6 +182,19 @@ export default function TidyFlowAIPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const setPrioritySlot = (slotIndex: number, provider: AIProviderId) => {
+    if (!config) return
+    const current = normalizePriority(config.providerPriority)
+    const next = [...current]
+    const swapWith = next.indexOf(provider)
+    if (swapWith === slotIndex) return
+    // Swap so every provider stays unique
+    const displaced = next[slotIndex]
+    next[slotIndex] = provider
+    if (swapWith >= 0) next[swapWith] = displaced
+    setConfig({ ...config, providerPriority: next })
   }
 
   const generateInsights = async () => {
@@ -171,6 +229,11 @@ export default function TidyFlowAIPage() {
     return <TrendingUp className="w-4 h-4 text-teal-500" />
   }
 
+  const priority = config ? normalizePriority(config.providerPriority) : DEFAULT_PRIORITY
+  const priorityLabel = priority
+    .map((p) => PROVIDER_OPTIONS.find((o) => o.id === p)?.label || p)
+    .join(" → ")
+
   if (loading) {
     return (
       <AdminLayout>
@@ -192,12 +255,25 @@ export default function TidyFlowAIPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">TidyFlow AI</h1>
               <p className="text-gray-600 mt-1">
-                Groq primary with Google Gemini fallback — recommends, never decides
+                OpenAI, Groq, and Google Gemini with configurable priority — recommends, never decides
               </p>
             </div>
           </div>
           {config && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${
+                  config.providers?.openai || config.hasOpenaiKey
+                    ? "bg-green-100 text-green-800"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {config.providers?.openai || config.hasOpenaiKey ? (
+                  <><CheckCircle className="w-3 h-3" /> OpenAI ({config.openaiKeySource || "none"})</>
+                ) : (
+                  <>OpenAI not configured</>
+                )}
+              </span>
               <span
                 className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${
                   config.providers?.groq || config.hasGroqKey
@@ -225,7 +301,7 @@ export default function TidyFlowAIPage() {
                 )}
               </span>
               <span className="text-xs text-gray-500">
-                Primary: Groq → Fallback: Google AI Studio
+                Priority: {priorityLabel}
               </span>
             </div>
           )}
@@ -323,7 +399,44 @@ export default function TidyFlowAIPage() {
                   Platform-wide keys used for all companies. Server environment variables are fallback when not saved here.
                 </p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    OpenAI API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={openaiApiKeyInput}
+                    onChange={(e) => setOpenaiApiKeyInput(e.target.value)}
+                    placeholder={config.hasOpenaiKey ? "•••••••• (leave blank to keep current)" : "sk-..."}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {config.hasOpenaiKey
+                      ? `Active: ${config.openaiKeySource === "database" ? "saved in settings" : "from server env"}`
+                      : "Not set — add a key or set OPENAI_API_KEY in server env"}
+                  </p>
+                  {config.openaiKeySource === "database" && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const token = getToken()
+                        await axios.patch(
+                          `/api/ai/config`,
+                          { clearOpenaiApiKey: true },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        )
+                        setOpenaiApiKeyInput("")
+                        loadAll()
+                        setMessage({ type: "success", text: "OpenAI key removed. Using env fallback if set." })
+                      }}
+                      className="text-xs text-red-600 mt-1 hover:underline"
+                    >
+                      Remove saved OpenAI key
+                    </button>
+                  )}
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Groq API Key
@@ -376,7 +489,7 @@ export default function TidyFlowAIPage() {
                   <p className="text-xs text-gray-500 mt-1">
                     {config.hasGoogleKey
                       ? `Active: ${config.googleKeySource === "database" ? "saved in settings" : "from server env"}`
-                      : "Not set — used as fallback when Groq fails"}
+                      : "Not set — add a key or set GOOGLE_AI_API_KEY in server env"}
                   </p>
                   {config.googleKeySource === "database" && (
                     <button
@@ -399,6 +512,37 @@ export default function TidyFlowAIPage() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Provider priority */}
+            <div className="border border-gray-200 rounded-xl p-5 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Provider Priority</h3>
+                <p className="text-xs text-gray-600 mt-1">
+                  Chat and vision try providers in this order, skipping any that are not configured.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {(["1st", "2nd", "3rd"] as const).map((label, index) => (
+                  <div key={label}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {label} priority
+                    </label>
+                    <select
+                      value={priority[index]}
+                      onChange={(e) => setPrioritySlot(index, e.target.value as AIProviderId)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    >
+                      {PROVIDER_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500">Order: {priorityLabel}</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -449,6 +593,30 @@ export default function TidyFlowAIPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Chat Model (OpenAI)
+                </label>
+                <input
+                  type="text"
+                  value={config.openaiModel || "gpt-4o-mini"}
+                  onChange={(e) => setConfig({ ...config, openaiModel: e.target.value })}
+                  placeholder="gpt-4o-mini"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Vision Model (OpenAI)
+                </label>
+                <input
+                  type="text"
+                  value={config.openaiVisionModel || "gpt-4o"}
+                  onChange={(e) => setConfig({ ...config, openaiVisionModel: e.target.value })}
+                  placeholder="gpt-4o"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Chat Model (Groq)
                 </label>
                 <input
@@ -469,13 +637,10 @@ export default function TidyFlowAIPage() {
                   placeholder="meta-llama/llama-4-scout-17b-16e-instruct"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Groq is primary for photo AI. Use Llama 4 Scout or Maverick (vision). Google Gemini is fallback only.
-                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Chat Model (Google Gemini fallback)
+                  Chat Model (Google Gemini)
                 </label>
                 <input
                   type="text"
@@ -486,7 +651,7 @@ export default function TidyFlowAIPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Vision Model (Google Gemini fallback)
+                  Vision Model (Google Gemini)
                 </label>
                 <input
                   type="text"
@@ -495,9 +660,6 @@ export default function TidyFlowAIPage() {
                   placeholder="gemini-2.0-flash"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Used only when Groq vision fails. Requires a valid Google AI API key above.
-                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

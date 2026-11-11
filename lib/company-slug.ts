@@ -71,6 +71,10 @@ export const COMPANY_ROUTE_MAP: Record<string, string> = {
   clients: 'clients',
   'booking-widget': 'booking-widget',
   booking: 'booking-widget',
+  chat: 'chat',
+  messages: 'chat',
+  'invoice-settings': 'invoice-settings',
+  'invoice-config': 'invoice-settings',
   // Platform admin only: company-config, ai
 }
 

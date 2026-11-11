@@ -13,6 +13,7 @@ const EVENTS = [
   "task:geofence",
   "safety:sos",
   "notification:new",
+  "chat:message",
   "realtime",
 ] as const
 

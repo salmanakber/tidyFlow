@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { PERMISSIONS } from "@/lib/permissions";
-import { usePermissions } from "@/lib/hooks/usePermissions";
-import RequirePermission from "@/components/RequirePermission";
+import Image from "next/image";
 
 interface TicketMessage {
   id: number;
@@ -25,7 +23,6 @@ interface TicketData {
 }
 
 export default function PublicTicketPage() {
-  const { hasPermission } = usePermissions()
   const params = useParams<{ token: string }>();
   const token = params?.token;
 
@@ -66,9 +63,7 @@ export default function PublicTicketPage() {
     try {
       const res = await fetch(`/api/support-tickets/${token}/messages`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: reply }),
       });
       const data = await res.json();
@@ -108,7 +103,7 @@ export default function PublicTicketPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10">
+      <main className="min-h-screen bg-[#F7F4EF] flex items-center justify-center px-4 py-10">
         <div className="text-sm text-slate-600">Loading your support ticket...</div>
       </main>
     );
@@ -116,9 +111,9 @@ export default function PublicTicketPage() {
 
   if (error || !ticket) {
     return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10">
+      <main className="min-h-screen bg-[#F7F4EF] flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
-          <h1 className="text-lg font-semibold text-slate-900 mb-2">Ticket not available</h1>
+          <h1 className="text-lg font-semibold text-[#0B1F33] mb-2">Ticket not available</h1>
           <p className="text-sm text-slate-600 mb-2">
             We were unable to load your support ticket. The link may have expired or the ticket may
             have been removed.
@@ -132,19 +127,23 @@ export default function PublicTicketPage() {
   const customerName = ticket.name || ticket.email;
 
   return (
-    <RequirePermission permission={PERMISSIONS.SUPPORT_TICKETS_VIEW}>
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10">
+    <main className="min-h-screen bg-[#F7F4EF] flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-3xl bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1">
-          Support Ticket Conversation
-        </h1>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-[#0B1F33] flex items-center justify-center">
+            <Image src="/assets/logot-transparent.png" alt="TidyFlow" width={24} height={24} />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#0B1F33]">
+              Support Ticket Conversation
+            </h1>
+            <p className="text-xs text-slate-500">TidyFlow Support</p>
+          </div>
+        </div>
+
         <p className="text-sm text-slate-600 mb-4">
-          Hi{" "}
-          <span className="font-semibold">
-            {customerName}
-          </span>
-          , here you can view the conversation with the MayaOps support team and send additional
-          replies if needed.
+          Hi <span className="font-semibold">{customerName}</span>, here you can view the conversation
+          with the TidyFlow support team and send additional replies if needed.
         </p>
 
         <div className="flex items-center justify-between mb-4 text-xs text-slate-600">
@@ -176,30 +175,24 @@ export default function PublicTicketPage() {
           <div>{statusBadge(ticket.status)}</div>
         </div>
 
-        {/* Messages thread */}
         <div className="border border-slate-200 rounded-xl mb-4 max-h-80 overflow-y-auto bg-slate-50/80 p-3 space-y-3">
           {ticket.messages.map((msg) => {
             const isAdmin = msg.author === "admin";
             return (
-              <div
-                key={msg.id}
-                className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}
-              >
+              <div key={msg.id} className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
                     isAdmin
-                      ? "bg-sky-600 text-white rounded-br-none"
+                      ? "bg-[#0B1F33] text-white rounded-br-none"
                       : "bg-white text-slate-800 border border-slate-200 rounded-bl-none"
                   }`}
                 >
                   <div className="mb-1 font-semibold">
-                    {isAdmin ? "MayaOps Support" : customerName || "You"}
+                    {isAdmin ? "TidyFlow Support" : customerName || "You"}
                   </div>
                   <div className="whitespace-pre-wrap">{msg.message}</div>
                   <div
-                    className={`mt-1 text-[10px] ${
-                      isAdmin ? "text-sky-100/80" : "text-slate-400"
-                    }`}
+                    className={`mt-1 text-[10px] ${isAdmin ? "text-amber-200/80" : "text-slate-400"}`}
                   >
                     {new Date(msg.createdAt).toLocaleString(undefined, {
                       day: "2-digit",
@@ -220,16 +213,15 @@ export default function PublicTicketPage() {
           )}
         </div>
 
-        {/* Reply form */}
         <form onSubmit={handleReply} className="space-y-3">
           <label className="block text-xs font-medium text-slate-700">
-            Your reply (this will be sent to the MayaOps support team)
+            Your reply (this will be sent to the TidyFlow support team)
           </label>
           <textarea
             value={reply}
             onChange={(e) => setReply(e.target.value)}
             rows={4}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 resize-y"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500 resize-y"
             placeholder="Type your message here..."
           />
           {error && (
@@ -240,7 +232,7 @@ export default function PublicTicketPage() {
           <button
             type="submit"
             disabled={sending || !reply.trim()}
-            className="inline-flex items-center justify-center rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center rounded-lg bg-[#0B1F33] px-4 py-2.5 text-sm font-semibold text-amber-300 shadow-sm hover:bg-[#132a42] disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {sending ? "Sending..." : "Send reply"}
           </button>
@@ -248,9 +240,14 @@ export default function PublicTicketPage() {
             Your reply will be added to this ticket and our support team will be notified by email.
           </p>
         </form>
+
+        <div className="mt-6 flex justify-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
+            <Image src="/assets/logot-transparent.png" alt="" width={14} height={14} />
+            <span className="text-[11px] font-semibold text-[#0B1F33]">Powered By TidyFlow</span>
+          </div>
+        </div>
       </div>
     </main>
-    </RequirePermission>
   );
 }
-

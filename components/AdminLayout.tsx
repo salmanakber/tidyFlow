@@ -44,6 +44,8 @@ import {
   Moon,
   Contact,
   CalendarHeart,
+  ShieldCheck,
+  FileCog,
 } from "lucide-react"
 import CompanySelector from "./CompanySelector"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
@@ -95,6 +97,8 @@ const ADMIN_NAV: NavItem[] = [
   { name: "Issues", href: "/admin/issues", icon: AlertCircle, permission: "tasks.view", roles: null, group: "ops" },
   { name: "User Management", href: "/admin/users-management", icon: Users, permission: "users.view", roles: null, group: "ops" },
   { name: "Safety & GPS", href: "/admin/safety", icon: MapPin, permission: null, roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },
+  { name: "Compliance", href: "/admin/compliance", icon: ShieldCheck, permission: null, roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },
+  { name: "Invoice settings", href: "/admin/invoice-settings", icon: FileCog, permission: "settings.view", roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },
   { name: "Reporting", href: "/admin/reporting", icon: BarChart3, permission: "reports.view", roles: null, group: "ops" },
   { name: "Notifications", href: "/admin/notifications", icon: Bell, permission: null, roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },
   { name: "Company Config", href: "/admin/company-config", icon: Camera, permission: "settings.view", roles: ["SUPER_ADMIN", "DEVELOPER", "ADMIN_UNIQUE"], group: "ops" },

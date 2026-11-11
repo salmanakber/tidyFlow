@@ -24,7 +24,8 @@ import {
   opsTh,
   opsTd,
 } from "@/components/ops/OpsChrome"
-import { Plus, Trash2, Loader2, AlertTriangle, Package } from "lucide-react"
+import { Plus, Trash2, Loader2, AlertTriangle, Package, Search } from "lucide-react"
+import SupplyPackingListPanel from "@/components/ops/SupplyPackingListPanel"
 
 function asList(data: any): any[] {
   if (Array.isArray(data)) return data
@@ -52,6 +53,14 @@ export default function SuppliesPage() {
   )
 }
 
+function setTaskIdInUrl(id: number | null) {
+  if (typeof window === "undefined") return
+  const url = new URL(window.location.href)
+  if (id) url.searchParams.set("taskId", String(id))
+  else url.searchParams.delete("taskId")
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
 function Content() {
   const [items, setItems] = useState<any[]>([])
   const [forecast, setForecast] = useState<any>(null)
@@ -62,6 +71,9 @@ function Content() {
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useUrlQueryState("status", "all")
   const [page, setPage] = useState(1)
+  const [packingTaskId, setPackingTaskId] = useState<number | null>(null)
+  const [packingInput, setPackingInput] = useState("")
+  const [recentTasks, setRecentTasks] = useState<Array<{ id: number; title: string }>>([])
   const [form, setForm] = useState({
     name: "",
     unit: "pcs",
@@ -69,6 +81,39 @@ function Content() {
     minStock: "5",
     unitCost: "0",
   })
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const fromUrl = Number(new URLSearchParams(window.location.search).get("taskId") || 0)
+    if (fromUrl > 0) {
+      setPackingTaskId(fromUrl)
+      setPackingInput(String(fromUrl))
+    }
+  }, [])
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const res = await adminGet("/api/tasks", { params: { limit: 12 } }).catch(() => null)
+        const raw = res?.data?.data
+        const list = Array.isArray(raw) ? raw : Array.isArray(raw?.tasks) ? raw.tasks : []
+        setRecentTasks(
+          list.slice(0, 12).map((t: any) => ({
+            id: Number(t.id),
+            title: t.title || t.name || `Task #${t.id}`,
+          }))
+        )
+      } catch {
+        setRecentTasks([])
+      }
+    })()
+  }, [])
+
+  const applyPackingTask = (id: number) => {
+    setPackingInput(String(id))
+    setPackingTaskId(id)
+    setTaskIdInUrl(id)
+  }
 
   const load = async () => {
     try {
@@ -204,6 +249,72 @@ function Content() {
           <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{forecastText(forecast)}</p>
         </OpsCard>
       </div>
+
+      <OpsCard>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+              Job packing
+            </p>
+            <h2 className="mt-0.5 text-sm font-extrabold text-navy-900 dark:text-white">
+              What to bring for a job
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Pick a task to see predicted supplies — same packing list as mobile.
+            </p>
+          </div>
+          <form
+            className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const id = Number(packingInput)
+              if (!Number.isFinite(id) || id <= 0) {
+                setError("Enter a valid task ID")
+                return
+              }
+              applyPackingTask(id)
+            }}
+          >
+            <div className="relative min-w-[200px] flex-1">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={packingInput}
+                onChange={(e) => setPackingInput(e.target.value)}
+                placeholder="Task ID"
+                list="recent-tasks-packing"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-amber-500 dark:border-navy-800 dark:bg-navy-950"
+              />
+              <datalist id="recent-tasks-packing">
+                {recentTasks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+            <OpsPrimaryButton type="submit">Load list</OpsPrimaryButton>
+          </form>
+        </div>
+        {recentTasks.length > 0 && !packingTaskId && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {recentTasks.slice(0, 6).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => applyPackingTask(t.id)}
+                className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold text-slate-600 hover:border-amber-500 hover:text-amber-700 dark:border-navy-800 dark:text-slate-300"
+              >
+                #{t.id} · {t.title.length > 28 ? `${t.title.slice(0, 28)}…` : t.title}
+              </button>
+            ))}
+          </div>
+        )}
+        {packingTaskId ? (
+          <div className="mt-4">
+            <SupplyPackingListPanel taskId={packingTaskId} onLogged={load} />
+          </div>
+        ) : null}
+      </OpsCard>
 
       {showForm && (
         <OpsCard>

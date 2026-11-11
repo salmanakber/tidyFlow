@@ -14,6 +14,7 @@ import {
   schedulePendingPlanSwitchReminders,
   scheduleTrialEndingReminders,
   ensureComplianceReminderScanScheduler,
+  ensureWeeklyComplianceDigestScheduler,
   ensureRebookAlertsScanScheduler,
 } from './automation-queue';
 import { getRedisConnectionOptions } from './redis-connection';
@@ -228,6 +229,11 @@ async function processAutomationJob(job: Job) {
       return scanComplianceExpiryAlerts();
     }
 
+    case 'scan-compliance-weekly-digest': {
+      const { sendWeeklyComplianceDigest } = await import('./compliance-alerts');
+      return sendWeeklyComplianceDigest();
+    }
+
     case 'compliance-expiry-alert': {
       const { sendComplianceAlert } = await import('./compliance-alerts');
       return sendComplianceAlert(job.data as import('./compliance-alerts').ComplianceExpiryAlertJob);
@@ -299,6 +305,10 @@ export function initializeAutomationWorker() {
 
   ensureComplianceReminderScanScheduler().catch((err) => {
     console.warn('[Automation Worker] compliance reminder scan scheduler failed:', err);
+  });
+
+  ensureWeeklyComplianceDigestScheduler().catch((err) => {
+    console.warn('[Automation Worker] weekly compliance digest scheduler failed:', err);
   });
 
   ensureRebookAlertsScanScheduler().catch((err) => {

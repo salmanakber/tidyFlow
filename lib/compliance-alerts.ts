@@ -313,4 +313,114 @@ export async function scheduleComplianceExpiryReminders(input: {
   return scheduled;
 }
 
+/**
+ * Weekly digest for owners/managers: summary of missing / expiring / expired docs.
+ * Designed to run once per week (Monday) via automation scheduler.
+ */
+export async function sendWeeklyComplianceDigest() {
+  const companies = await prisma.company.findMany({
+    where: { subscriptionStatus: { not: 'cancelled' } },
+    select: { id: true, name: true },
+  });
+
+  const result = { companiesScanned: companies.length, digestsSent: 0, skipped: 0 };
+
+  for (const company of companies) {
+    const documents = await prisma.complianceDocument.findMany({
+      where: { companyId: company.id },
+      orderBy: [{ docType: 'asc' }, { updatedAt: 'desc' }],
+      include: { uploader: { select: { firstName: true, lastName: true } } },
+    });
+
+    const checklist = buildComplianceChecklist(documents);
+    const missing = checklist.filter((i) => i.status === 'missing');
+    const expiring = checklist.filter((i) => i.status === 'expiring');
+    const expired = checklist.filter((i) => i.status === 'expired');
+
+    if (!missing.length && !expiring.length && !expired.length) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const weekKey = isoWeekKey(new Date());
+    const lines = [
+      `Weekly compliance digest for ${company.name || `Company #${company.id}`}:`,
+      `• Missing: ${missing.length}`,
+      `• Expiring soon: ${expiring.length}`,
+      `• Expired: ${expired.length}`,
+    ];
+    if (expired.length) {
+      lines.push(`Expired: ${expired.map((i) => i.title).join(', ')}`);
+    }
+    if (expiring.length) {
+      lines.push(`Expiring: ${expiring.map((i) => i.title).join(', ')}`);
+    }
+    if (missing.length) {
+      lines.push(`Missing: ${missing.map((i) => i.title).join(', ')}`);
+    }
+    lines.push('Open Compliance to renew or upload documents.');
+
+    const contacts = await getComplianceContacts(company.id);
+    for (const user of contacts) {
+      const dedupeKey = `compliance-weekly-digest-${company.id}-${user.id}-${weekKey}`;
+      const already = await wasComplianceAlertSent(user.id, dedupeKey);
+      if (already) continue;
+
+      await createNotification({
+        userId: user.id,
+        title: 'Weekly compliance digest',
+        message: lines.join('\n'),
+        type: 'compliance_alert',
+        metadata: {
+          dedupeKey,
+          companyId: company.id,
+          kind: 'weekly_digest',
+          missing: missing.length,
+          expiring: expiring.length,
+          expired: expired.length,
+        },
+        screenRoute: 'Compliance',
+      }).catch((err) => console.warn('[Compliance] weekly digest failed:', err));
+
+      // Best-effort email when user has an email address
+      try {
+        const fullUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { email: true },
+        });
+        if (fullUser?.email) {
+          const { sendEmail } = await import('@/lib/email');
+          await sendEmail({
+            to: fullUser.email,
+            subject: `TidyFlow · Weekly compliance digest (${company.name || 'your company'})`,
+            html: `<p>${lines.map((l) => escapeHtml(l)).join('<br/>')}</p><p><strong>TidyFlow Compliance</strong></p>`,
+          });
+        }
+      } catch (err) {
+        console.warn('[Compliance] weekly digest email skipped:', err);
+      }
+
+      result.digestsSent += 1;
+    }
+  }
+
+  return result;
+}
+
+function isoWeekKey(date: Date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function escapeHtml(value: string) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export { COMPLIANCE_DOC_TYPES };

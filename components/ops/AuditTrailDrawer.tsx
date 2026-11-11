@@ -6,7 +6,8 @@
  */
 import { useEffect, useMemo, useState } from "react"
 import axios from "axios"
-import { X, ScrollText, Loader2 } from "lucide-react"
+import { X, ScrollText, Loader2, Download } from "lucide-react"
+import { humanizeAuditAction } from "@/lib/audit-labels"
 
 export type AuditTrailLog = {
   id: number
@@ -110,14 +111,44 @@ export default function AuditTrailDrawer({
               <h2 className="text-sm font-extrabold text-navy-900 dark:text-white">Audit trail</h2>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-white"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const token =
+                    localStorage.getItem("authToken") || sessionStorage.getItem("authToken")
+                  const res = await axios.get("/api/audit-logs", {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    params: { limit: 500, format: "csv" },
+                    responseType: "blob",
+                  })
+                  const blob = new Blob([res.data], { type: "text/csv;charset=utf-8" })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = "tidyflow-audit-trail.csv"
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch {
+                  /* ignore */
+                }
+              }}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-navy-900 dark:hover:text-amber-300"
+              aria-label="Export CSV"
+              title="Export CSV"
+            >
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-navy-900 hover:text-white"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {(entityType || entityId) && (
@@ -156,7 +187,7 @@ export default function AuditTrailDrawer({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-bold text-navy-900 dark:text-white">
-                        {log.action}
+                        {humanizeAuditAction(log.action)}
                       </p>
                       <time className="shrink-0 font-mono text-[10px] text-slate-400">
                         {formatWhen(log.createdAt)}

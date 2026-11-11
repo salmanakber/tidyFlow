@@ -45,6 +45,8 @@ import {
   PanelLeftOpen,
   CalendarHeart,
   Contact,
+  MessageCircle,
+  FileCog,
 } from "lucide-react"
 import { useCompanyWorkspace } from "@/contexts/CompanyWorkspaceContext"
 import { CurrencyProvider } from "@/contexts/CurrencyContext"
@@ -93,6 +95,7 @@ const OWNER_NAV: NavItem[] = [
   // Navigate
   { name: "Home", page: "dashboard", icon: LayoutDashboard, group: "navigate" },
   { name: "Tasks", page: "jobs", icon: ClipboardList, group: "navigate" },
+  { name: "Chat", page: "chat", icon: MessageCircle, group: "navigate" },
   { name: "Live monitor", page: "monitor", icon: Crosshair, group: "navigate" },
   { name: "Calendar", page: "calendar", icon: Calendar, group: "navigate" },
   {
@@ -136,6 +139,13 @@ const OWNER_NAV: NavItem[] = [
     roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
   },
   { name: "Client Invoices", page: "invoices", icon: FileText, group: "finance" },
+  {
+    name: "Invoice settings",
+    page: "invoice-settings",
+    icon: FileCog,
+    group: "finance",
+    roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
+  },
   { name: "Expenses", page: "expenses", icon: Receipt, group: "finance" },
   {
     name: "Integrations",
@@ -158,7 +168,7 @@ const OWNER_NAV: NavItem[] = [
     group: "finance",
     roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"],
   },
-  { name: "Compliance", page: "compliance", icon: Shield, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "DEVELOPER"] },
+  { name: "Compliance", page: "compliance", icon: Shield, group: "finance", roles: ["OWNER", "COMPANY_ADMIN", "MANAGER", "DEVELOPER"] },
   {
     name: "Analytics",
     page: "reporting",
