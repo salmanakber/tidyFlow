@@ -759,7 +759,7 @@ export default function LiveCommandCenter({
                   />
                 )}
                 <p className="mt-2 font-mono text-[9px] text-slate-400">
-                  Read-only · mobile owns pings · city/country labels · scroll or buttons to zoom
+                  Read-only · pins show only when GPS is live · scroll or buttons to zoom
                   {mapMode === "globe" ? " · drag to orbit" : ""}
                 </p>
               </div>

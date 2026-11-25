@@ -103,6 +103,23 @@ function simplifyRing(ring: Ring, step = 2): Ring {
   return out
 }
 
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const rr = Math.min(r, w / 2, h / 2)
+  ctx.moveTo(x + rr, y)
+  ctx.arcTo(x + w, y, x + w, y + h, rr)
+  ctx.arcTo(x + w, y + h, x, y + h, rr)
+  ctx.arcTo(x, y + h, x, y, rr)
+  ctx.arcTo(x, y, x + w, y, rr)
+  ctx.closePath()
+}
+
 function ringCentroid(ring: Ring): { lat: number; lng: number } {
   let lat = 0
   let lng = 0
@@ -417,41 +434,6 @@ export default function LiveFleetGlobe({
         }
       }
 
-      // Country names (readable at default zoom) + city labels when zoomed
-      const z = zoomRef.current
-      if (z >= 0.9) {
-        for (const country of countriesRef.current) {
-          if (!country.name) continue
-          // Skip tiny / dense labels until zoomed
-          if (z < 1.25 && country.name.length > 12) continue
-          const v = project(country.lat, country.lng)
-          if (v.z < 0.45) continue
-          const x = cx + v.x * R
-          const y = cy - v.y * R
-          const alpha = Math.min(1, (v.z - 0.3) * 1.8)
-          ctx.fillStyle = `rgba(71,85,105,${0.45 + alpha * 0.4})`
-          ctx.font = `600 ${z >= 1.5 ? 10 : 8}px ui-sans-serif, system-ui, sans-serif`
-          ctx.textAlign = "center"
-          ctx.fillText(country.name, x, y)
-        }
-      }
-      if (z >= 1.05) {
-        for (const city of CITY_LABELS) {
-          const v = project(city.lat, city.lng)
-          if (v.z < 0.3) continue
-          const x = cx + v.x * R
-          const y = cy - v.y * R
-          const alpha = Math.min(1, (v.z - 0.2) * 1.6) * Math.min(1, (z - 0.95) / 0.6)
-          ctx.fillStyle = `rgba(30,41,59,${0.65 + alpha * 0.3})`
-          ctx.font = `bold ${z >= 1.8 ? 12 : 10}px ui-sans-serif, system-ui, sans-serif`
-          ctx.textAlign = "center"
-          ctx.fillText(city.name, x, y - 4)
-          ctx.fillStyle = `rgba(71,85,105,${0.55 + alpha * 0.35})`
-          ctx.font = "8px ui-sans-serif, system-ui, sans-serif"
-          ctx.fillText(city.country, x, y + 8)
-        }
-      }
-
       ctx.restore()
 
       ctx.beginPath()
@@ -476,17 +458,21 @@ export default function LiveFleetGlobe({
       ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.fill()
 
+      // Only draw pins + labels for real GPS markers (never blanket country/city names)
       const hits: Hit[] = []
       const list = markersRef.current.filter(
         (m) => Number.isFinite(m.lat) && Number.isFinite(m.lng)
       )
+      const t = Date.now()
       for (const m of list) {
         const v = project(m.lat, m.lng)
-        if (v.z < 0.05) continue
+        if (v.z < 0.08) continue
         const x = cx + v.x * R
         const y = cy - v.y * R
         const depth = (v.z + 1) / 2
-        const r = (5 + depth * 2.5) * Math.min(1.35, 0.85 + zoomRef.current * 0.15)
+        const baseR = (6 + depth * 2.2) * Math.min(1.3, 0.9 + zoomRef.current * 0.12)
+        const bounce = Math.sin(t / 420 + m.lat * 3 + m.lng) * 2.2
+        const pinY = y - baseR * 1.75 + bounce
         const color =
           m.kind === "sos"
             ? "#E11D48"
@@ -498,49 +484,102 @@ export default function LiveFleetGlobe({
                   ? "#059669"
                   : "#94A3B8"
 
+        // Soft ground ripple under pin
+        const ripple = 0.5 + 0.5 * Math.sin(t / 500 + m.lng)
+        ctx.beginPath()
+        ctx.ellipse(x, y + 1, baseR * (1.1 + ripple * 0.45), baseR * 0.28, 0, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(15,23,42,${0.08 + ripple * 0.06})`
+        ctx.fill()
+
+        // Expanding pulse rings for live cleaners / SOS
+        if (m.signal === "live" || m.kind === "sos") {
+          for (let ring = 0; ring < 2; ring++) {
+            const phase = ((t / 900 + ring * 0.45 + m.lat) % 1)
+            const rr = baseR + 4 + phase * 16
+            const a = (1 - phase) * (m.kind === "sos" ? 0.45 : 0.32)
+            ctx.beginPath()
+            ctx.arc(x, pinY, rr, 0, Math.PI * 2)
+            ctx.strokeStyle =
+              m.kind === "sos"
+                ? `rgba(225,29,72,${a})`
+                : `rgba(5,150,105,${a})`
+            ctx.lineWidth = 2
+            ctx.stroke()
+          }
+        }
+
+        // Pin stem
         ctx.strokeStyle = color
-        ctx.lineWidth = 2
+        ctx.lineWidth = 2.25
+        ctx.lineCap = "round"
         ctx.beginPath()
         ctx.moveTo(x, y)
-        ctx.lineTo(x, y - r * 1.6)
+        ctx.lineTo(x, pinY)
         ctx.stroke()
 
+        // Pin head (teardrop-ish circle)
         ctx.beginPath()
-        ctx.arc(x, y - r * 1.6, r, 0, Math.PI * 2)
+        ctx.arc(x, pinY, baseR, 0, Math.PI * 2)
         ctx.fillStyle = "#FFFFFF"
         ctx.fill()
         ctx.strokeStyle = color
-        ctx.lineWidth = 2.5
+        ctx.lineWidth = 2.75
         ctx.stroke()
         ctx.beginPath()
-        ctx.arc(x, y - r * 1.6, r * 0.45, 0, Math.PI * 2)
+        ctx.arc(x, pinY, baseR * 0.42, 0, Math.PI * 2)
         ctx.fillStyle = color
         ctx.fill()
 
-        // Name + city/country label beside pin
+        // Compact name + location chip — only for this marker
         const place = placesRef.current[m.id]
-        const title = m.label || "Team"
-        const placeLine = place?.label || m.sub || ""
+        const title = (m.label || "Team").slice(0, 20)
+        const placeLine = (place?.label || m.sub || "").slice(0, 26)
+        const padX = 8
+        const chipH = placeLine ? 34 : 22
+        ctx.font = "bold 11px ui-sans-serif, system-ui, sans-serif"
+        const titleW = ctx.measureText(title).width
+        ctx.font = "9px ui-sans-serif, system-ui, sans-serif"
+        const placeW = placeLine ? ctx.measureText(placeLine).width : 0
+        const chipW = Math.max(titleW, placeW) + padX * 2
+        const chipX = x + baseR + 8
+        const chipY = pinY - chipH / 2
+
+        // Keep chip on-screen
+        const maxX = w - chipW - 6
+        const drawX = Math.min(chipX, maxX)
+        const drawY = Math.max(6, Math.min(h - chipH - 6, chipY))
+
+        // Chip shadow + body
+        ctx.fillStyle = "rgba(15,23,42,0.08)"
+        ctx.beginPath()
+        roundRect(ctx, drawX + 1, drawY + 2, chipW, chipH, 8)
+        ctx.fill()
+        ctx.fillStyle = "rgba(255,255,255,0.96)"
+        ctx.beginPath()
+        roundRect(ctx, drawX, drawY, chipW, chipH, 8)
+        ctx.fill()
+        ctx.strokeStyle = "rgba(226,232,240,0.95)"
+        ctx.lineWidth = 1
+        ctx.stroke()
+
+        // Accent bar
+        ctx.fillStyle = color
+        ctx.beginPath()
+        roundRect(ctx, drawX, drawY, 3, chipH, 2)
+        ctx.fill()
+
         ctx.textAlign = "left"
-        ctx.font = `bold ${10 + (zoomRef.current > 1.5 ? 1 : 0)}px ui-sans-serif, system-ui`
-        ctx.fillStyle = "rgba(15,23,42,0.9)"
-        ctx.fillText(title.slice(0, 22), x + r + 6, y - r * 1.6 - 2)
+        ctx.textBaseline = "alphabetic"
+        ctx.font = "bold 11px ui-sans-serif, system-ui, sans-serif"
+        ctx.fillStyle = "#0F172A"
+        ctx.fillText(title, drawX + padX, drawY + (placeLine ? 14 : 15))
         if (placeLine) {
-          ctx.font = "9px ui-sans-serif, system-ui"
-          ctx.fillStyle = "rgba(71,85,105,0.95)"
-          ctx.fillText(placeLine.slice(0, 28), x + r + 6, y - r * 1.6 + 10)
+          ctx.font = "9px ui-sans-serif, system-ui, sans-serif"
+          ctx.fillStyle = "#64748B"
+          ctx.fillText(placeLine, drawX + padX, drawY + 27)
         }
 
-        if (m.kind === "cleaner" && m.signal === "live") {
-          const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 350 + m.lat)
-          ctx.beginPath()
-          ctx.arc(x, y - r * 1.6, r + 3 + pulse * 4, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(5,150,105,${0.35 - pulse * 0.2})`
-          ctx.lineWidth = 2
-          ctx.stroke()
-        }
-
-        hits.push({ m, x, y: y - r * 1.6, r: r + 10 })
+        hits.push({ m, x, y: pinY, r: baseR + 12 })
       }
       hitRef.current = hits
 
@@ -647,7 +686,7 @@ export default function LiveFleetGlobe({
 
       <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-2">
         <span className="rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600 shadow-sm backdrop-blur-sm">
-          Cities · countries · zoom {zoom.toFixed(1)}x
+          Live pins · zoom {zoom.toFixed(1)}x
         </span>
         {liveCount > 0 && (
           <span className="rounded-lg border border-emerald-200 bg-emerald-50/95 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700 shadow-sm">
