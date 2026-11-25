@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth, requireCompanyScope } from '@/lib/rbac';
+import { requireAuth, requireCompanyScope, resolveCompanyIdAsync } from '@/lib/rbac';
 import { requireActiveSubscription, checkPlanLimit } from '@/lib/subscription';
 import { UserRole } from '@prisma/client';
 
@@ -151,15 +151,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'Address and propertyType are required' }, { status: 400 });
     }
 
-    let companyId: number | null = null;
+    // Prefer body → resolveCompanyIdAsync (query / X-Company-Id / JWT / DB) → requireCompanyScope
+    const resolvedCompanyId = await resolveCompanyIdAsync(request, tokenUser);
+    let companyId: number | null =
+      (bodyCompanyId != null && Number.isFinite(Number(bodyCompanyId))
+        ? Number(bodyCompanyId)
+        : null) ??
+      resolvedCompanyId ??
+      requireCompanyScope(tokenUser);
 
-    if (role === UserRole.OWNER || role === UserRole.DEVELOPER || role === UserRole.SUPER_ADMIN) {
-      console.log('bodyCompanyId', body);
-      companyId = bodyCompanyId ?? null;
-      if (!companyId) return NextResponse.json({ success: false, message: 'companyId is required' }, { status: 400 });
-    } else {
-      companyId = requireCompanyScope(tokenUser);
-      if (!companyId) return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+    if (!companyId) {
+      return NextResponse.json(
+        { success: false, message: 'companyId is required — select a company or open your workspace' },
+        { status: 400 }
+      );
+    }
+
+    // Non-global roles may only create inside their own company
+    if (
+      role !== UserRole.OWNER &&
+      role !== UserRole.DEVELOPER &&
+      role !== UserRole.SUPER_ADMIN
+    ) {
+      const scoped = requireCompanyScope(tokenUser) ?? resolvedCompanyId;
+      if (!scoped || scoped !== companyId) {
+        return NextResponse.json({ success: false, message: 'No company scope' }, { status: 403 });
+      }
+      companyId = scoped;
     }
 
     const propertyLimit = await checkPlanLimit(companyId, 'properties');

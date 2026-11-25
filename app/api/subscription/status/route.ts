@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { requireAuth } from '@/lib/rbac';
+import { requireAuth, resolveCompanyIdAsync } from '@/lib/rbac';
+import { isCompanySubscriptionEntitled } from '@/lib/subscription';
 
 // Get subscription status including trial information
 export async function GET(request: NextRequest) {
@@ -8,8 +9,7 @@ export async function GET(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   const { tokenUser } = auth;
-  const companyId = tokenUser.companyId;
-  
+  const companyId = await resolveCompanyIdAsync(request, tokenUser);
 
   if (!companyId) {
     return NextResponse.json({ success: false, message: 'No company associated' }, { status: 400 });
@@ -41,13 +41,20 @@ export async function GET(request: NextRequest) {
     const daysRemaining = trialEndsAt && trialStillValid
       ? Math.ceil((new Date(trialEndsAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
       : 0;
+    const entitled = isCompanySubscriptionEntitled(company);
 
     return NextResponse.json({
       success: true,
       data: {
+        entitled,
+        locked: !entitled,
+        message: entitled
+          ? null
+          : 'Subscription inactive. Please renew to continue.',
         company: {
           id: company.id,
           name: company.name,
+          planTier: company.planTier,
           subscriptionStatus: company.subscriptionStatus,
           isTrialActive,
           trialEndsAt: trialEndsAt?.toISOString(),

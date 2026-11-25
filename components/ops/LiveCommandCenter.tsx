@@ -19,6 +19,7 @@ import LiveFleetMap, {
   type FleetMapGeofence,
   type FleetMapTrail,
 } from "@/components/ops/LiveFleetMap"
+import LiveFleetGlobe from "@/components/ops/LiveFleetGlobe"
 import {
   fetchLiveCleaners,
   fetchActiveTrackingJobs,
@@ -60,6 +61,8 @@ import {
   Users,
   Focus,
   MessageSquare,
+  Globe2,
+  Map,
 } from "lucide-react"
 
 type ViewTab = "fleet" | "exceptions" | "sos" | "playback" | "timeline"
@@ -93,6 +96,7 @@ export default function LiveCommandCenter({
   const [error, setError] = useState("")
   const [toast, setToast] = useState("")
   const [tab, setTab] = useState<ViewTab>(initialTab)
+  const [mapMode, setMapMode] = useState<"globe" | "map">("globe")
   const [filter, setFilter] = useState<FleetFilter>("all")
   const [focusedJobIds, setFocusedJobIds] = useState<number[]>([])
   const [selected, setSelected] = useState<FleetMapMarker | null>(null)
@@ -609,36 +613,81 @@ export default function LiveCommandCenter({
                 <div className="flex items-center gap-2">
                   <Crosshair size={15} className="text-amber-600" />
                   <p className="text-sm font-bold text-navy-900 dark:text-white">
-                    {tab === "playback" ? "Playback map" : "Live fleet map"}
+                    {tab === "playback"
+                      ? "Playback map"
+                      : mapMode === "globe"
+                        ? "Live fleet globe"
+                        : "Live fleet map"}
                   </p>
                 </div>
-                {focusedJobIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setFocusedJobIds([])}
-                    className="text-[11px] font-bold text-amber-700"
-                  >
-                    Clear focus ({focusedJobIds.length})
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {tab !== "playback" && (
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-navy-800 dark:bg-navy-950">
+                      <button
+                        type="button"
+                        onClick={() => setMapMode("globe")}
+                        className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-bold ${
+                          mapMode === "globe"
+                            ? "bg-navy-900 text-amber-300"
+                            : "text-slate-500 hover:text-navy-800 dark:hover:text-slate-200"
+                        }`}
+                      >
+                        <Globe2 size={12} /> Globe
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMapMode("map")}
+                        className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-bold ${
+                          mapMode === "map"
+                            ? "bg-navy-900 text-amber-300"
+                            : "text-slate-500 hover:text-navy-800 dark:hover:text-slate-200"
+                        }`}
+                      >
+                        <Map size={12} /> Flat
+                      </button>
+                    </div>
+                  )}
+                  {focusedJobIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFocusedJobIds([])}
+                      className="text-[11px] font-bold text-amber-700"
+                    >
+                      Clear focus ({focusedJobIds.length})
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="p-3">
-                <LiveFleetMap
-                  markers={mapData.markers}
-                  geofences={mapData.geofences}
-                  trails={mapData.trails}
-                  height={tab === "playback" ? 420 : 460}
-                  focusLatLng={focusLatLng}
-                  playbackIndex={tab === "playback" ? playbackIdx : null}
-                  onMarkerClick={(m) => {
-                    setSelected(m)
-                    setActionOpen(true)
-                    setFocusLatLng({ lat: m.lat, lng: m.lng })
-                  }}
-                  emptyMessage="No cleaners sharing GPS yet — positions appear when mobile tracking is on"
-                />
+                {mapMode === "globe" && tab !== "playback" ? (
+                  <LiveFleetGlobe
+                    markers={mapData.markers}
+                    height={460}
+                    onMarkerClick={(m) => {
+                      setSelected(m)
+                      setActionOpen(true)
+                      setFocusLatLng({ lat: m.lat, lng: m.lng })
+                    }}
+                  />
+                ) : (
+                  <LiveFleetMap
+                    markers={mapData.markers}
+                    geofences={mapData.geofences}
+                    trails={mapData.trails}
+                    height={tab === "playback" ? 420 : 460}
+                    focusLatLng={focusLatLng}
+                    playbackIndex={tab === "playback" ? playbackIdx : null}
+                    onMarkerClick={(m) => {
+                      setSelected(m)
+                      setActionOpen(true)
+                      setFocusLatLng({ lat: m.lat, lng: m.lng })
+                    }}
+                    emptyMessage="No cleaners sharing GPS yet — positions appear when mobile tracking is on"
+                  />
+                )}
                 <p className="mt-2 font-mono text-[9px] text-slate-400">
                   Read-only · mobile owns pings · stale pins show last known location
+                  {mapMode === "globe" && tab !== "playback" ? " · drag globe to orbit" : ""}
                 </p>
               </div>
             </OpsCard>

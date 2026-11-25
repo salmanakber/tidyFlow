@@ -58,7 +58,7 @@ export default function OpsOnboardingCard() {
     {
       done: steps.properties > 0,
       label: "Add your first property",
-      href: href("properties"),
+      href: `${href("properties")}?create=1`,
       icon: Building2,
     },
     {

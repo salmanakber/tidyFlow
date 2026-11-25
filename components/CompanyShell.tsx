@@ -54,6 +54,7 @@ import WorkspaceAppFooter from "@/components/WorkspaceAppFooter"
 import { OpsStatusLegend } from "@/components/ops/OpsChrome"
 import HeaderNotifications from "@/components/ops/HeaderNotifications"
 import HeaderChatBadge from "@/components/ops/HeaderChatBadge"
+import SubscriptionLock from "@/components/ops/SubscriptionLock"
 import OpsCriticalBanner from "@/components/ops/OpsCriticalBanner"
 import OpsOnboardingCard from "@/components/ops/OpsOnboardingCard"
 import { OpsLoader } from "@/components/ops/OpsLoader"
@@ -859,11 +860,13 @@ export default function CompanyShell({ children }: { children: React.ReactNode }
 
         <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className="mx-auto max-w-[1600px] space-y-4 sm:space-y-6">
-            <OpsCriticalBanner />
-            <OpsOnboardingCard />
-            <OpsStatusLegend compact />
-            {children}
-            <WorkspaceAppFooter />
+            <SubscriptionLock>
+              <OpsCriticalBanner />
+              <OpsOnboardingCard />
+              <OpsStatusLegend compact />
+              {children}
+              <WorkspaceAppFooter />
+            </SubscriptionLock>
           </div>
         </main>
       </div>
