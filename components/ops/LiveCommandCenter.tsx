@@ -63,6 +63,8 @@ import {
   MessageSquare,
   Globe2,
   Map,
+  Maximize2,
+  Minimize2,
 } from "lucide-react"
 
 type ViewTab = "fleet" | "exceptions" | "sos" | "playback" | "timeline"
@@ -97,6 +99,29 @@ export default function LiveCommandCenter({
   const [toast, setToast] = useState("")
   const [tab, setTab] = useState<ViewTab>(initialTab)
   const [mapMode, setMapMode] = useState<"globe" | "map">("globe")
+  const [fleetFullscreen, setFleetFullscreen] = useState(false)
+  const [viewportH, setViewportH] = useState(800)
+
+  useEffect(() => {
+    const sync = () => setViewportH(window.innerHeight)
+    sync()
+    window.addEventListener("resize", sync)
+    return () => window.removeEventListener("resize", sync)
+  }, [])
+
+  useEffect(() => {
+    if (!fleetFullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFleetFullscreen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prev
+    }
+  }, [fleetFullscreen])
   const [filter, setFilter] = useState<FleetFilter>("all")
   const [focusedJobIds, setFocusedJobIds] = useState<number[]>([])
   const [selected, setSelected] = useState<FleetMapMarker | null>(null)
@@ -605,15 +630,48 @@ export default function LiveCommandCenter({
         ))}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.85fr)]">
-        <div className="space-y-3">
-          {(tab === "fleet" || tab === "playback" || tab === "exceptions") && (
+      <div
+        className={
+          fleetFullscreen
+            ? "fixed inset-0 z-[70] flex flex-col bg-slate-100 p-3 dark:bg-navy-950 sm:p-4"
+            : "grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.85fr)]"
+        }
+      >
+        {fleetFullscreen && (
+          <div className="mb-3 flex flex-shrink-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm dark:border-navy-800 dark:bg-control-darkCard">
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                Fleet command
+              </p>
+              <p className="text-sm font-extrabold text-navy-900 dark:text-white">
+                Fullscreen live operations
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFleetFullscreen(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-amber-500 hover:text-amber-700 dark:border-navy-700 dark:bg-navy-950 dark:text-slate-200"
+            >
+              <Minimize2 size={14} /> Exit fullscreen
+            </button>
+          </div>
+        )}
+
+        <div
+          className={
+            fleetFullscreen
+              ? "grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]"
+              : "contents"
+          }
+        >
+        <div className={`space-y-3 ${fleetFullscreen ? "min-h-0 overflow-y-auto" : ""}`}>
+          {(tab === "fleet" || tab === "playback" || tab === "exceptions" || fleetFullscreen) && (
             <OpsCard padding={false}>
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-control-border px-4 py-2.5 dark:border-navy-800">
                 <div className="flex items-center gap-2">
                   <Crosshair size={15} className="text-amber-600" />
                   <p className="text-sm font-bold text-navy-900 dark:text-white">
-                    {tab === "playback"
+                    {tab === "playback" && !fleetFullscreen
                       ? "Playback map"
                       : mapMode === "globe"
                         ? "Live fleet globe"
@@ -621,7 +679,7 @@ export default function LiveCommandCenter({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {tab !== "playback" && (
+                  {(tab !== "playback" || fleetFullscreen) && (
                     <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-navy-800 dark:bg-navy-950">
                       <button
                         type="button"
@@ -656,13 +714,22 @@ export default function LiveCommandCenter({
                       Clear focus ({focusedJobIds.length})
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setFleetFullscreen((v) => !v)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:border-amber-500 hover:text-amber-700 dark:border-navy-700 dark:text-slate-300"
+                    title={fleetFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  >
+                    {fleetFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                    {fleetFullscreen ? "Exit" : "Fullscreen"}
+                  </button>
                 </div>
               </div>
               <div className="p-3">
-                {mapMode === "globe" && tab !== "playback" ? (
+                {mapMode === "globe" && (tab !== "playback" || fleetFullscreen) ? (
                   <LiveFleetGlobe
                     markers={mapData.markers}
-                    height={460}
+                    height={fleetFullscreen ? Math.max(520, viewportH - 220) : 460}
                     onMarkerClick={(m) => {
                       setSelected(m)
                       setActionOpen(true)
@@ -674,7 +741,13 @@ export default function LiveCommandCenter({
                     markers={mapData.markers}
                     geofences={mapData.geofences}
                     trails={mapData.trails}
-                    height={tab === "playback" ? 420 : 460}
+                    height={
+                      fleetFullscreen
+                        ? Math.max(520, viewportH - 220)
+                        : tab === "playback"
+                          ? 420
+                          : 460
+                    }
                     focusLatLng={focusLatLng}
                     playbackIndex={tab === "playback" ? playbackIdx : null}
                     onMarkerClick={(m) => {
@@ -686,8 +759,8 @@ export default function LiveCommandCenter({
                   />
                 )}
                 <p className="mt-2 font-mono text-[9px] text-slate-400">
-                  Read-only · mobile owns pings · stale pins show last known location
-                  {mapMode === "globe" && tab !== "playback" ? " · drag globe to orbit" : ""}
+                  Read-only · mobile owns pings · city/country labels · scroll or buttons to zoom
+                  {mapMode === "globe" ? " · drag to orbit" : ""}
                 </p>
               </div>
             </OpsCard>
@@ -856,7 +929,7 @@ export default function LiveCommandCenter({
         </div>
 
         {/* Right rail — exceptions + jobs */}
-        <div className="space-y-3">
+        <div className={`space-y-3 ${fleetFullscreen ? "min-h-0 overflow-y-auto" : ""}`}>
           <OpsCard padding={false}>
             <div className="flex items-center justify-between border-b border-control-border px-4 py-2.5 dark:border-navy-800">
               <p className="flex items-center gap-1.5 text-sm font-bold text-navy-900 dark:text-white">
@@ -894,7 +967,11 @@ export default function LiveCommandCenter({
                 </button>
               ))}
             </div>
-            <ul className="max-h-[280px] divide-y divide-slate-100 overflow-y-auto dark:divide-navy-900">
+            <ul
+              className={`divide-y divide-slate-100 overflow-y-auto dark:divide-navy-900 ${
+                fleetFullscreen ? "max-h-[min(42vh,420px)]" : "max-h-[280px]"
+              }`}
+            >
               {filteredExceptions.length === 0 ? (
                 <li className="p-4 text-center text-xs text-slate-400">Queue clear</li>
               ) : (
@@ -941,7 +1018,11 @@ export default function LiveCommandCenter({
                 <Users size={14} className="text-amber-600" /> Active jobs
               </p>
             </div>
-            <div className="max-h-[360px] space-y-2 overflow-y-auto p-3">
+            <div
+              className={`space-y-2 overflow-y-auto p-3 ${
+                fleetFullscreen ? "max-h-[min(48vh,520px)]" : "max-h-[360px]"
+              }`}
+            >
               {jobs.length === 0 ? (
                 <OpsEmpty message="No jobs tracking" ctaLabel="Open jobs" ctaHref={wsHref("jobs")} />
               ) : (
@@ -1025,6 +1106,7 @@ export default function LiveCommandCenter({
               )}
             </div>
           </OpsCard>
+        </div>
         </div>
       </div>
 

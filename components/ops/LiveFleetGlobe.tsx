@@ -1,26 +1,75 @@
 "use client"
 
 /**
- * Light-grey Shopify-style 3D globe with real country outlines + active user popover.
+ * Light-grey Shopify-style 3D globe:
+ * real countries, city/country labels, zoom, active-user popovers.
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { FleetMapMarker } from "@/components/ops/LiveFleetMap"
-import { MapPin, Radio, ShieldAlert, Building2, X } from "lucide-react"
+import {
+  MapPin,
+  Radio,
+  ShieldAlert,
+  Building2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  LocateFixed,
+} from "lucide-react"
 
 type Vec3 = { x: number; y: number; z: number }
-type Ring = Array<[number, number]> // [lng, lat]
-type CountryPoly = { rings: Ring[] }
-
+type Ring = Array<[number, number]>
+type CountryPoly = { rings: Ring[]; name?: string; lat: number; lng: number }
 type Hit = { m: FleetMapMarker; x: number; y: number; r: number }
+type PlaceInfo = { city?: string; country?: string; label: string }
 
 type PopoverState = {
   marker: FleetMapMarker
+  place?: PlaceInfo | null
   x: number
   y: number
 }
 
 const GEO_URL =
   "https://cdn.jsdelivr.net/gh/holtzy/D3-graph-gallery@master/DATA/world.geojson"
+
+/** Major cities drawn as labels when zoomed in enough */
+const CITY_LABELS: Array<{ name: string; country: string; lat: number; lng: number }> = [
+  { name: "London", country: "UK", lat: 51.5074, lng: -0.1278 },
+  { name: "Manchester", country: "UK", lat: 53.4808, lng: -2.2426 },
+  { name: "Birmingham", country: "UK", lat: 52.4862, lng: -1.8904 },
+  { name: "New York", country: "USA", lat: 40.7128, lng: -74.006 },
+  { name: "Los Angeles", country: "USA", lat: 34.0522, lng: -118.2437 },
+  { name: "Chicago", country: "USA", lat: 41.8781, lng: -87.6298 },
+  { name: "Toronto", country: "Canada", lat: 43.6532, lng: -79.3832 },
+  { name: "Vancouver", country: "Canada", lat: 49.2827, lng: -123.1207 },
+  { name: "Paris", country: "France", lat: 48.8566, lng: 2.3522 },
+  { name: "Berlin", country: "Germany", lat: 52.52, lng: 13.405 },
+  { name: "Madrid", country: "Spain", lat: 40.4168, lng: -3.7038 },
+  { name: "Rome", country: "Italy", lat: 41.9028, lng: 12.4964 },
+  { name: "Amsterdam", country: "Netherlands", lat: 52.3676, lng: 4.9041 },
+  { name: "Dubai", country: "UAE", lat: 25.2048, lng: 55.2708 },
+  { name: "Riyadh", country: "Saudi Arabia", lat: 24.7136, lng: 46.6753 },
+  { name: "Singapore", country: "Singapore", lat: 1.3521, lng: 103.8198 },
+  { name: "Tokyo", country: "Japan", lat: 35.6762, lng: 139.6503 },
+  { name: "Sydney", country: "Australia", lat: -33.8688, lng: 151.2093 },
+  { name: "Melbourne", country: "Australia", lat: -37.8136, lng: 144.9631 },
+  { name: "Auckland", country: "New Zealand", lat: -36.8509, lng: 174.7645 },
+  { name: "São Paulo", country: "Brazil", lat: -23.5505, lng: -46.6333 },
+  { name: "Mexico City", country: "Mexico", lat: 19.4326, lng: -99.1332 },
+  { name: "Lagos", country: "Nigeria", lat: 6.5244, lng: 3.3792 },
+  { name: "Cairo", country: "Egypt", lat: 30.0444, lng: 31.2357 },
+  { name: "Mumbai", country: "India", lat: 19.076, lng: 72.8777 },
+  { name: "Delhi", country: "India", lat: 28.7041, lng: 77.1025 },
+  { name: "Hong Kong", country: "China", lat: 22.3193, lng: 114.1694 },
+  { name: "Seoul", country: "South Korea", lat: 37.5665, lng: 126.978 },
+  { name: "Istanbul", country: "Turkey", lat: 41.0082, lng: 28.9784 },
+  { name: "Stockholm", country: "Sweden", lat: 59.3293, lng: 18.0686 },
+  { name: "Dublin", country: "Ireland", lat: 53.3498, lng: -6.2603 },
+  { name: "Lisbon", country: "Portugal", lat: 38.7223, lng: -9.1393 },
+]
+
+const placeCache = new Map<string, PlaceInfo>()
 
 function latLngToVec(lat: number, lng: number, radius = 1): Vec3 {
   const φ = (lat * Math.PI) / 180
@@ -54,6 +103,20 @@ function simplifyRing(ring: Ring, step = 2): Ring {
   return out
 }
 
+function ringCentroid(ring: Ring): { lat: number; lng: number } {
+  let lat = 0
+  let lng = 0
+  let n = 0
+  for (const [lo, la] of ring) {
+    if (!Number.isFinite(lo) || !Number.isFinite(la)) continue
+    lng += lo
+    lat += la
+    n++
+  }
+  if (!n) return { lat: 0, lng: 0 }
+  return { lat: lat / n, lng: lng / n }
+}
+
 function parseCountries(geo: any): CountryPoly[] {
   const features = Array.isArray(geo?.features) ? geo.features : []
   const countries: CountryPoly[] = []
@@ -62,19 +125,64 @@ function parseCountries(geo: any): CountryPoly[] {
     if (!g) continue
     const rings: Ring[] = []
     if (g.type === "Polygon") {
-      for (const ring of g.coordinates || []) {
-        rings.push(simplifyRing(ring as Ring, 3))
-      }
+      for (const ring of g.coordinates || []) rings.push(simplifyRing(ring as Ring, 3))
     } else if (g.type === "MultiPolygon") {
       for (const poly of g.coordinates || []) {
-        for (const ring of poly || []) {
-          rings.push(simplifyRing(ring as Ring, 3))
-        }
+        for (const ring of poly || []) rings.push(simplifyRing(ring as Ring, 3))
       }
     }
-    if (rings.length) countries.push({ rings })
+    if (!rings.length) continue
+    const name = String(f?.properties?.name || f?.properties?.NAME || "").trim() || undefined
+    const c = ringCentroid(rings[0])
+    countries.push({ rings, name, lat: c.lat, lng: c.lng })
   }
   return countries
+}
+
+/** Always-available place label from nearest known city (no network). */
+function nearestCityPlace(lat: number, lng: number): PlaceInfo {
+  let best = CITY_LABELS[0]
+  let bestD = Infinity
+  for (const c of CITY_LABELS) {
+    const d = (c.lat - lat) ** 2 + (c.lng - lng) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = c
+    }
+  }
+  // ~8° ≈ rough regional match; beyond that still show nearest for orientation
+  const city = bestD < 64 ? best.name : undefined
+  const country = best.country
+  const label = city ? `${city}, ${country}` : `Near ${country}`
+  return { city, country, label }
+}
+
+async function reverseGeocode(lat: number, lng: number): Promise<PlaceInfo> {
+  const key = `${lat.toFixed(3)},${lng.toFixed(3)}`
+  if (placeCache.has(key)) return placeCache.get(key)!
+  const fallback = nearestCityPlace(lat, lng)
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+    })
+    if (!res.ok) {
+      placeCache.set(key, fallback)
+      return fallback
+    }
+    const data = await res.json()
+    const a = data?.address || {}
+    const city =
+      a.city || a.town || a.village || a.municipality || a.suburb || a.county || fallback.city
+    const country = a.country || fallback.country
+    const label = [city, country].filter(Boolean).join(", ") || fallback.label
+    const info = { city, country, label }
+    placeCache.set(key, info)
+    return info
+  } catch {
+    placeCache.set(key, fallback)
+    return fallback
+  }
 }
 
 function signalLabel(s?: FleetMapMarker["signal"]) {
@@ -110,6 +218,7 @@ export default function LiveFleetGlobe({
   const wrapRef = useRef<HTMLDivElement>(null)
   const rotRef = useRef(0.55)
   const tiltRef = useRef(0.28)
+  const zoomRef = useRef(1.35)
   const dragRef = useRef<{ x: number; y: number; rot: number; tilt: number } | null>(null)
   const markersRef = useRef(markers)
   markersRef.current = markers
@@ -117,15 +226,17 @@ export default function LiveFleetGlobe({
   clickRef.current = onMarkerClick
   const hitRef = useRef<Hit[]>([])
   const countriesRef = useRef<CountryPoly[]>([])
+  const placesRef = useRef<Record<string, PlaceInfo>>({})
   const [geoReady, setGeoReady] = useState(false)
+  const [zoom, setZoom] = useState(1.35)
   const [popover, setPopover] = useState<PopoverState | null>(null)
+  const [, bump] = useState(0)
 
   const liveCount = useMemo(
     () => markers.filter((m) => m.kind === "cleaner" && m.signal === "live").length,
     [markers]
   )
 
-  // Load real country GeoJSON once
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -144,13 +255,54 @@ export default function LiveFleetGlobe({
     }
   }, [])
 
-  // Aim globe toward first live cleaner when available
+  // Instant nearest-city labels, then refine via reverse geocode when available
+  useEffect(() => {
+    let cancelled = false
+    const targets = markers
+      .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
+      .slice(0, 40)
+    for (const m of targets) {
+      if (!placesRef.current[m.id]) {
+        placesRef.current[m.id] = nearestCityPlace(m.lat, m.lng)
+      }
+    }
+    bump((n) => n + 1)
+    ;(async () => {
+      for (const m of targets) {
+        if (cancelled) return
+        const info = await reverseGeocode(m.lat, m.lng)
+        placesRef.current[m.id] = info
+        bump((n) => n + 1)
+        await new Promise((r) => setTimeout(r, 400))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [markers])
+
   useEffect(() => {
     const live = markers.find((m) => m.kind === "cleaner" && Number.isFinite(m.lat))
     if (!live) return
     rotRef.current = (-live.lng * Math.PI) / 180
     tiltRef.current = Math.max(-0.6, Math.min(0.6, (live.lat * Math.PI) / 180 / 2.2))
   }, [markers.length])
+
+  const applyZoom = useCallback((next: number) => {
+    const z = Math.max(0.85, Math.min(3.2, next))
+    zoomRef.current = z
+    setZoom(z)
+  }, [])
+
+  const focusNearestLive = useCallback(() => {
+    const live = markersRef.current.find(
+      (m) => m.kind === "cleaner" && Number.isFinite(m.lat)
+    )
+    if (!live) return
+    rotRef.current = (-live.lng * Math.PI) / 180
+    tiltRef.current = Math.max(-0.6, Math.min(0.6, (live.lat * Math.PI) / 180 / 2.2))
+    applyZoom(Math.max(zoomRef.current, 1.6))
+  }, [applyZoom])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -190,11 +342,10 @@ export default function LiveFleetGlobe({
       const h = height
       const cx = w / 2
       const cy = h / 2 + 6
-      const R = Math.min(w, h) * 0.4
+      const R = Math.min(w, h) * 0.36 * zoomRef.current
 
-      if (auto && !dragRef.current) rotRef.current += 0.0016
+      if (auto && !dragRef.current) rotRef.current += 0.0012
 
-      // Light workspace background
       ctx.clearRect(0, 0, w, h)
       const bg = ctx.createLinearGradient(0, 0, 0, h)
       bg.addColorStop(0, "#F8FAFC")
@@ -202,22 +353,19 @@ export default function LiveFleetGlobe({
       ctx.fillStyle = bg
       ctx.fillRect(0, 0, w, h)
 
-      // Soft ground shadow
       ctx.beginPath()
       ctx.ellipse(cx, cy + R * 0.92, R * 0.72, R * 0.12, 0, 0, Math.PI * 2)
-      ctx.fillStyle = "rgba(148,163,184,0.22)"
+      ctx.fillStyle = "rgba(148,163,184,0.2)"
       ctx.fill()
 
-      // Atmosphere (light)
       const atm = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.18)
-      atm.addColorStop(0, "rgba(148,163,184,0.16)")
+      atm.addColorStop(0, "rgba(148,163,184,0.14)")
       atm.addColorStop(1, "rgba(148,163,184,0)")
       ctx.fillStyle = atm
       ctx.beginPath()
       ctx.arc(cx, cy, R * 1.18, 0, Math.PI * 2)
       ctx.fill()
 
-      // Ocean sphere — light grey
       const ocean = ctx.createRadialGradient(
         cx - R * 0.35,
         cy - R * 0.4,
@@ -235,15 +383,12 @@ export default function LiveFleetGlobe({
       ctx.fillStyle = ocean
       ctx.fill()
 
-      // Clip to sphere for land
       ctx.save()
       ctx.beginPath()
       ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.clip()
 
-      // Real countries
-      const countries = countriesRef.current
-      for (const country of countries) {
+      for (const country of countriesRef.current) {
         for (const ring of country.rings) {
           if (!ring?.length) continue
           let started = false
@@ -260,45 +405,55 @@ export default function LiveFleetGlobe({
             if (!started) {
               ctx.moveTo(x, y)
               started = true
-            } else {
-              ctx.lineTo(x, y)
-            }
+            } else ctx.lineTo(x, y)
           }
           if (!started) continue
           ctx.closePath()
           ctx.fillStyle = "rgba(148,163,184,0.55)"
           ctx.fill()
-          ctx.strokeStyle = "rgba(100,116,139,0.45)"
-          ctx.lineWidth = 0.6
+          ctx.strokeStyle = "rgba(100,116,139,0.4)"
+          ctx.lineWidth = 0.55
           ctx.stroke()
         }
       }
 
-      // Subtle graticule
-      ctx.strokeStyle = "rgba(148,163,184,0.22)"
-      ctx.lineWidth = 0.7
-      for (let lat = -60; lat <= 60; lat += 30) {
-        ctx.beginPath()
-        let started = false
-        for (let lng = -180; lng <= 180; lng += 5) {
-          const v = project(lat, lng)
-          if (v.z < 0) {
-            started = false
-            continue
-          }
+      // Country names (readable at default zoom) + city labels when zoomed
+      const z = zoomRef.current
+      if (z >= 0.9) {
+        for (const country of countriesRef.current) {
+          if (!country.name) continue
+          // Skip tiny / dense labels until zoomed
+          if (z < 1.25 && country.name.length > 12) continue
+          const v = project(country.lat, country.lng)
+          if (v.z < 0.45) continue
           const x = cx + v.x * R
           const y = cy - v.y * R
-          if (!started) {
-            ctx.moveTo(x, y)
-            started = true
-          } else ctx.lineTo(x, y)
+          const alpha = Math.min(1, (v.z - 0.3) * 1.8)
+          ctx.fillStyle = `rgba(71,85,105,${0.45 + alpha * 0.4})`
+          ctx.font = `600 ${z >= 1.5 ? 10 : 8}px ui-sans-serif, system-ui, sans-serif`
+          ctx.textAlign = "center"
+          ctx.fillText(country.name, x, y)
         }
-        ctx.stroke()
+      }
+      if (z >= 1.05) {
+        for (const city of CITY_LABELS) {
+          const v = project(city.lat, city.lng)
+          if (v.z < 0.3) continue
+          const x = cx + v.x * R
+          const y = cy - v.y * R
+          const alpha = Math.min(1, (v.z - 0.2) * 1.6) * Math.min(1, (z - 0.95) / 0.6)
+          ctx.fillStyle = `rgba(30,41,59,${0.65 + alpha * 0.3})`
+          ctx.font = `bold ${z >= 1.8 ? 12 : 10}px ui-sans-serif, system-ui, sans-serif`
+          ctx.textAlign = "center"
+          ctx.fillText(city.name, x, y - 4)
+          ctx.fillStyle = `rgba(71,85,105,${0.55 + alpha * 0.35})`
+          ctx.font = "8px ui-sans-serif, system-ui, sans-serif"
+          ctx.fillText(city.country, x, y + 8)
+        }
       }
 
       ctx.restore()
 
-      // Sphere rim + highlight
       ctx.beginPath()
       ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.strokeStyle = "rgba(100,116,139,0.35)"
@@ -321,7 +476,6 @@ export default function LiveFleetGlobe({
       ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.fill()
 
-      // Markers
       const hits: Hit[] = []
       const list = markersRef.current.filter(
         (m) => Number.isFinite(m.lat) && Number.isFinite(m.lng)
@@ -332,7 +486,7 @@ export default function LiveFleetGlobe({
         const x = cx + v.x * R
         const y = cy - v.y * R
         const depth = (v.z + 1) / 2
-        const r = 5 + depth * 2.5
+        const r = (5 + depth * 2.5) * Math.min(1.35, 0.85 + zoomRef.current * 0.15)
         const color =
           m.kind === "sos"
             ? "#E11D48"
@@ -344,7 +498,6 @@ export default function LiveFleetGlobe({
                   ? "#059669"
                   : "#94A3B8"
 
-        // pin stem
         ctx.strokeStyle = color
         ctx.lineWidth = 2
         ctx.beginPath()
@@ -364,7 +517,20 @@ export default function LiveFleetGlobe({
         ctx.fillStyle = color
         ctx.fill()
 
-        // pulse for live cleaners
+        // Name + city/country label beside pin
+        const place = placesRef.current[m.id]
+        const title = m.label || "Team"
+        const placeLine = place?.label || m.sub || ""
+        ctx.textAlign = "left"
+        ctx.font = `bold ${10 + (zoomRef.current > 1.5 ? 1 : 0)}px ui-sans-serif, system-ui`
+        ctx.fillStyle = "rgba(15,23,42,0.9)"
+        ctx.fillText(title.slice(0, 22), x + r + 6, y - r * 1.6 - 2)
+        if (placeLine) {
+          ctx.font = "9px ui-sans-serif, system-ui"
+          ctx.fillStyle = "rgba(71,85,105,0.95)"
+          ctx.fillText(placeLine.slice(0, 28), x + r + 6, y - r * 1.6 + 10)
+        }
+
         if (m.kind === "cleaner" && m.signal === "live") {
           const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 350 + m.lat)
           ctx.beginPath()
@@ -374,7 +540,7 @@ export default function LiveFleetGlobe({
           ctx.stroke()
         }
 
-        hits.push({ m, x, y: y - r * 1.6, r: r + 8 })
+        hits.push({ m, x, y: y - r * 1.6, r: r + 10 })
       }
       hitRef.current = hits
 
@@ -412,9 +578,14 @@ export default function LiveFleetGlobe({
         return
       }
       const hit = findHit(e.clientX, e.clientY)
-      canvas.style.cursor = hit || dragRef.current ? "pointer" : "grab"
+      canvas.style.cursor = hit ? "pointer" : "grab"
       if (hit) {
-        setPopover({ marker: hit.m, x: hit.x, y: hit.y })
+        setPopover({
+          marker: hit.m,
+          place: placesRef.current[hit.m.id] || null,
+          x: hit.x,
+          y: hit.y,
+        })
       }
     }
     const onUp = () => {
@@ -429,11 +600,21 @@ export default function LiveFleetGlobe({
         setPopover(null)
         return
       }
-      setPopover({ marker: hit.m, x: hit.x, y: hit.y })
+      setPopover({
+        marker: hit.m,
+        place: placesRef.current[hit.m.id] || null,
+        x: hit.x,
+        y: hit.y,
+      })
       clickRef.current?.(hit.m)
     }
-    const onLeave = () => {
-      if (!dragRef.current) canvas.style.cursor = "grab"
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      auto = false
+      const next = zoomRef.current * (e.deltaY > 0 ? 0.92 : 1.08)
+      const z = Math.max(0.85, Math.min(3.2, next))
+      zoomRef.current = z
+      setZoom(z)
     }
 
     canvas.addEventListener("pointerdown", onDown)
@@ -441,7 +622,7 @@ export default function LiveFleetGlobe({
     canvas.addEventListener("pointerup", onUp)
     canvas.addEventListener("pointercancel", onUp)
     canvas.addEventListener("click", onClick)
-    canvas.addEventListener("pointerleave", onLeave)
+    canvas.addEventListener("wheel", onWheel, { passive: false })
 
     return () => {
       alive = false
@@ -452,7 +633,7 @@ export default function LiveFleetGlobe({
       canvas.removeEventListener("pointerup", onUp)
       canvas.removeEventListener("pointercancel", onUp)
       canvas.removeEventListener("click", onClick)
-      canvas.removeEventListener("pointerleave", onLeave)
+      canvas.removeEventListener("wheel", onWheel)
     }
   }, [height, geoReady])
 
@@ -466,13 +647,40 @@ export default function LiveFleetGlobe({
 
       <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-2">
         <span className="rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600 shadow-sm backdrop-blur-sm">
-          Light globe · real countries
+          Cities · countries · zoom {zoom.toFixed(1)}x
         </span>
         {liveCount > 0 && (
           <span className="rounded-lg border border-emerald-200 bg-emerald-50/95 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700 shadow-sm">
             {liveCount} live
           </span>
         )}
+      </div>
+
+      <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => applyZoom(zoomRef.current + 0.25)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-amber-400 hover:text-amber-700"
+          title="Zoom in"
+        >
+          <ZoomIn size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => applyZoom(zoomRef.current - 0.25)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-amber-400 hover:text-amber-700"
+          title="Zoom out"
+        >
+          <ZoomOut size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={focusNearestLive}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-amber-400 hover:text-amber-700"
+          title="Focus live cleaner"
+        >
+          <LocateFixed size={16} />
+        </button>
       </div>
 
       {!geoReady && (
@@ -491,10 +699,10 @@ export default function LiveFleetGlobe({
 
       {popover && (
         <div
-          className="absolute z-20 w-[240px] -translate-x-1/2 -translate-y-[110%] rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
+          className="absolute z-20 w-[260px] -translate-x-1/2 -translate-y-[112%] rounded-xl border border-slate-200 bg-white p-3 shadow-xl"
           style={{
-            left: Math.max(120, Math.min((wrapRef.current?.clientWidth || 300) - 120, popover.x)),
-            top: Math.max(8, popover.y),
+            left: Math.max(130, Math.min((wrapRef.current?.clientWidth || 300) - 130, popover.x)),
+            top: Math.max(10, popover.y),
           }}
           onMouseLeave={() => setPopover(null)}
         >
@@ -523,8 +731,24 @@ export default function LiveFleetGlobe({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold text-navy-900">{popover.marker.label}</p>
+              <p className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                <MapPin size={11} className="shrink-0 text-amber-600" />
+                <span className="truncate">
+                  {popover.place?.label ||
+                    popover.marker.sub ||
+                    `${popover.marker.lat.toFixed(3)}, ${popover.marker.lng.toFixed(3)}`}
+                </span>
+              </p>
+              {popover.place?.city || popover.place?.country ? (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Working from{" "}
+                  <span className="font-semibold text-navy-800">
+                    {[popover.place.city, popover.place.country].filter(Boolean).join(", ")}
+                  </span>
+                </p>
+              ) : null}
               {popover.marker.sub ? (
-                <p className="mt-0.5 truncate text-[11px] text-slate-500">{popover.marker.sub}</p>
+                <p className="mt-1 truncate text-[11px] text-slate-500">{popover.marker.sub}</p>
               ) : null}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span
@@ -538,10 +762,6 @@ export default function LiveFleetGlobe({
                   {popover.marker.kind}
                 </span>
               </div>
-              <p className="mt-2 flex items-center gap-1 font-mono text-[10px] text-slate-400">
-                <MapPin size={10} />
-                {popover.marker.lat.toFixed(4)}, {popover.marker.lng.toFixed(4)}
-              </p>
               <button
                 type="button"
                 className="mt-2.5 inline-flex h-8 w-full items-center justify-center rounded-lg bg-navy-900 text-[11px] font-bold text-amber-300 hover:bg-navy-800"
